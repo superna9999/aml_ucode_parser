@@ -151,7 +151,12 @@ int main(int argc, char *argv[])
 	int size;
 	int cur = 256; // skip first 256 bytes (signature)
 
-	if (dump_file("video_ucode.bin", &buf, &size))
+	if (argc < 2) {
+		fprintf(stderr, "Usage: %s <video_ucode.bin>\n", argv[0]);
+		return 1;
+	}
+
+	if (dump_file(argv[1], &buf, &size))
 		return EXIT_FAILURE;
 
 	while (cur < size) {
