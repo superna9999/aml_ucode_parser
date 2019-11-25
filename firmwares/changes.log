@@ -1,39 +1,64 @@
-commit f84d575313d689e8bff11f5f4e0055567dd3dc14
-Author: Gan Zhang <gan.zhang@amlogic.com>
-Date:   Tue Oct 8 13:14:40 2019 +0800
+commit f2fdaa2fc32a1946bda1f48ea79479b3338d7531
+Author: Hui Zhang <hui.zhang@amlogic.com>
+Date:   Sun Sep 29 16:46:04 2019 +0800
 
-    media_module: tiny h264 stream decode error [1/1]
+    vmh264: fix error frame detect issue [1/1]
     
-    PD#SWPL-13083
+    PD#SWPL-12967
     
     Problem:
-    tiny h264 stream decode error
+    in frame mode, some pic miss stream data, which may cause
+    data_request from hw, but driver think it is data not comming
+    ,not skip this error frame
     
     Solution:
-    disable this read cache when frame width <= 64
-    IQIDCT_CONTROL, bit[16] – dcac_dma_read_cache_disable
+    in frame mode, change data_reqest handle to pic_done. driver
+    will check if there is error with mb number. the error will
+    be detected
     
     Verify:
-    AC213
+    AC-213
     
-    Change-Id: I8a07b70347b335709ebe7be44735f6aa667801c6
-    Signed-off-by: Gan Zhang <gan.zhang@amlogic.com>
+    Change-Id: I186c6149fc6802fbd4636f4e02b1ea787fba85be
+    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
 
 diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-index 52feccc..3224145 100644
+index 3224145..0d86144 100644
 --- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
 +++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-@@ -3214,6 +3214,13 @@ int config_decode_buf(struct vdec_h264_hw_s *hw, struct StorablePicture *pic)
- 	j = 0;
- 	h264_buffer_info_data_write_count = 0;
+@@ -5710,7 +5710,8 @@ static irqreturn_t vh264_isr_thread_fn(struct vdec_s *vdec, int irq)
+ 		hw->last_mby_mbx = 0;
+ 		hw->last_vld_level = 0;
+ 		start_process_time(hw);
+-	} else if (dec_dpb_status == H264_PIC_DATA_DONE) {
++	} else if (dec_dpb_status == H264_PIC_DATA_DONE
++		||((dec_dpb_status == H264_DATA_REQUEST) && input_frame_based(vdec))) {
+ pic_done_proc:
+ 		reset_process_time(hw);
  
-+	//disable this read cache when frame width <= 64 (4MBs)
-+	//IQIDCT_CONTROL, bit[16] – dcac_dma_read_cache_disable
-+	if (hw->frame_width <= 64)
-+		SET_VREG_MASK(IQIDCT_CONTROL,(1 << 16));
-+	else
-+		CLEAR_VREG_MASK(IQIDCT_CONTROL,(1 << 16));
-+
- 	if (last_pic)
- 		dpb_print(DECODE_ID(hw), PRINT_FLAG_ERRORFLAG_DBG,
- 				"last_pic->data_flag %x   slice_type %x last_pic->slice_type %x\n",
+@@ -5984,6 +5985,9 @@ empty_proc:
+ 						(p_H264_Dpb->last_dpb_status == H264_PIC_DATA_DONE) ||
+ 						((p_H264_Dpb->last_dpb_status == H264_SLICE_HEAD_DONE) &&
+ 						 (p_H264_Dpb->mSlice.slice_type != B_SLICE))) {
++						 dpb_print(DECODE_ID(hw),
++							PRINT_FLAG_ERROR, "%s last dpb status 0x%x need bugmgr reset \n",
++							p_H264_Dpb->last_dpb_status, __func__);
+ 							hw->reset_bufmgr_flag = 1;
+ 					}
+ 				}
+@@ -6201,12 +6205,15 @@ static irqreturn_t vh264_isr(struct vdec_s *vdec, int irq)
+ 
+ static void timeout_process(struct vdec_h264_hw_s *hw)
+ {
++	struct h264_dpb_stru *p_H264_Dpb = &hw->dpb;
+ 	hw->timeout_num++;
+ 	amvdec_stop();
+ 	if (hw->mmu_enable) {
+ 		hevc_set_frame_done(hw);
+ 		hevc_sao_wait_done(hw);
+ 	}
++	if (!hw->i_only && (error_proc_policy & 0x2))
++		flush_dpb(p_H264_Dpb);
+ 	dpb_print(DECODE_ID(hw),
+ 		PRINT_FLAG_ERROR, "%s decoder timeout\n", __func__);
+ 	release_cur_decoding_buf(hw);
