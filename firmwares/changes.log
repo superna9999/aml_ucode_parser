@@ -1,36 +1,46 @@
-commit 7a1788b8a6b44fd1ea7514d1d836f78b0459ffe7
-Author: Song Zhao <song.zhao@amlogic.com>
-Date:   Thu Sep 12 13:40:51 2019 -0700
+commit 8773984960bbdc020f2a1c1047d5bf4e9b4bdbca
+Author: Nanxin Qin <nanxin.qin@amlogic.com>
+Date:   Mon Jun 17 21:33:35 2019 +0800
 
-    esparser: fix address mapping warning [1/1]
+    vmh264: fixed playback for the interlace source. [1/1]
     
-    PD#TV-10166
+    PD#OTT-4563
     
     Problem:
-    End of AIU buf are not mapped.
+    1080i-25-H264.mkv playback failed,no video and audio
     
     Solution:
-    Avoid converting it to virtual address
+    fixed playback for the interlace source.
     
     Verify:
-    T962E2
+    w400
     
-    Change-Id: I7ca5d8f987773cb96970a3f3f6bf7f10b28c0889
-    Signed-off-by: Song Zhao <song.zhao@amlogic.com>
+    Change-Id: Ie01282e4173b51f62165ebcbbffb0e7f55c58025
+    Signed-off-by: Nanxin Qin <nanxin.qin@amlogic.com>
 
-diff --git a/drivers/stream_input/parser/esparser.c b/drivers/stream_input/parser/esparser.c
-index 1e45893..1cc3ac9 100644
---- a/drivers/stream_input/parser/esparser.c
-+++ b/drivers/stream_input/parser/esparser.c
-@@ -272,6 +272,11 @@ static ssize_t _esparser_write_s(const char __user *buf,
- 	/*pr_info("write wp 0x%x, count %d, start 0x%x, end 0x%x\n",
- 	*		 wp, (u32)count, buf_start, buf_end);*/
- 	if (wp + count > buf_end) {
-+		if (wp == buf_end) {
-+			wp = buf_start;
-+			set_buf_wp(type, wp);
-+			return -EAGAIN;
-+		}
- 		vaddr = codec_mm_phys_to_virt(wp);
- 		ret = copy_from_user(vaddr, p, buf_end - wp);
- 		if (ret > 0) {
+diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+index e284a98..075ce66 100644
+--- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
++++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+@@ -5552,10 +5552,19 @@ static irqreturn_t vh264_isr_thread_fn(struct vdec_s *vdec, int irq)
+ 
+ 		if (p_H264_Dpb->mVideo.dec_picture) {
+ 			int cfg_ret = 0;
++			bool field_pic_flag = false;
++
+ 			if (slice_header_process_status == 1) {
+-				if ((p_H264_Dpb->mSPS.profile_idc == BASELINE) ||
++				if (!p_H264_Dpb->mSPS.frame_mbs_only_flag) {
++					field_pic_flag =
++						(p_H264_Dpb->mSlice.structure == TOP_FIELD ||
++						p_H264_Dpb->mSlice.structure == BOTTOM_FIELD) ?
++						true : false;
++				}
++
++				if (!field_pic_flag && ((p_H264_Dpb->mSPS.profile_idc == BASELINE) ||
+ 					(((unsigned long)(hw->vh264_amstream_dec_info
+-						.param)) & 0x8)) {
++						.param)) & 0x8))) {
+ 					p_H264_Dpb->fast_output_enable =
+ 					H264_OUTPUT_MODE_FAST;
+ 				}
