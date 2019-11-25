@@ -1,34 +1,48 @@
-commit a15f7b833bffdd9d00fa9766463db9aa95acb057
-Author: Lei Qian <lei.qian@amlogic.com>
-Date:   Tue Jan 15 21:45:09 2019 -0800
+commit 7bdb3073cc5c508eac3ac8c61be5d7af18c26d95
+Author: Shuai Li <shuai.li@amlogic.com>
+Date:   Wed Jan 16 11:31:17 2019 +0800
 
-    Revert "dvb: modify parser source setting algorithms [1/1]"
+    audio: fix wrong uio info map data [1/1]
     
-    This reverts commit 15d58dc9d68070e1210d71c2b72c6638fc390004.
+    PD#SWPL-4004
     
-    Change-Id: I1e4a28e7da818d867fb352dfc6bedf84946cd57c
+    Problem:
+    Wrong uio info map data cause dcv lib crash.
+    
+    Solution:
+    Fix the wrong uio info map.
+    
+    Verify:
+    Local tested.
+    
+    Change-Id: If6caf37c2b730275a98963c0a2d478a2bca5ecd3
+    Signed-off-by: Shuai Li <shuai.li@amlogic.com>
 
-diff --git a/drivers/stream_input/parser/hw_demux/aml_dmx.c b/drivers/stream_input/parser/hw_demux/aml_dmx.c
-index ac6747a..378d996 100644
---- a/drivers/stream_input/parser/hw_demux/aml_dmx.c
-+++ b/drivers/stream_input/parser/hw_demux/aml_dmx.c
-@@ -2774,16 +2774,10 @@ static int dmx_enable(struct aml_dmx *dmx)
- 		break;
- 	}
+diff --git a/drivers/stream_input/amports/adec.c b/drivers/stream_input/amports/adec.c
+index 9b84d96..ce014e1 100644
+--- a/drivers/stream_input/amports/adec.c
++++ b/drivers/stream_input/amports/adec.c
+@@ -160,6 +160,9 @@ static struct class astream_class = {
+ #define CBUS_REG_OFFSET(reg) ((reg) << 2)
+ #define IO_SECBUS_PHY_BASE 0xda000000ULL
  
--
--	hi_bsf = 0;
--	if (dmx->id == 0 && dvb->stb_source == AM_TS_SRC_DMX0)
--		hi_bsf = 1;
--
--	if (dmx->id == 1 && dvb->stb_source == AM_TS_SRC_DMX1)
--		hi_bsf = 1;
--
--	if (dmx->id == 2 && dvb->stb_source == AM_TS_SRC_DMX2)
-+	if (dmx->channel[0].used || dmx->channel[1].used)
- 		hi_bsf = 1;
-+	else
-+		hi_bsf = 0;
++
++#define IO_AOBUS_PHY_BASE_AFTER_G12A 0xff800000ULL
++
+ static struct uio_info astream_uio_info = {
+ 	.name = "astream_uio",
+ 	.version = "0.1",
+@@ -358,9 +361,11 @@ s32 astream_dev_register(void)
+ 		astream_dev->offset = -0x100;
  
- 	if ((dvb->dsc[0].dst != -1)
- 	    && ((dvb->dsc[0].dst - AM_TS_SRC_DMX0) == dmx->id))
+ 		/*need to offset -0x180 in g12a.*/
+-		if (AM_MESON_CPU_MAJOR_ID_G12A <= get_cpu_major_id())
++		if (AM_MESON_CPU_MAJOR_ID_G12A <= get_cpu_major_id()) {
+ 			astream_dev->offset = -0x180;
+-
++			/* after G12A chip, the aobus base addr changed */
++			astream_uio_info.mem[4].addr = IO_AOBUS_PHY_BASE_AFTER_G12A;
++		}
+ 		astream_uio_info.mem[0].addr =
+ 			(cbus_base + CBUS_REG_OFFSET(AIU_AIFIFO_CTRL +
+ 			astream_dev->offset)) & (PAGE_MASK);
