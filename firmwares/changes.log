@@ -1,34 +1,27 @@
-commit f5dfeef012442b14614989ce16f28a76001bde22
+commit 37c10a56fd46fcc014deaf2e8fff291e31f15411
 Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Sat Sep 14 18:03:37 2019 +0800
+Date:   Thu Sep 12 13:59:39 2019 +0800
 
-    vmh264: fix StreamSpark{8669-128} playback not smooth issue [1/1]
+    vmh264: fix memory pollution issue caused by LMEM DMA [1/1]
     
-    PD#SWPL-10335
+    PD#SWPL-14018
     
-    Problem:
-    default value of start_decode_buf_level is big and
-    cause too much time cost on check run ready. decoding
-    output is not quick. and display not smooth
+    Problem
+    LMEM DMA caused memory pullotion
     
     Solution:
-    change start_decode_buf_level to 0x4000
+    read LMEM dma address from scratch regiest directly
+    
+    ucode gerrit: 85777
+    ucode change id: I98ef
+    ucode commit id: ee37df
     
     Verify:
-    R314
+    X301
     
-    Change-Id: Ia09432495dababcb51964b4d05e05bd9bfcda8ec
+    Change-Id: I25f129dc1d8b4f77633fbdf49c43794e2b7fe2bf
+    Signed-off-by: Sandy Luo <sandy.luo@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-index 576544b..e284a98 100644
---- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
-+++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-@@ -140,7 +140,7 @@ static unsigned int force_rate_framebase;
- static unsigned int force_disp_bufspec_num;
- static unsigned int fixed_frame_rate_mode;
- static unsigned int error_recovery_mode_in;
--static int start_decode_buf_level = 0x8000;
-+static int start_decode_buf_level = 0x4000;
- static int pre_decode_buf_level = 0x1000;
- static int stream_mode_start_num = 4;
- 
+diff --git a/firmware/video_ucode.bin b/firmware/video_ucode.bin
+index 25ae9a5..5b83755 100755
+Binary files a/firmware/video_ucode.bin and b/firmware/video_ucode.bin differ
