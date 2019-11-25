@@ -1,176 +1,58 @@
-commit 0eb79ad74c57b3d04f189dd72837112b172220a1
-Author: Rain Zhang <rain.zhang@amlogic.com>
-Date:   Tue May 28 15:30:32 2019 -0700
+commit 9edb8e7650e579860555eda53f87d17025f8a39e
+Author: Hui Zhang <hui.zhang@amlogic.com>
+Date:   Thu Jun 20 11:06:10 2019 +0800
 
-    vp9: add no_head mode for block mode [2/2]
+    vp9: youtube display aspec ratio issue [1/1]
     
-    PD#SWPL-9153
+    PD#TV-7029
     
     Problem:
-    omx adding headers to each vp9 frame spend a lot
-    of time, it will affects decoding efficiency.
+    youtube 1920 x 800 video display aspec ratio still
+    is 16:9. because resolution from sysinfo is not
+    accurate
     
     Solution:
-    Decoder adds no header mode to solve this issue.
-    ucode gerrit: 75267
+    use pic resolution to calculate ratio and output with vf
     
-    Change-Id: Ic20ef2bfc2f1073a060f9c0cb4441325fb1c4610
-    Signed-off-by: Rain Zhang <rain.zhang@amlogic.com>
+    Verify
+    T960X
+    
+    Change-Id: I1c4275b0a1f387f65daebe26c3c16aa3a0a0b9ce
+    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
 
 diff --git a/drivers/frame_provider/decoder/vp9/vvp9.c b/drivers/frame_provider/decoder/vp9/vvp9.c
-index 7e2f0ac..f498632 100644
+index f498632..8ee43a6 100644
 --- a/drivers/frame_provider/decoder/vp9/vvp9.c
 +++ b/drivers/frame_provider/decoder/vp9/vvp9.c
-@@ -115,7 +115,7 @@
- #define DECODE_MODE_MULTI_STREAMBASE	((0x80 << 24) | 1)
- #define DECODE_MODE_MULTI_FRAMEBASE	((0x80 << 24) | 2)
- #define DECODE_MODE_SINGLE_LOW_LATENCY ((0x80 << 24) | 3)
+@@ -6435,13 +6435,13 @@ static void set_canvas(struct VP9Decoder_s *pbi,
+ static void set_frame_info(struct VP9Decoder_s *pbi, struct vframe_s *vf)
+ {
+ 	unsigned int ar;
 -
-+#define DECODE_MODE_MULTI_FRAMEBASE_NOHEAD ((0x80 << 24) | 4)
+ 	vf->duration = pbi->frame_dur;
+ 	vf->duration_pulldown = 0;
+ 	vf->flag = 0;
+ 	vf->prop.master_display_colour = pbi->vf_dp;
+ 	vf->signal_type = pbi->video_signal_type;
+-
++	if (vf->compWidth && vf->compHeight)
++		pbi->frame_ar = vf->compHeight * 0x100 / vf->compWidth;
+ 	ar = min_t(u32, pbi->frame_ar, DISP_RATIO_ASPECT_RATIO_MAX);
+ 	vf->ratio_control = (ar << DISP_RATIO_ASPECT_RATIO_BIT);
  
- #define  VP9_TRIGGER_FRAME_DONE		0x100
- #define  VP9_TRIGGER_FRAME_ENABLE	0x200
-@@ -1169,6 +1169,7 @@ struct VP9Decoder_s {
- 	u64 sc_start_time;
- 	bool postproc_done;
- 	int low_latency_flag;
-+	bool no_head;
- 	bool pic_list_init_done;
- 	bool pic_list_init_done2;
- 	bool is_used_v4l;
-@@ -2787,6 +2788,8 @@ static u32 i_only_flag;
+@@ -6889,7 +6889,6 @@ static int prepare_display_buf(struct VP9Decoder_s *pbi,
+ 		if (pic_config->bit_depth == VPX_BITS_8)
+ 			vf->bitdepth |= BITDEPTH_SAVING_MODE;
  
- static u32 low_latency_flag;
- 
-+static u32 no_head;
-+
- static u32 max_decoding_time;
- /*
-  *error handling
-@@ -5762,7 +5765,9 @@ static void vp9_init_decoder_hw(struct VP9Decoder_s *pbi, u32 mask)
- 			else
- 				decode_mode = DECODE_MODE_SINGLE;
- 		} else if (vdec_frame_based(hw_to_vdec(pbi)))
--			decode_mode = DECODE_MODE_MULTI_FRAMEBASE;
-+			decode_mode = pbi->no_head ?
-+				DECODE_MODE_MULTI_FRAMEBASE_NOHEAD :
-+				DECODE_MODE_MULTI_FRAMEBASE;
- 		else
- 			decode_mode = DECODE_MODE_MULTI_STREAMBASE;
- #ifdef SUPPORT_FB_DECODING
-@@ -8953,6 +8958,7 @@ static int amvdec_vp9_probe(struct platform_device *pdev)
- 		pbi->vvp9_amstream_dec_info.height = 0;
- 		pbi->vvp9_amstream_dec_info.rate = 30;
- 	}
-+	pbi->no_head = no_head;
- #ifdef MULTI_INSTANCE_SUPPORT
- 	pbi->cma_dev = pdata->cma_dev;
- #else
-@@ -9747,7 +9753,7 @@ static void vp9_dump_state(struct vdec_s *vdec)
- 		);
- 
- 	vp9_print(pbi, 0,
--		"is_framebase(%d), eos %d, dec_result 0x%x dec_frm %d disp_frm %d run %d not_run_ready %d input_empty %d low_latency %d\n",
-+		"is_framebase(%d), eos %d, dec_result 0x%x dec_frm %d disp_frm %d run %d not_run_ready %d input_empty %d low_latency %d no_head %d \n",
- 		input_frame_based(vdec),
- 		pbi->eos,
- 		pbi->dec_result,
-@@ -9756,7 +9762,8 @@ static void vp9_dump_state(struct vdec_s *vdec)
- 		run_count[pbi->index],
- 		not_run_ready[pbi->index],
- 		input_empty[pbi->index],
--		pbi->low_latency_flag
-+		pbi->low_latency_flag,
-+		pbi->no_head
- 		);
- 
- 	if (vf_get_receiver(vdec->vf_provider_name)) {
-@@ -9970,6 +9977,12 @@ static int ammvdec_vp9_probe(struct platform_device *pdev)
- 			vp9_buf_height = config_val;
+-		set_frame_info(pbi, vf);
+ 		/* if((vf->width!=pic_config->width)|
+ 		 *	(vf->height!=pic_config->height))
+ 		 */
+@@ -6908,6 +6907,7 @@ static int prepare_display_buf(struct VP9Decoder_s *pbi,
  		}
+ 		vf->compWidth = pic_config->y_crop_width;
+ 		vf->compHeight = pic_config->y_crop_height;
++		set_frame_info(pbi, vf);
+ 		if (force_fps & 0x100) {
+ 			u32 rate = force_fps & 0xff;
  
-+		if (get_config_int(pdata->config, "no_head",
-+				&config_val) == 0)
-+			pbi->no_head = config_val;
-+		else
-+			pbi->no_head = no_head;
-+
- 		/*use ptr config for max_pic_w, etc*/
- 		if (get_config_int(pdata->config, "vp9_max_pic_w",
- 				&config_val) == 0) {
-@@ -10040,9 +10053,14 @@ static int ammvdec_vp9_probe(struct platform_device *pdev)
- 	pbi->mmu_enable = 1;
- 	video_signal_type = pbi->video_signal_type;
- 
--	if (pdata->sys_info)
-+	if (pdata->sys_info) {
- 		pbi->vvp9_amstream_dec_info = *pdata->sys_info;
--	else {
-+		if ((unsigned long) pbi->vvp9_amstream_dec_info.param
-+				& 0x08) {
-+				pbi->low_latency_flag = 1;
-+			} else
-+				pbi->low_latency_flag = 0;
-+	} else {
- 		pbi->vvp9_amstream_dec_info.width = 0;
- 		pbi->vvp9_amstream_dec_info.height = 0;
- 		pbi->vvp9_amstream_dec_info.rate = 30;
-@@ -10057,6 +10075,9 @@ static int ammvdec_vp9_probe(struct platform_device *pdev)
- 		pbi->max_pic_h = 1080;
- 	}
- 
-+	vp9_print(pbi, 0,
-+			"no_head %d  low_latency %d\n",
-+			pbi->no_head, pbi->low_latency_flag);
- #if 0
- 	pbi->buf_start = pdata->mem_start;
- 	pbi->buf_size = pdata->mem_end - pdata->mem_start + 1;
-@@ -10280,16 +10301,26 @@ static int __init amvdec_vp9_driver_init_module(void)
- 
- 	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1) {
- 		amvdec_vp9_profile.profile =
--				"8k, 10bit, dwrite, compressed";
-+				"8k, 10bit, dwrite, compressed, no_head";
- 	} else if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_GXL
- 		/*&& get_cpu_major_id() != MESON_CPU_MAJOR_ID_GXLX*/
- 		&& get_cpu_major_id() != AM_MESON_CPU_MAJOR_ID_TXL) {
--		if (vdec_is_support_4k())
--			amvdec_vp9_profile.profile =
--				"4k, 10bit, dwrite, compressed";
--		else
--			amvdec_vp9_profile.profile =
--				"10bit, dwrite, compressed";
-+			if (get_cpu_major_id() < AM_MESON_CPU_MAJOR_ID_TXLX) {
-+				if (vdec_is_support_4k())
-+					amvdec_vp9_profile.profile =
-+						"4k, 10bit, dwrite, compressed";
-+				else
-+					amvdec_vp9_profile.profile =
-+						"10bit, dwrite, compressed";
-+			} else {
-+				if (vdec_is_support_4k())
-+					amvdec_vp9_profile.profile =
-+						"4k, 10bit, dwrite, compressed, no_head";
-+				else
-+					amvdec_vp9_profile.profile =
-+						"10bit, dwrite, compressed, no_head";
-+			}
-+
- 	} else {
- 		amvdec_vp9_profile.name = "vp9_unsupport";
- 	}
-@@ -10366,6 +10397,9 @@ MODULE_PARM_DESC(i_only_flag, "\n amvdec_vp9 i_only_flag\n");
- module_param(low_latency_flag, uint, 0664);
- MODULE_PARM_DESC(low_latency_flag, "\n amvdec_vp9 low_latency_flag\n");
- 
-+module_param(no_head, uint, 0664);
-+MODULE_PARM_DESC(no_head, "\n amvdec_vp9 no_head\n");
-+
- module_param(error_handle_policy, uint, 0664);
- MODULE_PARM_DESC(error_handle_policy, "\n amvdec_vp9 error_handle_policy\n");
- 
-diff --git a/firmware/video_ucode.bin b/firmware/video_ucode.bin
-old mode 100644
-new mode 100755
-index 3035cd8..9ef34f2
-Binary files a/firmware/video_ucode.bin and b/firmware/video_ucode.bin differ
