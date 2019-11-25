@@ -1,47 +1,35 @@
-commit b2e59ce1b08fecf494eb19ced278e36754e74575
-Author: Nanxin Qin <nanxin.qin@amlogic.com>
-Date:   Tue Jun 4 17:06:46 2019 +0800
+commit 3a5d05d26d479ceb31d776736ddc9e03ac2ff9e0
+Author: shihong.zheng <shihong.zheng@amlogic.com>
+Date:   Mon Jun 10 17:19:06 2019 +0800
 
-    the share sources need to be protected by lock.
+    mh264: disable mmu for 4k mbaff video. [1/1]
     
-    PD#OTT-4411
+    PD#SWPL-7113
     
-    Change-Id: I01bee0c10bb1263722f12893484dce819c26bc71
-    Signed-off-by: Nanxin Qin <nanxin.qin@amlogic.com>
+    Problem:
+    h264 mmu is not support mb_aff 4k videos, can't play
+    [4KH264_25.000fps_17.7Mbps_8bit]B600Media.ts
+    
+    Solution:
+    force_enable_mmu set to 0.
+    
+    Verify:
+    x301
+    
+    Change-Id: I1ac5838f3316062dd54433eaffaf5e514b492eac
+    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/utils/vdec.c b/drivers/frame_provider/decoder/utils/vdec.c
-index bb8edab..a6ccb61 100644
---- a/drivers/frame_provider/decoder/utils/vdec.c
-+++ b/drivers/frame_provider/decoder/utils/vdec.c
-@@ -4609,6 +4609,7 @@ static ssize_t dump_vdec_blocks_show(struct class *class,
- {
- 	struct vdec_core_s *core = vdec_core;
- 	char *pbuf = buf;
-+	unsigned long flags = vdec_core_lock(vdec_core);
- 
- 	if (list_empty(&core->connected_vdec_list))
- 		pbuf += sprintf(pbuf, "connected vdec list empty\n");
-@@ -4619,6 +4620,7 @@ static ssize_t dump_vdec_blocks_show(struct class *class,
- 				pbuf, PAGE_SIZE - (pbuf - buf));
- 		}
- 	}
-+	vdec_core_unlock(vdec_core, flags);
- 
- 	return pbuf - buf;
- }
-@@ -4627,6 +4629,7 @@ static ssize_t dump_vdec_chunks_show(struct class *class,
- {
- 	struct vdec_core_s *core = vdec_core;
- 	char *pbuf = buf;
-+	unsigned long flags = vdec_core_lock(vdec_core);
- 
- 	if (list_empty(&core->connected_vdec_list))
- 		pbuf += sprintf(pbuf, "connected vdec list empty\n");
-@@ -4637,6 +4640,7 @@ static ssize_t dump_vdec_chunks_show(struct class *class,
- 				pbuf, PAGE_SIZE - (pbuf - buf));
- 		}
- 	}
-+	vdec_core_unlock(vdec_core, flags);
- 
- 	return pbuf - buf;
- }
+diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+index a27b76f..2ea0d1b 100644
+--- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
++++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+@@ -121,7 +121,8 @@
+ #define H264_MMU
+ #define VIDEO_SIGNAL_TYPE_AVAILABLE_MASK	0x20000000
+ static int mmu_enable;
+-static int force_enable_mmu = 1;
++/*mmu do not support mbaff*/
++static int force_enable_mmu = 0;
+ unsigned int h264_debug_flag; /* 0xa0000000; */
+ unsigned int h264_debug_mask = 0xff;
+ 	/*
