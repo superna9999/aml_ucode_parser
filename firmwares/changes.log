@@ -1,36 +1,69 @@
-commit cc881e56aaa58716f1c400934d52d95bd27faf84
-Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Tue Aug 20 08:34:59 2019 +0800
+commit 00890de05d686e5f0a094a2aba5a12e821a39e32
+Author: shihong.zheng <shihong.zheng@amlogic.com>
+Date:   Sat Aug 17 15:33:21 2019 +0800
 
-    hevc_core: fix crash issue caused by mpred dma. [1/1]
+    esparser: fix vp9 play abnormal. [1/1]
     
-    PD#TV-8081
+    PD#SWPL-12692
     
     Problem:
-    for some serious error h265 stream. it might set HEVC_MPRED_TILE_SIZE_LCU
-    to 0. and it caused :
-    
-    1) Zero tile size will cause end address result wrong
-    2) Zero tile size will cause Mpred AXI write address offset wrong
-    
-    it will cuase mpred dma out of range and memory poluation
+    vp9 play abnormal, data dropped at end
+    when threadrw workqueue wirte bitstream.
+    int type implicit convert to size_t when
+    compare with size_t type.
     
     Solution:
-    add a check for non-Zero before to set HEVC_MPRED_TILE_SIZE_LCU  register.
-    if 0. decoder will stop to go ahead to avoid invalid processing
-    
-    ucode gerrit id: 83256
-    ucode change id: I4bd85
-    ucode commit id: 91e8ea
+    firstly check ret less than 0, avoid
+    complicit convert to size_t int 64bit
+    when compare with left which is size_t type.
     
     Verify:
-    X301
+    p212
     
-    Change-Id: Ia72791fd7e6699a91f492fd0e5c5d10457c0c741
-    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
+    Change-Id: I8942ea23c2e711d084971bbbde63e3374b4a9b6b
+    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
 
-diff --git a/firmware/video_ucode.bin b/firmware/video_ucode.bin
-old mode 100644
-new mode 100755
-index eb7e0b5..4b5d60e
-Binary files a/firmware/video_ucode.bin and b/firmware/video_ucode.bin differ
+diff --git a/drivers/stream_input/parser/thread_rw.c b/drivers/stream_input/parser/thread_rw.c
+index dd147a7..4e4864f 100644
+--- a/drivers/stream_input/parser/thread_rw.c
++++ b/drivers/stream_input/parser/thread_rw.c
+@@ -151,6 +151,7 @@ static ssize_t threadrw_write_in(
+ {
+ 	int ret = 0;
+ 	int off = 0;
++	/* int change to size_t for buffer overflow on OTT-5057 */
+ 	size_t left = count;
+ 	int wait_num = 0;
+ 	unsigned long flags;
+@@ -159,14 +160,11 @@ static ssize_t threadrw_write_in(
+ 		ret = threadrw_write_onece(task,
+ 				task->file,
+ 				stbuf, buf + off, left);
+-		if (ret >= left) {
+-			off = count;
+-			left = 0;
+-		} else if (ret > 0) {
+-			off += ret;
+-			left -= ret;
+ 
+-		} else if (ret < 0) {
++		/* firstly check ret < 0, avoid the risk of -EAGAIN in ret
++		 * implicit convert to size_t when compare with "size_t left".
++		 */
++		if (ret < 0) {
+ 			if (off > 0) {
+ 				break;	/*have write ok some data. */
+ 			} else if (ret == -EAGAIN) {
+@@ -183,6 +181,12 @@ static ssize_t threadrw_write_in(
+ 				break;
+ 			}
+ 			break;	/*to end */
++		} else if (ret >= left) {
++			off = count;
++			left = 0;
++		} else if (ret > 0) {
++			off += ret;
++			left -= ret;
+ 		}
+ 	}
+ 
