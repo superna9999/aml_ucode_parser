@@ -1,229 +1,46 @@
-commit 5050c738843f569e7f3c75fdc956011b391da09f
-Author: shihong.zheng <shihong.zheng@amlogic.com>
-Date:   Thu Jan 10 22:20:05 2019 +0800
+commit 15d58dc9d68070e1210d71c2b72c6638fc390004
+Author: Rui Wang <rui.wang@amlogic.com>
+Date:   Fri Jan 11 11:15:27 2019 +0800
 
-    vdec: fixed stuck when exit from single mode [1/1]
+    dvb: modify parser source setting algorithms [1/1]
     
-    PD#SWPL-4049
+    PD#TV-2151
     
     Problem:
-    image stuck for 10 seconds before exiting movieplayer
+    the ts stream cannot be played after
+    switch channel
     
     Solution:
-    do not set single mode last_vdec in vdec init
+    setting parser source according to
+    stb_source and demux id
     
     Verify:
-    u212
+    Verify android p at x301
     
-    Change-Id: I0aeeb13f1a1db8ea239b125f1d49fee214c7f5b5
-    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
+    Change-Id: I63438acdcbee37eb5825b0b5c7eb506894fe0526
+    Signed-off-by: Rui Wang <rui.wang@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/avs2/vavs2.c b/drivers/frame_provider/decoder/avs2/vavs2.c
-index c498b1b..58cb15c 100644
---- a/drivers/frame_provider/decoder/avs2/vavs2.c
-+++ b/drivers/frame_provider/decoder/avs2/vavs2.c
-@@ -4425,7 +4425,7 @@ static int avs2_prepare_display_buf(struct AVS2Decoder_s *dec)
+diff --git a/drivers/stream_input/parser/hw_demux/aml_dmx.c b/drivers/stream_input/parser/hw_demux/aml_dmx.c
+index 378d996..ac6747a 100644
+--- a/drivers/stream_input/parser/hw_demux/aml_dmx.c
++++ b/drivers/stream_input/parser/hw_demux/aml_dmx.c
+@@ -2774,10 +2774,16 @@ static int dmx_enable(struct aml_dmx *dmx)
+ 		break;
+ 	}
  
- 		if (vf) {
- 			set_vframe(dec, vf, pic, 0);
--			decoder_do_frame_check(vf, CORE_MASK_HEVC);
-+			decoder_do_frame_check(hw_to_vdec(dec), vf);
- 			kfifo_put(&dec->display_q, (const struct vframe_s *)vf);
- 
- 	#ifndef CONFIG_AMLOGIC_MEDIA_MULTI_DEC
-diff --git a/drivers/frame_provider/decoder/h264/vh264.c b/drivers/frame_provider/decoder/h264/vh264.c
-index e74af2c..db7f4af 100644
---- a/drivers/frame_provider/decoder/h264/vh264.c
-+++ b/drivers/frame_provider/decoder/h264/vh264.c
-@@ -1913,7 +1913,7 @@ static void vh264_isr(void)
- 					decoder_bmmu_box_get_mem_handle(
- 						mm_blk_handle,
- 						VF_BUFFER_IDX(buffer_index));
--				decoder_do_frame_check(vf, CORE_MASK_VDEC_1);
-+				decoder_do_frame_check(NULL, vf);
- 				if ((error_recovery_mode_use & 2) && error) {
- 					kfifo_put(&recycle_q,
- 						(const struct vframe_s *)vf);
-@@ -1964,7 +1964,7 @@ static void vh264_isr(void)
- 					decoder_bmmu_box_get_mem_handle(
- 						mm_blk_handle,
- 						VF_BUFFER_IDX(buffer_index));
--				decoder_do_frame_check(vf, CORE_MASK_VDEC_1);
-+				decoder_do_frame_check(NULL, vf);
- 				if ((error_recovery_mode_use & 2) && error) {
- 					kfifo_put(&recycle_q,
- 						(const struct vframe_s *)vf);
-@@ -2105,7 +2105,7 @@ static void vh264_isr(void)
- 		p_last_vf = vf;
- 		pts_discontinue = false;
- 		iponly_early_mode = 1;
--		decoder_do_frame_check(vf, CORE_MASK_VDEC_1);
-+		decoder_do_frame_check(NULL, vf);
- 		kfifo_put(&delay_display_q,
- 			(const struct vframe_s *)vf);
- 		WRITE_VREG(AV_SCRATCH_0, 0);
-diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-index 6255293..694f9cd 100644
---- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
-+++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-@@ -2566,9 +2566,9 @@ int prepare_display_buf(struct vdec_s *vdec, struct FrameStore *frame)
- 
- 		if (i == 0) {
- 			if (hw->mmu_enable)
--				decoder_do_frame_check(vf, CORE_MASK_VDEC_1 | CORE_MASK_HEVC);
-+				decoder_do_frame_check(hw_to_vdec(hw), vf);
- 			else
--				decoder_do_frame_check(vf, CORE_MASK_VDEC_1);
-+				decoder_do_frame_check(hw_to_vdec(hw), vf);
- 		}
- 
- 		kfifo_put(&hw->display_q, (const struct vframe_s *)vf);
-diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
-index 544c35d..ab8b9ef 100644
---- a/drivers/frame_provider/decoder/h265/vh265.c
-+++ b/drivers/frame_provider/decoder/h265/vh265.c
-@@ -7520,7 +7520,7 @@ static int prepare_display_buf(struct hevc_state_s *hevc, struct PIC_s *pic)
- 		vf->type_original = vf->type;
- 		pic->vf_ref = 1;
- 		hevc->vf_pre_count++;
--		decoder_do_frame_check(vf, CORE_MASK_HEVC);
-+		decoder_do_frame_check(hw_to_vdec(hevc), vf);
- 		kfifo_put(&hevc->display_q, (const struct vframe_s *)vf);
- 
- 		if (get_dbg_flag(hevc) & H265_DEBUG_PIC_STRUCT)
-diff --git a/drivers/frame_provider/decoder/utils/frame_check.c b/drivers/frame_provider/decoder/utils/frame_check.c
-index 9fd8a82..20a7c38 100644
---- a/drivers/frame_provider/decoder/utils/frame_check.c
-+++ b/drivers/frame_provider/decoder/utils/frame_check.c
-@@ -669,14 +669,22 @@ static int fbc_check_prepare(struct pic_check_t *check,
- 	return 0;
- }
- 
--int decoder_do_frame_check(struct vframe_s *vf, int core_mask)
-+static struct vdec_s *single_mode_vdec = NULL;
+-	if (dmx->channel[0].used || dmx->channel[1].used)
 +
-+int decoder_do_frame_check(struct vdec_s *vdec, struct vframe_s *vf)
- {
- 	int ret = 0;
- 	int resize = 0;
- 	void *planes[4];
- 	struct pic_check_t *check = NULL;
--	struct pic_check_mgr_t *mgr =
--		(struct pic_check_mgr_t *)vdec_get_active_vfc(core_mask);
-+	struct pic_check_mgr_t *mgr = NULL;
++	hi_bsf = 0;
++	if (dmx->id == 0 && dvb->stb_source == AM_TS_SRC_DMX0)
++		hi_bsf = 1;
 +
-+	if (vdec == NULL) {
-+		if (single_mode_vdec == NULL)
-+			return 0;
-+		mgr = &single_mode_vdec->vfc;
-+	} else
-+		mgr = &vdec->vfc;
- 
- 	if ((mgr == NULL) ||
- 		(vf == NULL) ||
-@@ -896,6 +904,7 @@ static unsigned int yuv_enable, check_enable;
- static unsigned int yuv_start[MAX_INSTANCE_MUN];
- static unsigned int yuv_num[MAX_INSTANCE_MUN];
- 
++	if (dmx->id == 1 && dvb->stb_source == AM_TS_SRC_DMX1)
++		hi_bsf = 1;
 +
- int vdec_frame_check_init(struct vdec_s *vdec)
- {
- 	int ret = 0, id = 0;
-@@ -907,6 +916,9 @@ int vdec_frame_check_init(struct vdec_s *vdec)
- 	if (!check_enable && !yuv_enable)
- 		return 0;
++	if (dmx->id == 2 && dvb->stb_source == AM_TS_SRC_DMX2)
+ 		hi_bsf = 1;
+-	else
+-		hi_bsf = 0;
  
-+	if (vdec_single(vdec))
-+		single_mode_vdec = vdec;
-+
- 	vdec->canvas_mode = CANVAS_BLKMODE_LINEAR;
- 	id = vdec->id;
- 
-@@ -938,6 +950,8 @@ void vdec_frame_check_exit(struct vdec_s *vdec)
- 	if (vdec == NULL)
- 		return;
- 	frame_check_exit(&vdec->vfc);
-+
-+	single_mode_vdec = NULL;
- }
- 
- ssize_t dump_yuv_store(struct class *class,
-diff --git a/drivers/frame_provider/decoder/utils/frame_check.h b/drivers/frame_provider/decoder/utils/frame_check.h
-index 27f4c5c..fed21f5 100644
---- a/drivers/frame_provider/decoder/utils/frame_check.h
-+++ b/drivers/frame_provider/decoder/utils/frame_check.h
-@@ -83,7 +83,7 @@ struct pic_check_mgr_t{
- int dump_yuv_trig(struct pic_check_mgr_t *mgr,
- 	int id, int start, int num);
- 
--int decoder_do_frame_check(struct vframe_s *vf, int core_mask);
-+int decoder_do_frame_check(struct vdec_s *vdec, struct vframe_s *vf);
- 
- int frame_check_init(struct pic_check_mgr_t *mgr, int id);
- 
-diff --git a/drivers/frame_provider/decoder/utils/vdec.c b/drivers/frame_provider/decoder/utils/vdec.c
-index 97c32a6..218a32a 100644
---- a/drivers/frame_provider/decoder/utils/vdec.c
-+++ b/drivers/frame_provider/decoder/utils/vdec.c
-@@ -1632,28 +1632,6 @@ struct vdec_s *vdec_get_with_id(unsigned id)
- 	return ret_vdec;
- }
- 
--void *vdec_get_active_vfc(int core_mask)
--{
--	void *p = NULL;
--	struct vdec_s *vdec = vdec_core->last_vdec;
--
--	if (vdec_core->parallel_dec == 1) {
--		if (core_mask & CORE_MASK_VDEC_1)
--			vdec = vdec_core->active_vdec;
--		else if (core_mask & CORE_MASK_HEVC)
--			vdec = vdec_core->active_hevc;
--		else
--			vdec = vdec_core->last_vdec;
--	}
--
--	if (vdec == NULL)
--		return NULL;
--
--	p = &vdec->vfc;
--
--	return p;
--}
--
- /*
-  *register vdec_device
-  * create output, vfm or create ionvideo output
-@@ -1714,8 +1692,6 @@ s32 vdec_init(struct vdec_s *vdec, int is_4k)
- 	vdec_core->parallel_dec = parallel_decode;
- 	vdec->canvas_mode = CANVAS_BLKMODE_32X32;
- #ifdef FRAME_CHECK
--	if (vdec_single(vdec))
--		vdec_core->last_vdec = vdec;
- 	vdec_frame_check_init(vdec);
- #endif
- 	p->dev = platform_device_register_data(
-@@ -1957,9 +1933,8 @@ void vdec_release(struct vdec_s *vdec)
- 
- #ifdef FRAME_CHECK
- 	vdec_frame_check_exit(vdec);
--	if (vdec_single(vdec))
--		vdec_core->active_vdec = NULL;
- #endif
-+
- 	platform_device_unregister(vdec->dev);
- 	pr_debug("vdec_release instance %p, total %d\n", vdec,
- 		atomic_read(&vdec_core->vdec_nr));
-diff --git a/drivers/frame_provider/decoder/vp9/vvp9.c b/drivers/frame_provider/decoder/vp9/vvp9.c
-index eedaed6..b7461d9 100644
---- a/drivers/frame_provider/decoder/vp9/vvp9.c
-+++ b/drivers/frame_provider/decoder/vp9/vvp9.c
-@@ -6878,7 +6878,7 @@ static int prepare_display_buf(struct VP9Decoder_s *pbi,
- 				&& (debug & VP9_DEBUG_NO_TRIGGER_FRAME) == 0
- 				)) {
- 		inc_vf_ref(pbi, pic_config->index);
--		decoder_do_frame_check(vf, CORE_MASK_HEVC);
-+		decoder_do_frame_check(hw_to_vdec(pbi), vf);
- 		kfifo_put(&pbi->display_q, (const struct vframe_s *)vf);
- 		pbi->vf_pre_count++;
- #ifndef CONFIG_AMLOGIC_MEDIA_MULTI_DEC
+ 	if ((dvb->dsc[0].dst != -1)
+ 	    && ((dvb->dsc[0].dst - AM_TS_SRC_DMX0) == dmx->id))
