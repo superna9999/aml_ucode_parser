@@ -1,7 +1,667 @@
-commit 0581c37493d183918f77be762cd202ba369ebf73
-Merge: 36b26ea 60e7b9f
-Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Fri Mar 29 04:40:19 2019 -0700
+commit 6f5ee885678ea4696504d1c6651563b9c329ddda
+Author: Nanxin.Qin <nanxin.qin@amlogic.com>
+Date:   Wed Mar 27 11:14:04 2019 +0800
 
-    Merge "path: add ppmgr [4/5]" into amlogic-4.9-dev
+    decoder: bringup sm1. [1/2]
+    
+    PD#SWPL-5261
+    
+    Problem:
+    bringup sm1.
+    
+    Solution:
+    1. add cpu chipid sm1.
+    2. modify the operation of the DOS power on/off
+       to compatible with soc sm1.
+    3. ucode commit id:
+       6e4fda861bcf23d1bb01f4a8c2fe516219e818c7
+    
+    Verify:
+    AC200
+    
+    Change-Id: I386a324bae2d78e4d66f9adeeb23f898b4cccc61
+    Signed-off-by: Nanxin.Qin <nanxin.qin@amlogic.com>
 
+diff --git a/drivers/common/chips/chips.c b/drivers/common/chips/chips.c
+index e3792b7..1fe5107 100644
+--- a/drivers/common/chips/chips.c
++++ b/drivers/common/chips/chips.c
+@@ -73,6 +73,7 @@ static const struct type_name cpu_type_name[] = {
+ 	{AM_MESON_CPU_MAJOR_ID_TXLX, "txlx"},
+ 	{AM_MESON_CPU_MAJOR_ID_G12A, "g12a"},
+ 	{AM_MESON_CPU_MAJOR_ID_G12B, "g12b"},
++	{AM_MESON_CPU_MAJOR_ID_SM1, "sm1"},
+ 	{AM_MESON_CPU_MAJOR_ID_TL1, "tl1"},
+ 	{0, NULL},
+ };
+diff --git a/drivers/common/chips/decoder_cpu_ver_info.c b/drivers/common/chips/decoder_cpu_ver_info.c
+index 36b594a..1c05357 100644
+--- a/drivers/common/chips/decoder_cpu_ver_info.c
++++ b/drivers/common/chips/decoder_cpu_ver_info.c
+@@ -56,6 +56,7 @@ static enum AM_MESON_CPU_MAJOR_ID cpu_ver_info[AM_MESON_CPU_MAJOR_ID_MAX - MAJOR
+ 	AM_MESON_CPU_MAJOR_ID_G12A,
+ 	AM_MESON_CPU_MAJOR_ID_G12B,
+ 	AM_MESON_CPU_MAJOR_ID_GXLX2,
++	AM_MESON_CPU_MAJOR_ID_SM1,
+ 	AM_MESON_CPU_MAJOR_ID_TL1,
+ };
+ 
+@@ -90,6 +91,11 @@ static const struct of_device_id cpu_ver_of_match[] = {
+ 		.data = &cpu_ver_info[AM_MESON_CPU_MAJOR_ID_TXLX - MAJOR_ID_START],
+ 	},
+ 
++	{
++		.compatible = "amlogic, cpu-major-id-sm1",
++		.data = &cpu_ver_info[AM_MESON_CPU_MAJOR_ID_SM1 - MAJOR_ID_START],
++	},
++
+ 	{
+ 		.compatible = "amlogic, cpu-major-id-tl1",
+ 		.data = &cpu_ver_info[AM_MESON_CPU_MAJOR_ID_TL1 - MAJOR_ID_START],
+diff --git a/drivers/common/chips/decoder_cpu_ver_info.h b/drivers/common/chips/decoder_cpu_ver_info.h
+index c9f391a..7b9f187 100644
+--- a/drivers/common/chips/decoder_cpu_ver_info.h
++++ b/drivers/common/chips/decoder_cpu_ver_info.h
+@@ -43,6 +43,7 @@ enum AM_MESON_CPU_MAJOR_ID
+ 	AM_MESON_CPU_MAJOR_ID_G12A = 0x28,
+ 	AM_MESON_CPU_MAJOR_ID_G12B = 0x29,
+ 	AM_MESON_CPU_MAJOR_ID_GXLX2 = 0x2a,
++	AM_MESON_CPU_MAJOR_ID_SM1 = 0x2b,
+ 	AM_MESON_CPU_MAJOR_ID_TL1 = 0x2e,
+ 	AM_MESON_CPU_MAJOR_ID_MAX,
+ };
+diff --git a/drivers/common/firmware/firmware_type.c b/drivers/common/firmware/firmware_type.c
+index 9c5edd6..882be8c 100644
+--- a/drivers/common/firmware/firmware_type.c
++++ b/drivers/common/firmware/firmware_type.c
+@@ -60,17 +60,18 @@ static const struct format_name_s format_name[] = {
+ };
+ 
+ static const struct cpu_type_s cpu_type[] = {
+-	{AM_MESON_CPU_MAJOR_ID_GXL,	"gxl"},
+-	{AM_MESON_CPU_MAJOR_ID_GXM,	"gxm"},
+-	{AM_MESON_CPU_MAJOR_ID_TXL,	"txl"},
++	{AM_MESON_CPU_MAJOR_ID_GXL,		"gxl"},
++	{AM_MESON_CPU_MAJOR_ID_GXM,		"gxm"},
++	{AM_MESON_CPU_MAJOR_ID_TXL,		"txl"},
+ 	{AM_MESON_CPU_MAJOR_ID_TXLX,	"txlx"},
+-	{AM_MESON_CPU_MAJOR_ID_AXG,	"axg"},
++	{AM_MESON_CPU_MAJOR_ID_AXG,		"axg"},
+ 	{AM_MESON_CPU_MAJOR_ID_GXLX,	"gxlx"},
+ 	{AM_MESON_CPU_MAJOR_ID_TXHD,	"txhd"},
+ 	{AM_MESON_CPU_MAJOR_ID_G12A,	"g12a"},
+ 	{AM_MESON_CPU_MAJOR_ID_G12B,	"g12b"},
+ 	{AM_MESON_CPU_MAJOR_ID_GXLX2,	"gxlx2"},
+-	{AM_MESON_CPU_MAJOR_ID_TL1,	"tl1"},
++	{AM_MESON_CPU_MAJOR_ID_SM1,		"sm1"},
++	{AM_MESON_CPU_MAJOR_ID_TL1,		"tl1"},
+ };
+ 
+ const char *get_fw_format_name(unsigned int format)
+diff --git a/drivers/common/media_clock/clk/clkg12.c b/drivers/common/media_clock/clk/clkg12.c
+index d5b6daf..eeb6d29 100644
+--- a/drivers/common/media_clock/clk/clkg12.c
++++ b/drivers/common/media_clock/clk/clkg12.c
+@@ -719,6 +719,9 @@ static int vdec_clock_set(int clk)
+ 		clk = 667;
+ 	}
+ 
++	if (get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_SM1)
++		clk = 800;
++
+ 	if (set_frq_enable && vdec_frq) {
+ 		pr_info("Set the vdec frq is %u MHz\n", vdec_frq);
+ 		clk = vdec_frq;
+@@ -765,7 +768,7 @@ static int hevc_back_clock_set(int clk)
+ 	if ((clk > 500 && clk != 667)) {
+ 		if (clock_real_clk[VDEC_HEVCB] == 648)
+ 		return 648;
+-		if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1)
++		if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1)
+ 			clk = TL1_HEVC_MAX_CLK;
+ 		else
+ 			clk = 667;
+@@ -813,7 +816,7 @@ static int hevc_clock_set(int clk)
+ 	if ((clk > 500 && clk != 667)) {
+ 		if (clock_real_clk[VDEC_HEVC] == 648)
+ 			return 648;
+-		if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1)
++		if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1)
+ 			clk = TL1_HEVC_MAX_CLK;
+ 		else
+ 			clk = 667;
+@@ -1009,6 +1012,7 @@ static int vdec_clock_get(enum vdec_type_e core)
+ 	AM_MESON_CPU_MAJOR_ID_TXLX,\
+ 	AM_MESON_CPU_MAJOR_ID_G12A,\
+ 	AM_MESON_CPU_MAJOR_ID_G12B,\
++	AM_MESON_CPU_MAJOR_ID_SM1,\
+ 	AM_MESON_CPU_MAJOR_ID_TL1,\
+ 	0}
+ #include "clk.h"
+diff --git a/drivers/frame_provider/decoder/avs2/vavs2.c b/drivers/frame_provider/decoder/avs2/vavs2.c
+index 220d33d..633c924 100644
+--- a/drivers/frame_provider/decoder/avs2/vavs2.c
++++ b/drivers/frame_provider/decoder/avs2/vavs2.c
+@@ -809,7 +809,7 @@ static int avs2_print_cont(struct AVS2Decoder_s *dec,
+ 
+ static int get_frame_mmu_map_size(struct AVS2Decoder_s *dec)
+ {
+-	if ((get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1) &&
++	if ((get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1) &&
+ 		(IS_8K_SIZE(dec->init_pic_w, dec->init_pic_h)))
+ 		return (MAX_FRAME_8K_NUM * 4);
+ 	return (MAX_FRAME_4K_NUM * 4);
+@@ -817,7 +817,7 @@ static int get_frame_mmu_map_size(struct AVS2Decoder_s *dec)
+ 
+ static int get_compress_header_size(struct AVS2Decoder_s *dec)
+ {
+-	if ((get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1) &&
++	if ((get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1) &&
+ 		(IS_8K_SIZE(dec->init_pic_w, dec->init_pic_h)))
+ 		return MMU_COMPRESS_8K_HEADER_SIZE;
+ 	return MMU_COMPRESS_HEADER_SIZE;
+@@ -952,7 +952,7 @@ int avs2_alloc_mmu(
+ 		dec, pic_width, pic_height,
+ 		bit_depth_10);
+ 	cur_mmu_4k_number = ((picture_size + (1 << 12) - 1) >> 12);
+-	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1)
++	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1)
+ 		max_frame_num = MAX_FRAME_8K_NUM;
+ 	else
+ 		max_frame_num = MAX_FRAME_4K_NUM;
+@@ -2188,7 +2188,7 @@ static int config_pic(struct AVS2Decoder_s *dec,
+ 			}
+ #ifdef MV_USE_FIXED_BUF
+ #ifdef G12A_BRINGUP_DEBUG
+-			if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1) {
++			if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1) {
+ 				pic->mpred_mv_wr_start_addr =
+ 				dec->work_space_buf->mpred_mv.buf_start +
+ 					(pic->index * 0x120000 * 4);
+@@ -2709,7 +2709,7 @@ static void config_mcrcc_axi_hw(struct AVS2Decoder_s *dec)
+ 		return;
+ 	}
+ /*
+-	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1) {
++	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1) {
+ 		mcrcc_get_hitrate();
+ 		decomp_get_hitrate();
+ 		decomp_get_comprate();
+@@ -3696,7 +3696,7 @@ static void avs2_init_decoder_hw(struct AVS2Decoder_s *dec)
+ 	avs2_print(dec, AVS2_DBG_BUFMGR_MORE,
+ 		"Bitstream level Init for DBLK .Done.\n");
+ 
+-	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1) {
++	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1) {
+ 	    mcrcc_perfcount_reset();
+ 	    decomp_perfcount_reset();
+ 	}
+@@ -3799,7 +3799,7 @@ static int avs2_local_init(struct AVS2Decoder_s *dec)
+ 	cur_buf_info = &dec->work_space_buf_store;
+ 
+ 	if (vdec_is_support_4k()) {
+-		if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1)
++		if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1)
+ 			memcpy(cur_buf_info, &amvavs2_workbuff_spec[2],	/* 8k */
+ 			sizeof(struct BuffInfo_s));
+ 		else
+@@ -3838,7 +3838,7 @@ static int avs2_local_init(struct AVS2Decoder_s *dec)
+ 		&& (buf_alloc_width > 1920 &&  buf_alloc_height > 1088)) {
+ 		buf_alloc_width = 1920;
+ 		buf_alloc_height = 1088;
+-	} else if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1) {
++	} else if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1) {
+ 		buf_alloc_width = 8192;
+ 		buf_alloc_height = 4608;
+ 	}
+@@ -5167,7 +5167,7 @@ static irqreturn_t vavs2_isr_thread_fn(int irq, void *data)
+ 			unsigned long buf_addr;
+ 			unsigned mv_buf_size = 0x120000;
+ 			int i = dec->avs2_dec.hc.cur_pic->index;
+-			if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1)
++			if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1)
+ 				mv_buf_size = 0x120000 * 4;
+ 			if (decoder_bmmu_box_alloc_buf_phy
+ 			(dec->bmmu_box,
+@@ -7036,7 +7036,7 @@ static int __init amvdec_avs2_driver_init_module(void)
+ 	struct BuffInfo_s *p_buf_info;
+ 
+ 	if (vdec_is_support_4k()) {
+-		if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1)
++		if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1)
+ 			p_buf_info = &amvavs2_workbuff_spec[2];
+ 		else
+ 			p_buf_info = &amvavs2_workbuff_spec[1];
+@@ -7068,7 +7068,7 @@ static int __init amvdec_avs2_driver_init_module(void)
+ 		return -ENODEV;
+ 	}
+ 
+-	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1) {
++	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1) {
+ 		amvdec_avs2_profile.profile =
+ 				"8k, 10bit, dwrite, compressed";
+ 		vcodec_profile_register(&amvdec_avs2_profile);
+diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+index fd92bcc..9c51508 100644
+--- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
++++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+@@ -887,7 +887,7 @@ static u32 mem_map_mode = H265_MEM_MAP_MODE;
+ 
+ static int is_oversize(int w, int h)
+ {
+-	int max = (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1)?
++	int max = (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1)?
+ 		MAX_SIZE_8K : MAX_SIZE_4K;
+ 
+ 	if (w < 0 || h < 0)
+diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
+index 9e7f8f3..e585fe6 100644
+--- a/drivers/frame_provider/decoder/h265/vh265.c
++++ b/drivers/frame_provider/decoder/h265/vh265.c
+@@ -1693,7 +1693,7 @@ u32 again_threshold = 0x40;
+ 
+ static int get_frame_mmu_map_size(void)
+ {
+-	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1)
++	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1)
+ 		return (MAX_FRAME_8K_NUM * 4);
+ 
+ 	return (MAX_FRAME_4K_NUM * 4);
+@@ -1701,7 +1701,7 @@ static int get_frame_mmu_map_size(void)
+ 
+ static int is_oversize(int w, int h)
+ {
+-	int max = (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1)?
++	int max = (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1)?
+ 		MAX_SIZE_8K : MAX_SIZE_4K;
+ 
+ 	if (w < 0 || h < 0)
+@@ -2822,7 +2822,7 @@ static int cal_current_buf_size(struct hevc_state_s *hevc,
+ 	int dw_mode = get_double_write_mode(hevc);
+ 
+ 	if (hevc->mmu_enable) {
+-		if ((get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1) &&
++		if ((get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1) &&
+ 			(IS_8K_SIZE(hevc->pic_w, hevc->pic_h)))
+ 			buf_size = ((MMU_COMPRESS_8K_HEADER_SIZE + 0xffff) >> 16)
+ 				<< 16;
+@@ -3066,7 +3066,7 @@ static int config_pic(struct hevc_state_s *hevc, struct PIC_s *pic)
+ 
+ 	if (hevc->mmu_enable) {
+ 		pic->header_adr = hevc->m_BUF[i].start_adr;
+-		if ((get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1) &&
++		if ((get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1) &&
+ 			(IS_8K_SIZE(hevc->pic_w, hevc->pic_h)))
+ 			y_adr = hevc->m_BUF[i].start_adr +
+ 				MMU_COMPRESS_8K_HEADER_SIZE;
+@@ -4870,7 +4870,7 @@ static void config_sao_hw(struct hevc_state_s *hevc, union param_u *params)
+ 	/* DBLK CONFIG HERE */
+ 	if (hevc->new_pic) {
+ 		if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_G12A) {
+-			if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1)
++			if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1)
+ 				data32 = (0xff << 8) | (0x0  << 0);
+ 			else
+ 				data32 = (0x57 << 8) |  /* 1st/2nd write both enable*/
+@@ -6422,7 +6422,7 @@ static int H265_alloc_mmu(struct hevc_state_s *hevc, struct PIC_s *new_pic,
+ 		decoder_mmu_box_free_idx(hevc->mmu_box, new_pic->index);
+ 		new_pic->scatter_alloc = 0;
+ 	}
+-	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1)
++	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1)
+ 		max_frame_num = MAX_FRAME_8K_NUM;
+ 	else
+ 		max_frame_num = MAX_FRAME_4K_NUM;
+@@ -6537,7 +6537,7 @@ static int hevc_local_init(struct hevc_state_s *hevc)
+ 	cur_buf_info = &hevc->work_space_buf_store;
+ 
+ 	if (vdec_is_support_4k()) {
+-		if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1)
++		if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1)
+ 			memcpy(cur_buf_info, &amvh265_workbuff_spec[2],	/* 4k */
+ 			sizeof(struct BuffInfo_s));
+ 		else
+@@ -11866,7 +11866,7 @@ static int __init amvdec_h265_driver_init_module(void)
+ 	struct BuffInfo_s *p_buf_info;
+ 
+ 	if (vdec_is_support_4k()) {
+-		if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1)
++		if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1)
+ 			p_buf_info = &amvh265_workbuff_spec[2];
+ 		else
+ 			p_buf_info = &amvh265_workbuff_spec[1];
+@@ -11909,7 +11909,7 @@ static int __init amvdec_h265_driver_init_module(void)
+ 		if (is_meson_m8m2_cpu()) {
+ 			/* m8m2 support 4k */
+ 			amvdec_h265_profile.profile = "4k";
+-		} else if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1) {
++		} else if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1) {
+ 			amvdec_h265_profile.profile =
+ 				"8k, 8bit, 10bit, dwrite, compressed";
+ 		}else if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_GXBB) {
+diff --git a/drivers/frame_provider/decoder/utils/vdec.c b/drivers/frame_provider/decoder/utils/vdec.c
+index 57159d7..f62b76a 100644
+--- a/drivers/frame_provider/decoder/utils/vdec.c
++++ b/drivers/frame_provider/decoder/utils/vdec.c
+@@ -2816,7 +2816,9 @@ void vdec_poweron(enum vdec_type_e core)
+ 	if (core == VDEC_1) {
+ 		/* vdec1 power on */
+ 		WRITE_AOREG(AO_RTI_GEN_PWR_SLEEP0,
+-				READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) & ~0xc);
++				READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) &
++				(get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_SM1
++				? ~0x2 : ~0xc));
+ 		/* wait 10uS */
+ 		udelay(10);
+ 		/* vdec1 soft reset */
+@@ -2834,7 +2836,9 @@ void vdec_poweron(enum vdec_type_e core)
+ 		WRITE_VREG(DOS_MEM_PD_VDEC, 0);
+ 		/* remove vdec1 isolation */
+ 		WRITE_AOREG(AO_RTI_GEN_PWR_ISO0,
+-				READ_AOREG(AO_RTI_GEN_PWR_ISO0) & ~0xC0);
++				READ_AOREG(AO_RTI_GEN_PWR_ISO0) &
++				(get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_SM1
++				? ~0x2 : ~0xC0));
+ 		/* reset DOS top registers */
+ 		WRITE_VREG(DOS_VDEC_MCRCC_STALL_CTRL, 0);
+ 		if (get_cpu_major_id() >=
+@@ -2875,8 +2879,9 @@ void vdec_poweron(enum vdec_type_e core)
+ 		if (has_hdec()) {
+ 			/* hcodec power on */
+ 			WRITE_AOREG(AO_RTI_GEN_PWR_SLEEP0,
+-					READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) &
+-					~0x3);
++				READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) &
++				(get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_SM1
++				? ~0x1 : ~0x3));
+ 			/* wait 10uS */
+ 			udelay(10);
+ 			/* hcodec soft reset */
+@@ -2888,8 +2893,9 @@ void vdec_poweron(enum vdec_type_e core)
+ 			WRITE_VREG(DOS_MEM_PD_HCODEC, 0);
+ 			/* remove hcodec isolation */
+ 			WRITE_AOREG(AO_RTI_GEN_PWR_ISO0,
+-					READ_AOREG(AO_RTI_GEN_PWR_ISO0) &
+-					~0x30);
++				READ_AOREG(AO_RTI_GEN_PWR_ISO0) &
++				(get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_SM1
++				? ~0x1 : ~0x30));
+ 		}
+ 	} else if (core == VDEC_HEVC) {
+ 		if (has_hevc_vdec()) {
+@@ -2899,7 +2905,8 @@ void vdec_poweron(enum vdec_type_e core)
+ 				/* hevc power on */
+ 				WRITE_AOREG(AO_RTI_GEN_PWR_SLEEP0,
+ 					READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) &
+-					~0xc0);
++					(get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_SM1
++					? ~0x4 : ~0xc0));
+ 				/* wait 10uS */
+ 				udelay(10);
+ 				/* hevc soft reset */
+@@ -2916,7 +2923,8 @@ void vdec_poweron(enum vdec_type_e core)
+ 				/* remove hevc isolation */
+ 				WRITE_AOREG(AO_RTI_GEN_PWR_ISO0,
+ 					READ_AOREG(AO_RTI_GEN_PWR_ISO0) &
+-					~0xc00);
++					(get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_SM1
++					? ~0x4 : ~0xc00));
+ 
+ 				if (!hevc_workaround_needed())
+ 					break;
+@@ -2994,14 +3002,18 @@ void vdec_poweroff(enum vdec_type_e core)
+ 		}
+ 		/* enable vdec1 isolation */
+ 		WRITE_AOREG(AO_RTI_GEN_PWR_ISO0,
+-				READ_AOREG(AO_RTI_GEN_PWR_ISO0) | 0xc0);
++				READ_AOREG(AO_RTI_GEN_PWR_ISO0) |
++				(get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_SM1
++				? 0x2 : 0xc0));
+ 		/* power off vdec1 memories */
+ 		WRITE_VREG(DOS_MEM_PD_VDEC, 0xffffffffUL);
+ 		/* disable vdec1 clock */
+ 		vdec_clock_off();
+ 		/* vdec1 power off */
+ 		WRITE_AOREG(AO_RTI_GEN_PWR_SLEEP0,
+-				READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) | 0xc);
++				READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) |
++				(get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_SM1
++				? 0x2 : 0xc));
+ 	} else if (core == VDEC_2) {
+ 		if (has_vdec2()) {
+ 			/* enable vdec2 isolation */
+@@ -3021,15 +3033,18 @@ void vdec_poweroff(enum vdec_type_e core)
+ 		if (has_hdec()) {
+ 			/* enable hcodec isolation */
+ 			WRITE_AOREG(AO_RTI_GEN_PWR_ISO0,
+-					READ_AOREG(AO_RTI_GEN_PWR_ISO0) |
+-					0x30);
++				READ_AOREG(AO_RTI_GEN_PWR_ISO0) |
++				(get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_SM1
++				? 0x1 : 0x30));
+ 			/* power off hcodec memories */
+ 			WRITE_VREG(DOS_MEM_PD_HCODEC, 0xffffffffUL);
+ 			/* disable hcodec clock */
+ 			hcodec_clock_off();
+ 			/* hcodec power off */
+ 			WRITE_AOREG(AO_RTI_GEN_PWR_SLEEP0,
+-					READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) | 3);
++				READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) |
++				(get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_SM1
++				? 0x1 : 3));
+ 		}
+ 	} else if (core == VDEC_HEVC) {
+ 		if (has_hevc_vdec()) {
+@@ -3037,7 +3052,8 @@ void vdec_poweroff(enum vdec_type_e core)
+ 				/* enable hevc isolation */
+ 				WRITE_AOREG(AO_RTI_GEN_PWR_ISO0,
+ 					READ_AOREG(AO_RTI_GEN_PWR_ISO0) |
+-					0xc00);
++					(get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_SM1
++					? 0x4 : 0xc00));
+ 			/* power off hevc memories */
+ 			WRITE_VREG(DOS_MEM_PD_HEVC, 0xffffffffUL);
+ 
+@@ -3048,8 +3064,9 @@ void vdec_poweroff(enum vdec_type_e core)
+ 
+ 			/* hevc power off */
+ 			WRITE_AOREG(AO_RTI_GEN_PWR_SLEEP0,
+-					READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) |
+-					0xc0);
++				READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) |
++				(get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_SM1
++				? 0x4 : 0xc0));
+ 			} else {
+ 				pr_info("!!!!!!!!not power down\n");
+ 				hevc_reset_core(NULL);
+@@ -3066,7 +3083,9 @@ bool vdec_on(enum vdec_type_e core)
+ 	bool ret = false;
+ 
+ 	if (core == VDEC_1) {
+-		if (((READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) & 0xc) == 0) &&
++		if (((READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) &
++			(get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_SM1
++			? 0x2 : 0xc)) == 0) &&
+ 			(READ_HHI_REG(HHI_VDEC_CLK_CNTL) & 0x100))
+ 			ret = true;
+ 	} else if (core == VDEC_2) {
+@@ -3077,13 +3096,17 @@ bool vdec_on(enum vdec_type_e core)
+ 		}
+ 	} else if (core == VDEC_HCODEC) {
+ 		if (has_hdec()) {
+-			if (((READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) & 0x3) == 0) &&
++			if (((READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) &
++				(get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_SM1
++				? 0x1 : 0x3)) == 0) &&
+ 				(READ_HHI_REG(HHI_VDEC_CLK_CNTL) & 0x1000000))
+ 				ret = true;
+ 		}
+ 	} else if (core == VDEC_HEVC) {
+ 		if (has_hevc_vdec()) {
+-			if (((READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) & 0xc0) == 0) &&
++			if (((READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) &
++				(get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_SM1
++				? 0x4 : 0xc0)) == 0) &&
+ 				(READ_HHI_REG(HHI_VDEC2_CLK_CNTL) & 0x1000000))
+ 				ret = true;
+ 		}
+diff --git a/drivers/frame_provider/decoder/vp9/vvp9.c b/drivers/frame_provider/decoder/vp9/vvp9.c
+index c246fe1..4483297 100644
+--- a/drivers/frame_provider/decoder/vp9/vvp9.c
++++ b/drivers/frame_provider/decoder/vp9/vvp9.c
+@@ -1590,7 +1590,7 @@ int vp9_alloc_mmu(
+ 				   bit_depth_10);
+ 	cur_mmu_4k_number = ((picture_size + (1 << 12) - 1) >> 12);
+ 
+-	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1)
++	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1)
+ 		max_frame_num = MAX_FRAME_8K_NUM;
+ 	else
+ 		max_frame_num = MAX_FRAME_4K_NUM;
+@@ -4677,7 +4677,7 @@ static int config_pic(struct VP9Decoder_s *pbi,
+ 
+ static int is_oversize(int w, int h)
+ {
+-	int max = (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1)?
++	int max = (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1)?
+ 		MAX_SIZE_8K : MAX_SIZE_4K;
+ 
+ 	if (w < 0 || h < 0)
+@@ -4691,7 +4691,7 @@ static int is_oversize(int w, int h)
+ 
+ static int vvp9_mmu_compress_header_size(struct VP9Decoder_s *pbi)
+ {
+-	if ((get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1) &&
++	if ((get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1) &&
+ 		IS_8K_SIZE(pbi->max_pic_w, pbi->max_pic_h))
+ 		return (MMU_COMPRESS_8K_HEADER_SIZE);
+ 
+@@ -4701,7 +4701,7 @@ static int vvp9_mmu_compress_header_size(struct VP9Decoder_s *pbi)
+ /*#define FRAME_MMU_MAP_SIZE  (MAX_FRAME_4K_NUM * 4)*/
+ static int vvp9_frame_mmu_map_size(struct VP9Decoder_s *pbi)
+ {
+-	if ((get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1) &&
++	if ((get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1) &&
+ 		IS_8K_SIZE(pbi->max_pic_w, pbi->max_pic_h))
+ 		return (MAX_FRAME_8K_NUM * 4);
+ 
+@@ -4890,7 +4890,7 @@ static int config_pic_size(struct VP9Decoder_s *pbi, unsigned short bit_depth)
+ 		else
+ 			WRITE_VREG(HEVCD_MPP_DECOMP_CTL1, (1 << 3));
+ 	}
+-	if (get_cpu_major_id() < AM_MESON_CPU_MAJOR_ID_TL1)
++	if (get_cpu_major_id() < AM_MESON_CPU_MAJOR_ID_SM1)
+ 		WRITE_VREG(HEVCD_MPP_DECOMP_CTL2, (losless_comp_body_size >> 5));
+ 	/*WRITE_VREG(HEVCD_MPP_DECOMP_CTL3,(0xff<<20) | (0xff<<10) | 0xff);*/
+ 	WRITE_VREG(HEVC_CM_BODY_LENGTH, losless_comp_body_size);
+@@ -5241,7 +5241,7 @@ static void vp9_config_work_space_hw(struct VP9Decoder_s *pbi, u32 mask)
+ 		/* cfg_d_addr */
+ 		WRITE_VREG(HEVC_DBLK_CFG5, buf_spec->dblk_data.buf_start);
+ 
+-	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1) {
++	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1) {
+ 		 /*
+ 	     * data32 = (READ_VREG(P_HEVC_DBLK_CFG3)>>8) & 0xff; // xio left offset, default is 0x40
+ 	     * data32 = data32 * 2;
+@@ -5254,7 +5254,7 @@ static void vp9_config_work_space_hw(struct VP9Decoder_s *pbi, u32 mask)
+ 	if (pbi->mmu_enable) {
+ 		/*bit[4] : paged_mem_mode*/
+ 		WRITE_VREG(HEVCD_MPP_DECOMP_CTL1, (0x1 << 4));
+-		if (get_cpu_major_id() < AM_MESON_CPU_MAJOR_ID_TL1)
++		if (get_cpu_major_id() < AM_MESON_CPU_MAJOR_ID_SM1)
+ 			WRITE_VREG(HEVCD_MPP_DECOMP_CTL2, 0);
+ 	} else {
+ 		/*if(cur_pic_config->bit_depth == VPX_BITS_10)
+@@ -5466,7 +5466,7 @@ void vp9_loop_filter_init(struct VP9Decoder_s *pbi)
+ 	}
+ 
+ 	/*video format is VP9*/
+-	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1) {
++	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1) {
+ 		data32 = (0x3 << 14) | // (dw fifo thres r and b)
+ 		(0x3 << 12) | // (dw fifo thres r or b)
+ 		(0x3 << 10) | // (dw fifo thres not r/b)
+@@ -5826,7 +5826,7 @@ static void  config_mcrcc_axi_hw(struct VP9Decoder_s *pbi)
+ 		return;
+ 	}
+ 
+-	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1) {
++	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1) {
+ 		mcrcc_get_hitrate(pbi->m_ins_flag);
+ 		decomp_get_hitrate();
+ 		decomp_get_comprate();
+@@ -6120,7 +6120,7 @@ static int vp9_local_init(struct VP9Decoder_s *pbi)
+ 	cur_buf_info = &pbi->work_space_buf_store;
+ 
+ 	if (vdec_is_support_4k()) {
+-		if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1) {
++		if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1) {
+ 			memcpy(cur_buf_info, &amvvp9_workbuff_spec[2],	/* 8k */
+ 			sizeof(struct BuffInfo_s));
+ 		} else
+@@ -6137,7 +6137,7 @@ static int vp9_local_init(struct VP9Decoder_s *pbi)
+ #else
+ /*! MULTI_INSTANCE_SUPPORT*/
+ 	if (vdec_is_support_4k()) {
+-		if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1)
++		if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1)
+ 			cur_buf_info = &amvvp9_workbuff_spec[2];/* 8k work space */
+ 		else
+ 			cur_buf_info = &amvvp9_workbuff_spec[1];/* 4k2k work space */
+@@ -6157,7 +6157,7 @@ static int vp9_local_init(struct VP9Decoder_s *pbi)
+ 			pbi->max_pic_w = 1920;
+ 			pbi->max_pic_h = 1088;
+ 		}
+-	} else if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1) {
++	} else if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1) {
+ 		buf_alloc_width = 8192;
+ 		buf_alloc_height = 4608;
+ 	}
+@@ -6172,7 +6172,7 @@ static int vp9_local_init(struct VP9Decoder_s *pbi)
+ 		pbi->vvp9_amstream_dec_info.height :
+ 		pbi->work_space_buf->max_height));
+ 
+-	if ((get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1) &&
++	if ((get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1) &&
+ 		(pbi->double_write_mode != 0) &&
+ 		(((pbi->max_pic_w % 64) != 0) ||
+ 		(pbi->vvp9_amstream_dec_info.width % 64) != 0))
+@@ -8336,7 +8336,7 @@ static int amvdec_vp9_probe(struct platform_device *pdev)
+ 
+ 	pbi->init_flag = 0;
+ 	pbi->first_sc_checked= 0;
+-	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1) {
++	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1) {
+ 		vp9_max_pic_w = 8192;
+ 		vp9_max_pic_h = 4608;
+ 	}
+@@ -9347,7 +9347,7 @@ static int ammvdec_vp9_probe(struct platform_device *pdev)
+ 	if (get_cpu_major_id() < AM_MESON_CPU_MAJOR_ID_TXLX)
+ 		pbi->stat |= VP9_TRIGGER_FRAME_ENABLE;
+ 
+-	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1) {
++	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1) {
+ 		pbi->max_pic_w = 8192;
+ 		pbi->max_pic_h = 4608;
+ 	}
+@@ -9611,7 +9611,7 @@ static int __init amvdec_vp9_driver_init_module(void)
+ 	struct BuffInfo_s *p_buf_info;
+ 
+ 	if (vdec_is_support_4k()) {
+-		if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1)
++		if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1)
+ 			p_buf_info = &amvvp9_workbuff_spec[2];
+ 		else
+ 			p_buf_info = &amvvp9_workbuff_spec[1];
+@@ -9646,7 +9646,7 @@ static int __init amvdec_vp9_driver_init_module(void)
+ 		return -ENODEV;
+ 	}
+ 
+-	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1) {
++	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1) {
+ 		amvdec_vp9_profile.profile =
+ 				"8k, 10bit, dwrite, compressed";
+ 	} else if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_GXL
+diff --git a/firmware/video_ucode.bin b/firmware/video_ucode.bin
+index a514560..ec0dfaa 100755
+Binary files a/firmware/video_ucode.bin and b/firmware/video_ucode.bin differ
