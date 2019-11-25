@@ -1,34 +1,7 @@
-commit c6e96a61c178de159ac4557407e002c3ac14a2b8
-Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Thu Mar 28 17:46:12 2019 +0800
+commit 36b26eab500c11b6b34e94a1a12b7cff17d30d49
+Merge: c6e96a6 a65ca8a
+Author: Simon Zheng <simon.zheng@amlogic.com>
+Date:   Thu Mar 28 23:01:12 2019 -0700
 
-    vmh264: fix video flicker issue when stream error  [1/1]
-    
-    PD#SWPL-5826
-    
-    Problem:
-    DVB vmh264 playback will appears video flicker when back to
-    start playback, it's dpb innoemal when stream error. output
-    poc is not in sequence.
-    
-    Solution:
-    flush dpb first when dpb has error. avoid dpb error data inside
-    
-    Verify:
-    X301
-    
-    Change-Id: Ib8a56c6d4b269a4961e500786939ebc5ea92ed45
-    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
+    Merge "H.265: fix vpu resume issue [1/1]" into amlogic-4.9-dev
 
-diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-index 1523bdc..fd92bcc 100644
---- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
-+++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-@@ -4845,6 +4845,7 @@ static irqreturn_t vh264_isr_thread_fn(struct vdec_s *vdec, int irq)
- 						ret,
- 						hw->decode_pic_count+1,
- 						hw->skip_frame_count);
-+					flush_dpb(p_H264_Dpb);
- 					hw->data_flag |= ERROR_FLAG;
- 					p_H264_Dpb->mVideo.dec_picture->data_flag |= ERROR_FLAG;
- 					if ((error_proc_policy & 0x80)
