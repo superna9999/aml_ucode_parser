@@ -1,78 +1,271 @@
-commit a39bd1d3a208e8bd446eced19eeea96575449d76
-Author: shihong.zheng <shihong.zheng@amlogic.com>
-Date:   Tue Jun 18 20:25:48 2019 +0800
+commit 4db926fa2103340c176297e0d84b58916cc23bd6
+Author: Hui Zhang <hui.zhang@amlogic.com>
+Date:   Wed Jun 19 20:28:59 2019 +0800
 
-    h265: parse sei in condition meet. [1/1]
+    vmh264: some stream playback not smooth in dvb [1/1]
     
-    PD#SWPL-9823
+    PD#SWPL-8284
     
     Problem:
-    parser sei error cause hevc display abnormal
-    after support hevc interlace.
+    1) reorder_num it too big to output smoothly on dvb
+    2) pts jump at some point
     
     Solution:
-    parser sei when do not parse in ucode and
-    frame_field_info_present_flag is true.
-    gerrit id: 77205
-    change id: I4bb0ed5
+    1) change output condition to max_ref_num
+    2) remove vpts lookup to output and use pickout pts
+    3) calculate new pts value with duration if lookup fail
     
-    Verify:
-    u212
+    Verify
+    X301
     
-    Change-Id: I6bb77e1d45cfbca4621c631cac1bb8b305af2f39
-    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
+    Change-Id: I01f0393ff25aa0b707d55b0da6ac3dc1be0c5f40
+    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
-index 5b111e2..569cbff 100644
---- a/drivers/frame_provider/decoder/h265/vh265.c
-+++ b/drivers/frame_provider/decoder/h265/vh265.c
-@@ -1516,6 +1516,7 @@ struct hevc_state_s {
+diff --git a/drivers/frame_provider/decoder/h264_multi/h264_dpb.c b/drivers/frame_provider/decoder/h264_multi/h264_dpb.c
+index cf0df90..410efd2 100644
+--- a/drivers/frame_provider/decoder/h264_multi/h264_dpb.c
++++ b/drivers/frame_provider/decoder/h264_multi/h264_dpb.c
+@@ -1565,6 +1565,15 @@ static void dpb_combine_field(struct h264_dpb_stru *p_H264_Dpb,
+ 	fs->frame->view_id = fs->view_id;
+ #endif
+ 	fs->frame->iCodingType = fs->top_field->iCodingType;
++	if (fs->top_field->poc < fs->bottom_field->poc) {
++		fs->pts = fs->top_field->pts;
++		fs->pts64 = fs->top_field->pts64;
++		fs->offset_delimiter = fs->top_field->offset_delimiter;
++	} else {
++		fs->pts = fs->bottom_field->pts;
++		fs->pts64 = fs->bottom_field->pts64;
++		fs->offset_delimiter = fs->bottom_field->offset_delimiter;
++	}
+ 	/* FIELD_CODING ;*/
+ }
  
- 	unsigned char interlace_flag;
- 	unsigned char curr_pic_struct;
-+	unsigned char frame_field_info_present_flag;
+@@ -1621,6 +1630,7 @@ static void insert_picture_in_dpb(struct h264_dpb_stru *p_H264_Dpb,
+ 		fs->is_used = 3;
+ 		fs->slice_type = p->slice_type;
+ 		fs->frame_size = p->frame_size;
++		fs->offset_delimiter = p->offset_delimiter;
+ 		if (p->used_for_reference) {
+ 			fs->is_reference = 3;
+ 			fs->is_orig_reference = 3;
+@@ -1630,6 +1640,8 @@ static void insert_picture_in_dpb(struct h264_dpb_stru *p_H264_Dpb,
+ 					p->long_term_frame_idx;
+ 			}
+ 		}
++		fs->pts = p->pts;
++		fs->pts64 = p->pts64;
+ 		fs->layer_id = p->layer_id;
+ #if (MVC_EXTENSION_ENABLE)
+ 		fs->view_id = p->view_id;
+@@ -1734,10 +1746,9 @@ static void insert_picture_in_dpb(struct h264_dpb_stru *p_H264_Dpb,
+ 	if (-1 != p_Vid->p_ref && !p_Inp->silent)
+ 		find_snr(p_Vid, fs->frame, &p_Vid->p_ref);
+ #endif
++	//fs->pts = p->pts;
++	//fs->pts64 = p->pts64;
+ 	}
+-
+-	fs->pts = p->pts;
+-	fs->pts64 = p->pts64;
+ 	fs->timestamp = p->timestamp;
+ }
  
- 	unsigned short sps_num_reorder_pics_0;
- 	unsigned short misc_flag0;
-@@ -6312,6 +6313,10 @@ static int hevc_slice_segment_header_process(struct hevc_state_s *hevc,
- 			(rpm_param->p.profile_etc >> 2) & 0x1;
- 		hevc->curr_pic_struct =
- 			(rpm_param->p.sei_frame_field_info >> 3) & 0xf;
-+		if (parser_sei_enable & 0x4) {
-+			hevc->frame_field_info_present_flag =
-+				(rpm_param->p.sei_frame_field_info >> 8) & 0x1;
+@@ -2257,7 +2268,7 @@ int output_frames(struct h264_dpb_stru *p_H264_Dpb, unsigned char flush_flag)
+ 		if (fast_output_flag)
+ 			;
+ 		else if (none_displayed_num <
+-			p_H264_Dpb->reorder_pic_num)
++			p_H264_Dpb->origin_max_reference)
+ 			return 0;
+ 	}
+ 
+@@ -5750,6 +5761,7 @@ int h264_slice_header_process(struct h264_dpb_stru *p_H264_Dpb)
+ 						 */
+ 						 1);
+ 		if (p_H264_Dpb->mVideo.dec_picture) {
++			u32 offset_lo, offset_hi;
+ 			struct DecodedPictureBuffer *p_Dpb =
+ 				&p_H264_Dpb->mDPB;
+ 			struct StorablePicture *p =
+@@ -5758,11 +5770,12 @@ int h264_slice_header_process(struct h264_dpb_stru *p_H264_Dpb)
+ 				p_H264_Dpb->mVideo.dec_picture);
+ #if 1
+ 			/* rain */
+-			p_H264_Dpb->mVideo.dec_picture->offset_delimiter_lo  =
++			offset_lo  =
+ 			p_H264_Dpb->dpb_param.l.data[OFFSET_DELIMITER_LO];
+-			p_H264_Dpb->mVideo.dec_picture->offset_delimiter_hi  =
++			offset_hi  =
+ 			p_H264_Dpb->dpb_param.l.data[OFFSET_DELIMITER_HI];
+-
++			p_H264_Dpb->mVideo.dec_picture->offset_delimiter =
++				(offset_lo	| offset_hi << 16);
+ 			p_H264_Dpb->mVideo.dec_picture->buf_spec_num  = -1;
+ 			p_H264_Dpb->mVideo.dec_picture->
+ 				colocated_buf_index = -1;
+diff --git a/drivers/frame_provider/decoder/h264_multi/h264_dpb.h b/drivers/frame_provider/decoder/h264_multi/h264_dpb.h
+index 222113f..39755bd 100644
+--- a/drivers/frame_provider/decoder/h264_multi/h264_dpb.h
++++ b/drivers/frame_provider/decoder/h264_multi/h264_dpb.h
+@@ -697,10 +697,7 @@ struct StorablePicture {
+ 	char listXsize[MAX_NUM_SLICES][2];
+ 	struct StorablePicture **listX[MAX_NUM_SLICES][2];
+ 	int         layer_id;
+-
+-	int offset_delimiter_lo;
+-	int offset_delimiter_hi;
+-
++	u32 	       offset_delimiter;
+ 	u32         pts;
+ 	u64         pts64;
+ 	u64         timestamp;
+@@ -777,7 +774,7 @@ struct FrameStore {
+ 	int       anchor_pic_flag[2];
+ #endif
+ 	int       layer_id;
+-
++	u32 	  offset_delimiter;
+ 	u32       pts;
+ 	u64       pts64;
+ 	u64       timestamp;
+@@ -884,6 +881,7 @@ struct h264_dpb_stru {
+ 	unsigned int dec_dpb_status;
+ 	unsigned char buf_alloc_fail;
+ 	unsigned int dpb_error_flag;
++	unsigned int origin_max_reference;
+ 	unsigned int first_insert_frame;
+ 	int first_output_poc;
+ };
+diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+index 29732fd..921d46f 100644
+--- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
++++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+@@ -727,7 +727,7 @@ struct vdec_h264_hw_s {
+ 	u32 first_pts;
+ 	u64 first_pts64;
+ 	bool first_pts_cached;
+-
++	u64 last_pts64;
+ #if 0
+ 	void *sei_data_buffer;
+ 	dma_addr_t sei_data_buffer_phys;
+@@ -906,6 +906,10 @@ static int is_oversize(int w, int h)
+ 	return false;
+ }
+ 
++static void vmh264_udc_fill_vpts(struct vdec_h264_hw_s *hw,
++						int frame_type,
++						u32 vpts,
++						u32 vpts_valid);
+ static int  compute_losless_comp_body_size(int width,
+ 				int height, int bit_depth_10);
+ static int  compute_losless_comp_header_size(int width, int height);
+@@ -2499,7 +2503,24 @@ int prepare_display_buf(struct vdec_s *vdec, struct FrameStore *frame)
+ 				__func__, frame->frame_num, frame->is_used);
+ 			frame->data_flag |= ERROR_FLAG;
+ 	}
+-
++	if (vdec_stream_based(vdec) && !(frame->data_flag & NODISP_FLAG)) {
++		if ((pts_lookup_offset_us64(PTS_TYPE_VIDEO,
++			frame->offset_delimiter, &frame->pts, &frame->frame_size,
++			0, &frame->pts64) == 0)) {
++			hw->last_pts64 = frame->pts64;
++			hw->last_pts = frame->pts;
++		} else {
++			frame->pts64 = hw->last_pts64 +DUR2PTS(hw->frame_dur) ;
++			frame->pts = hw->last_pts + DUR2PTS(hw->frame_dur);
 +		}
++		dpb_print(DECODE_ID(hw), PRINT_FLAG_VDEC_STATUS,
++		"%s error= 0x%x poc = %d  offset= 0x%x pts= 0x%x last_pts =0x%x  pts64 = %lld  last_pts64= %lld  duration = %d\n",
++		__func__, (frame->data_flag & ERROR_FLAG), frame->poc,
++		frame->offset_delimiter, frame->pts,hw->last_pts,
++		frame->pts64, hw->last_pts64, hw->frame_dur);
++		hw->last_pts64 = frame->pts64;
++		hw->last_pts = frame->pts;
++	}
+ 	if ((frame->data_flag & NODISP_FLAG) ||
+ 		(frame->data_flag & NULL_FLAG) ||
+ 		((!hw->send_error_frame_flag) &&
+@@ -4503,6 +4524,7 @@ static int vh264_set_params(struct vdec_h264_hw_s *hw,
+ 		reg_val = param4;
+ 		level_idc = reg_val & 0xff;
+ 		max_reference_size = (reg_val >> 8) & 0xff;
++		hw->dpb.origin_max_reference = max_reference_size;
+ 		dpb_print(DECODE_ID(hw), 0,
+ 			"mb height/widht/total: %x/%x/%x level_idc %x max_ref_num %x\n",
+ 			mb_height, mb_width, mb_total,
+@@ -4527,17 +4549,6 @@ static int vh264_set_params(struct vdec_h264_hw_s *hw,
+ 			dpb_print(DECODE_ID(hw), 0,
+ 			"set reorder_pic_num to %d\n",
+ 			hw->dpb.reorder_pic_num);
+-		}else
+-		{
+-			if (!hw->first_head_check_flag && level_idc == 21 &&
+-				hw->frame_width == 32 && hw->frame_height == 32 &&
+-				max_reference_size == 0 && hw->dpb.reorder_pic_num >
+-				MAX_VF_BUF_NUM) {
+-				dpb_print(DECODE_ID(hw), 0,
+-					"%s warning abnormal reorder_pic  %d\n", __func__, hw->dpb.reorder_pic_num);
+-				hw->first_head_check_flag = 1;
+-				return -1;
+-			}
+ 		}
  
- 		if (interlace_enable == 0 || hevc->m_ins_flag)
- 			hevc->interlace_flag = 0;
-@@ -7290,14 +7295,17 @@ static int parse_sei(struct hevc_state_s *hevc,
- 		if (p+payload_size <= sei_buf+size) {
- 			switch (payload_type) {
- 			case SEI_PicTiming:
--				p_sei = p;
--				hevc->curr_pic_struct = (*p_sei >> 4)&0x0f;
--				pic->pic_struct = hevc->curr_pic_struct;
--				if (get_dbg_flag(hevc) &
--					H265_DEBUG_PIC_STRUCT) {
--					hevc_print(hevc, 0,
--					"parse result pic_struct = %d\n",
--					hevc->curr_pic_struct);
-+				if ((parser_sei_enable & 0x4) &&
-+					hevc->frame_field_info_present_flag) {
-+					p_sei = p;
-+					hevc->curr_pic_struct = (*p_sei >> 4)&0x0f;
-+					pic->pic_struct = hevc->curr_pic_struct;
-+					if (get_dbg_flag(hevc) &
-+						H265_DEBUG_PIC_STRUCT) {
-+						hevc_print(hevc, 0,
-+						"parse result pic_struct = %d\n",
-+						hevc->curr_pic_struct);
-+					}
+ 		active_buffer_spec_num =
+@@ -5277,11 +5288,6 @@ static void check_decoded_pic_error(struct vdec_h264_hw_s *hw)
+ 	}
+ }
+ 
+-static void vmh264_udc_fill_vpts(struct vdec_h264_hw_s *hw,
+-						int frame_type,
+-						u32 vpts,
+-						u32 vpts_valid);
+-
+ static irqreturn_t vh264_isr_thread_fn(struct vdec_s *vdec, int irq)
+ {
+ 	int i;
+@@ -5720,14 +5726,12 @@ pic_done_proc:
+ 				pic->pts = 0;
+ 				pic->pts64 = 0;
+ #endif
+-			} else {
++		} else {
+ 				struct StorablePicture *pic =
+ 					p_H264_Dpb->mVideo.dec_picture;
+-				u32 offset = pic->offset_delimiter_lo |
+-					(pic->offset_delimiter_hi << 16);
+-				if (pts_lookup_offset_us64(PTS_TYPE_VIDEO,
+-					offset, &pic->pts, &pic->frame_size,
+-					0, &pic->pts64)) {
++				u32 offset = pic->offset_delimiter;
++				if (pts_pickout_offset_us64(PTS_TYPE_VIDEO,
++					offset, &pic->pts, 0, &pic->pts64)) {
+ 					pic->pts = 0;
+ 					pic->pts64 = 0;
+ #ifdef MH264_USERDATA_ENABLE
+@@ -5742,7 +5746,8 @@ pic_done_proc:
+ 						pic->pts, 1);
+ #endif
  				}
- 				break;
- 			case SEI_UserDataITU_T_T35:
-diff --git a/firmware/video_ucode.bin b/firmware/video_ucode.bin
-old mode 100755
-new mode 100644
-index 9ef34f2..ffbccce
-Binary files a/firmware/video_ucode.bin and b/firmware/video_ucode.bin differ
+-			}
++
++	}
+ 			mutex_unlock(&hw->chunks_mutex);
+ 			check_decoded_pic_error(hw);
+ #ifdef ERROR_HANDLE_TEST
+@@ -7708,8 +7713,12 @@ static void vh264_work(struct work_struct *work)
+ 		u32 param4 = READ_VREG(AV_SCRATCH_B);
+ 		if (vh264_set_params(hw, param1,
+ 			param2, param3, param4) < 0) {
+-				goto result_done;
+-			}
++			WRITE_VREG(AV_SCRATCH_0, (hw->max_reference_size<<24) |
++			(hw->dpb.mDPB.size<<16) |
++			(hw->dpb.mDPB.size<<8));
++			start_process_time(hw);
++			return;
++		}
+ 	} else
+ 	if (((hw->dec_result == DEC_RESULT_GET_DATA) ||
+ 		(hw->dec_result == DEC_RESULT_GET_DATA_RETRY))
