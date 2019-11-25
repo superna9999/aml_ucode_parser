@@ -1,33 +1,7 @@
-commit e9513c4188d94011f65232c697baf36208c3042b
-Author: renjiang.han <renjiang.han@amlogic.com>
-Date:   Mon Apr 8 15:16:48 2019 +0800
+commit b19bbc28d29f6473a78f1a5d9bdb167545ecc13e
+Merge: e9513c4 a8f62ee
+Author: Hui Zhang <hui.zhang@amlogic.com>
+Date:   Mon Apr 8 02:04:59 2019 -0700
 
-    vdec: remove ppmgr [1/1]
-    
-    PD#SWPL-6794
-    
-    Problem:
-    ppmgr cannot receive amlvideo.
-    
-    Solution:
-    remove ppmgr.
-    
-    Verify:
-    On S922x
-    
-    Change-Id: I79eae25e11a03203ffc1aad732bc50064e982e30
-    Signed-off-by: renjiang.han <renjiang.han@amlogic.com>
+    Merge "media_module: mh264/h265/avs2 [2/2]" into amlogic-4.9-dev
 
-diff --git a/drivers/frame_provider/decoder/utils/vdec.c b/drivers/frame_provider/decoder/utils/vdec.c
-index f62b76a..c3d1e08 100644
---- a/drivers/frame_provider/decoder/utils/vdec.c
-+++ b/drivers/frame_provider/decoder/utils/vdec.c
-@@ -1885,7 +1885,7 @@ s32 vdec_init(struct vdec_s *vdec, int is_4k)
- 			} else {
- 				snprintf(vdec->vfm_map_chain, VDEC_MAP_NAME_SIZE,
- 					"%s %s", vdec->vf_provider_name,
--					"amlvideo ppmgr deinterlace amvideo");
-+					"amlvideo deinterlace amvideo");
- 			}
- 			snprintf(vdec->vfm_map_id, VDEC_MAP_NAME_SIZE,
- 				"vdec-map-%d", vdec->id);
