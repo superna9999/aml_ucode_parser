@@ -1,92 +1,62 @@
-commit 54afe6646a8a9fbc7a16eab651bc2217502f77fe
-Author: shihong.zheng <shihong.zheng@amlogic.com>
-Date:   Mon Apr 15 15:42:08 2019 +0800
+commit 421736244a366a41dd3b2b422d20546d6034e4ba
+Author: joy rao <joy.rao@amlogic.com>
+Date:   Thu Mar 28 17:01:22 2019 +0800
 
-    mmpeg12: fixed closed caption disorder. [1/1]
+    vdec: add force no-secure even process drmmode for vmx [1/1]
     
-    PD#SWPL-4186
+    PD#SWPL-1822
     
     Problem:
-    mpeg2 display cc abnormal.
+    Usually in drmmode VDEC is allowed only can access secure.
+    vmx ultra hls is played in  drmmode and uses hw demux. Hw
+    demux will parse es data to nosecure. Then VDEC will read invalid data
+    and decoding failed.
     
     Solution:
-    drop old cc data when dec_result is DEC_RESULT_AGAIN.
+    Force setup no-secure when vmx hls is played.
     
     Verify:
-    x301
+    S905d
     
-    Change-Id: I88d25d1defb6b10cbf5790ab8691e9a95c58e510
-    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
+    Change-Id: I5771ecb403a71bc6ebced5c485de40e4583561a5
+    Signed-off-by: joy rao <joy.rao@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-index 842e5be..a8962dd 100644
---- a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-+++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-@@ -268,6 +268,8 @@ struct vdec_mpeg12_hw_s {
- 	u8 *user_data_buffer;
- 	int wait_for_udr_send;
- 	u32 ucode_cc_last_wp;
-+	u32 notify_ucode_cc_last_wp;
-+	u32 notify_data_cc_last_wp;
- 
- #ifdef DUMP_USER_DATA
- #define MAX_USER_DATA_SIZE		1572864
-@@ -807,6 +809,8 @@ static void user_data_ready_notify(struct vdec_mpeg12_hw_s *hw,
- 		hw->wait_for_udr_send = 0;
- 		hw->cur_ud_idx = 0;
- 	}
-+	hw->notify_ucode_cc_last_wp = hw->ucode_cc_last_wp;
-+	hw->notify_data_cc_last_wp = hw->userdata_info.last_wp;
- }
- 
- static int vmmpeg2_user_data_read(struct vdec_s *vdec,
-@@ -1052,7 +1056,6 @@ static void userdata_push_do_work(struct work_struct *work)
- 	struct vdec_mpeg12_hw_s *hw = container_of(work,
- 					struct vdec_mpeg12_hw_s, userdata_push_work);
- 
--
- 	memset(&meta_info, 0, sizeof(meta_info));
- 
- 	meta_info.duration = hw->frame_dur;
-@@ -1174,7 +1177,6 @@ static void userdata_push_do_work(struct work_struct *work)
- 		if (pdata >= hw->userdata_info.data_buf_end)
- 			pdata = hw->userdata_info.data_buf;
- 	}
--
- 	pcur_ud_rec = hw->ud_record + hw->cur_ud_idx;
- 
- 	pcur_ud_rec->meta_info = meta_info;
-@@ -1201,6 +1203,17 @@ static void userdata_push_do_work(struct work_struct *work)
- 
- 	hw->cur_ud_idx++;
- 	WRITE_VREG(AV_SCRATCH_J, 0);
-+
-+}
+diff --git a/drivers/frame_provider/decoder/utils/vdec.c b/drivers/frame_provider/decoder/utils/vdec.c
+index e5be3ae..7e8988f 100644
+--- a/drivers/frame_provider/decoder/utils/vdec.c
++++ b/drivers/frame_provider/decoder/utils/vdec.c
+@@ -99,6 +99,10 @@ static int no_powerdown;
+ static int parallel_decode = 1;
+ static int fps_detection;
+ static int fps_clear;
 +
 +
-+void userdata_pushed_drop(struct vdec_mpeg12_hw_s *hw)
-+{
-+	hw->userdata_info.last_wp = hw->notify_data_cc_last_wp;
-+	hw->ucode_cc_last_wp = hw->notify_ucode_cc_last_wp;
-+	hw->cur_ud_idx = 0;
-+	hw->wait_for_udr_send = 0;
++static int force_nosecure_even_drm;
 +
- }
+ static DEFINE_SPINLOCK(vdec_spin_lock);
  
+ #define HEVC_TEST_LIMIT 100
+@@ -2453,6 +2457,15 @@ void vdec_prepare_run(struct vdec_s *vdec, unsigned long mask)
+ 	if (!vdec_core_with_input(mask))
+ 		return;
  
-@@ -1251,6 +1264,7 @@ static irqreturn_t vmpeg12_isr_thread_fn(struct vdec_s *vdec, int irq)
- 		else {
- 			hw->dec_result = DEC_RESULT_AGAIN;
- 			vdec_schedule_work(&hw->work);
-+			userdata_pushed_drop(hw);
- 		}
- 		return IRQ_HANDLED;
- 	} else {
-@@ -1742,7 +1756,6 @@ static void vmpeg12_work(struct work_struct *work)
- 			vdec_schedule_work(&hw->work);
- 			return;
- 		}
--
- #ifdef AGAIN_HAS_THRESHOLD
- 	hw->next_again_flag = 1;
- #endif
++	if (secure && vdec_stream_based(vdec) && force_nosecure_even_drm)
++	{
++		/* Verimatrix ultra webclient (HLS) was played in drmmode and used hw demux. In drmmode VDEC only can access secure.
++		Now HW demux parsed es data to no-secure buffer. So the VDEC input was no-secure, VDEC playback failed. Forcing
++		use nosecure for verimatrix webclient HLS. If in the future HW demux can parse es data to secure buffer, make
++		VDEC r/w secure.*/
++		secure = 0;
++		//pr_debug("allow VDEC can access nosecure even in drmmode\n");
++	}
+ 	if (input->target == VDEC_INPUT_TARGET_VLD)
+ 		tee_config_device_secure(DMC_DEV_ID_VDEC, secure);
+ 	else if (input->target == VDEC_INPUT_TARGET_HEVC)
+@@ -4757,6 +4770,7 @@ module_param(debugflags, int, 0664);
+ module_param(parallel_decode, int, 0664);
+ module_param(fps_detection, int, 0664);
+ module_param(fps_clear, int, 0664);
++module_param(force_nosecure_even_drm, int, 0664);
+ 
+ module_param(frameinfo_flag, int, 0664);
+ MODULE_PARM_DESC(frameinfo_flag,
