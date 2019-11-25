@@ -1,30 +1,34 @@
-commit 54fa3a1f3d323ca85a3d8112f660dc42e07a724b
+commit 0172012cd6ccf343a9607bbf3dab90a425425ae3
 Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Wed Jul 10 10:38:59 2019 +0800
+Date:   Mon Jul 8 14:56:29 2019 +0800
 
-    vmh264: fix decoding error issue. [1/1]
+    vmh264: reset bufmgr when ref error happaned [1/1]
     
-    PD#OTT-4903
+    PD#SWPL-10897
     
     Problem:
-    there is a bug in vmh264 multi-slice in frame mode if
-    more slice in one package. decoder will return empty
-    when first slice not decoded completely. it will cause
-    this frame decode error happened
+    hot-plug dvb cable cause video decoder error and not
+    frame output
     
     Solution:
-    change code to return empty directly only in pic_done
-    ucode gerrit id: 79737
-    ucode change id: I00dc
-    ucode commit id: f44ba
+    enable bufmgr reset  when reference error happend
+    
     Verify:
     x301
     
-    Change-Id: If859f1f93481e431c00d78a80e2993fb8568b82d
+    Change-Id: I9cf1e39e5e3b1bf1f8f7de78877fda8f3a294b11
     Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
 
-diff --git a/firmware/video_ucode.bin b/firmware/video_ucode.bin
-old mode 100644
-new mode 100755
-index ca6cc7d..b966ce8
-Binary files a/firmware/video_ucode.bin and b/firmware/video_ucode.bin differ
+diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+index 952caee..6b871fa 100644
+--- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
++++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+@@ -265,7 +265,7 @@ static unsigned int i_only_flag;
+ 	bit[12] i_only when error happen
+ 	bit[13] 0: mark error according to last pic, 1: ignore mark error
+ */
+-static unsigned int error_proc_policy = 0xf36; /*0x1f14*/
++static unsigned int error_proc_policy = 0xfb6; /*0x1f14*/
+ 
+ 
+ /*
