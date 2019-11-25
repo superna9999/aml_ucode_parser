@@ -1,26 +1,200 @@
-commit c2806a1c829e8c70245f66e5f72a5b74434400ea
-Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Wed Feb 27 08:32:21 2019 +0800
+commit 6d2907a6cfb90e385bebc97b1c6a7c3ba60ab4c6
+Author: Lifeng Cao <lifeng.cao@amlogic.com>
+Date:   Sat Feb 16 19:31:26 2019 +0800
 
-    vh264: enable buf2 sw reset for GXTVBB and later [1/1]
+    media_module: frame rate policy back not check reset flag [1/1]
     
-    PD#TV-2461
+    PD#SWPL-4908
     
     Problem:
-    there is red and green clore line on screen sometimes with
-    h264 playback. never disapear untill codec reset
+    frame rate policy end hint check fr_hint_status and reset flag
+    When releasing hinted vdec the reset flag is true. Then reset flag
+    is false, hinted vdec has release at first time. In this case
+    vdec could not call end hint.
     
     Solution:
-    enable buf2 sw reset for GXTVBB and later
-    
-    ucode change id: I09cbe750a2bff2a2727e21879f7bee8b730113f7
+    hint check reset flag, end hint check fr_hint_status.
     
     Verify:
-    T962 or T968
+    X301
     
-    Change-Id: I7af8ea54b9eb2c1c25d502e13cf69f5a76631bd7
-    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
+    Change-Id: I0403182910eabba2620eae9b512533ca90c91dcf
+    Signed-off-by: Lifeng Cao <lifeng.cao@amlogic.com>
 
-diff --git a/firmware/video_ucode.bin b/firmware/video_ucode.bin
-index b700492..f35e55d 100755
-Binary files a/firmware/video_ucode.bin and b/firmware/video_ucode.bin differ
+diff --git a/drivers/frame_provider/decoder/avs/avs.c b/drivers/frame_provider/decoder/avs/avs.c
+index a82e9c7..0e9282c 100644
+--- a/drivers/frame_provider/decoder/avs/avs.c
++++ b/drivers/frame_provider/decoder/avs/avs.c
+@@ -1610,12 +1610,13 @@ static s32 vavs_init(void)
+ #endif
+ 
+ 	if (vavs_amstream_dec_info.rate != 0) {
+-		if (!is_reset)
++		if (!is_reset) {
+ 			vf_notify_receiver(PROVIDER_NAME,
+ 					VFRAME_EVENT_PROVIDER_FR_HINT,
+ 					(void *)((unsigned long)
+ 					vavs_amstream_dec_info.rate));
+-		fr_hint_status = VDEC_HINTED;
++			fr_hint_status = VDEC_HINTED;
++		}
+ 	} else
+ 		fr_hint_status = VDEC_NEED_HINT;
+ 
+@@ -1774,7 +1775,7 @@ static int amvdec_avs_remove(struct platform_device *pdev)
+ 	}
+ #endif
+ 	if (stat & STAT_VF_HOOK) {
+-		if (fr_hint_status == VDEC_HINTED && !is_reset)
++		if (fr_hint_status == VDEC_HINTED)
+ 			vf_notify_receiver(PROVIDER_NAME,
+ 				VFRAME_EVENT_PROVIDER_FR_END_HINT, NULL);
+ 		fr_hint_status = VDEC_NO_NEED_HINT;
+diff --git a/drivers/frame_provider/decoder/h264/vh264.c b/drivers/frame_provider/decoder/h264/vh264.c
+index db7f4af..74799ba 100644
+--- a/drivers/frame_provider/decoder/h264/vh264.c
++++ b/drivers/frame_provider/decoder/h264/vh264.c
+@@ -2743,11 +2743,12 @@ static s32 vh264_init(void)
+ #endif
+ 
+ 	if (frame_dur != 0) {
+-		if (!is_reset)
++		if (!is_reset) {
+ 			vf_notify_receiver(PROVIDER_NAME,
+ 					VFRAME_EVENT_PROVIDER_FR_HINT,
+ 					(void *)((unsigned long)frame_dur));
+-		fr_hint_status = VDEC_HINTED;
++			fr_hint_status = VDEC_HINTED;
++		}
+ 	} else
+ 		fr_hint_status = VDEC_NEED_HINT;
+ 
+@@ -2799,7 +2800,7 @@ static int vh264_stop(int mode)
+ 
+ 	if (stat & STAT_VF_HOOK) {
+ 		if (mode == MODE_FULL) {
+-			if (fr_hint_status == VDEC_HINTED && !is_reset)
++			if (fr_hint_status == VDEC_HINTED)
+ 				vf_notify_receiver(PROVIDER_NAME,
+ 					VFRAME_EVENT_PROVIDER_FR_END_HINT,
+ 					NULL);
+diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
+index 6845e1b..7cb34b0 100644
+--- a/drivers/frame_provider/decoder/h265/vh265.c
++++ b/drivers/frame_provider/decoder/h265/vh265.c
+@@ -10091,12 +10091,13 @@ static s32 vh265_init(struct hevc_state_s *hevc)
+ 	vf_notify_receiver(hevc->provider_name, VFRAME_EVENT_PROVIDER_START,
+ 				NULL);
+ 	if (hevc->frame_dur != 0) {
+-		if (!is_reset)
++		if (!is_reset) {
+ 			vf_notify_receiver(hevc->provider_name,
+ 					VFRAME_EVENT_PROVIDER_FR_HINT,
+ 					(void *)
+ 					((unsigned long)hevc->frame_dur));
+-		fr_hint_status = VDEC_HINTED;
++			fr_hint_status = VDEC_HINTED;
++		}
+ 	} else
+ 		fr_hint_status = VDEC_NEED_HINT;
+ #else
+@@ -10223,7 +10224,7 @@ static int vh265_stop(struct hevc_state_s *hevc)
+ 	}
+ 
+ 	if (hevc->stat & STAT_VF_HOOK) {
+-		if (fr_hint_status == VDEC_HINTED && !is_reset) {
++		if (fr_hint_status == VDEC_HINTED) {
+ 			vf_notify_receiver(hevc->provider_name,
+ 					VFRAME_EVENT_PROVIDER_FR_END_HINT,
+ 					NULL);
+diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
+index f758076..2100433 100644
+--- a/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
++++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
+@@ -1989,13 +1989,14 @@ static s32 vmpeg12_init(void)
+ 	vf_reg_provider(&vmpeg_vf_prov);
+ #endif
+ 	if (vmpeg12_amstream_dec_info.rate != 0) {
+-		if (!is_reset)
++		if (!is_reset) {
+ 			vf_notify_receiver(PROVIDER_NAME,
+ 				VFRAME_EVENT_PROVIDER_FR_HINT,
+ 				(void *)
+ 				((unsigned long)
+ 				vmpeg12_amstream_dec_info.rate));
+-		fr_hint_status = VDEC_HINTED;
++			fr_hint_status = VDEC_HINTED;
++		}
+ 	} else
+ 		fr_hint_status = VDEC_NEED_HINT;
+ 
+@@ -2105,7 +2106,7 @@ static int amvdec_mpeg12_remove(struct platform_device *pdev)
+ 	}
+ 
+ 	if (stat & STAT_VF_HOOK) {
+-		if (fr_hint_status == VDEC_HINTED && !is_reset)
++		if (fr_hint_status == VDEC_HINTED)
+ 			vf_notify_receiver(PROVIDER_NAME,
+ 				VFRAME_EVENT_PROVIDER_FR_END_HINT, NULL);
+ 		fr_hint_status = VDEC_NO_NEED_HINT;
+diff --git a/drivers/frame_provider/decoder/mpeg4/vmpeg4.c b/drivers/frame_provider/decoder/mpeg4/vmpeg4.c
+index 56351f7..a930e84 100644
+--- a/drivers/frame_provider/decoder/mpeg4/vmpeg4.c
++++ b/drivers/frame_provider/decoder/mpeg4/vmpeg4.c
+@@ -1088,13 +1088,14 @@ static s32 vmpeg4_init(void)
+ 	vf_reg_provider(&vmpeg_vf_prov);
+ #endif
+ 	if (vmpeg4_amstream_dec_info.rate != 0) {
+-		if (!is_reset)
++		if (!is_reset) {
+ 			vf_notify_receiver(PROVIDER_NAME,
+ 						VFRAME_EVENT_PROVIDER_FR_HINT,
+ 						(void *)
+ 						((unsigned long)
+ 						vmpeg4_amstream_dec_info.rate));
+-		fr_hint_status = VDEC_HINTED;
++			fr_hint_status = VDEC_HINTED;
++		}
+ 	} else
+ 		fr_hint_status = VDEC_NEED_HINT;
+ 
+@@ -1167,7 +1168,7 @@ static int amvdec_mpeg4_remove(struct platform_device *pdev)
+ 	}
+ 
+ 	if (stat & STAT_VF_HOOK) {
+-		if (fr_hint_status == VDEC_HINTED && !is_reset)
++		if (fr_hint_status == VDEC_HINTED)
+ 			vf_notify_receiver(PROVIDER_NAME,
+ 				VFRAME_EVENT_PROVIDER_FR_END_HINT, NULL);
+ 		fr_hint_status = VDEC_NO_NEED_HINT;
+diff --git a/drivers/frame_provider/decoder/utils/vdec.c b/drivers/frame_provider/decoder/utils/vdec.c
+index b7b0dd4..97ffdf2 100644
+--- a/drivers/frame_provider/decoder/utils/vdec.c
++++ b/drivers/frame_provider/decoder/utils/vdec.c
+@@ -1862,13 +1862,14 @@ s32 vdec_init(struct vdec_s *vdec, int is_4k)
+ 
+ 		if (vdec_core->hint_fr_vdec == vdec) {
+ 			if (p->sys_info->rate != 0) {
+-				if (!vdec->is_reset)
++				if (!vdec->is_reset) {
+ 					vf_notify_receiver(p->vf_provider_name,
+ 						VFRAME_EVENT_PROVIDER_FR_HINT,
+ 						(void *)
+ 						((unsigned long)
+ 						p->sys_info->rate));
+-				vdec->fr_hint_state = VDEC_HINTED;
++					vdec->fr_hint_state = VDEC_HINTED;
++				}
+ 			} else {
+ 				vdec->fr_hint_state = VDEC_NEED_HINT;
+ 			}
+@@ -1909,8 +1910,7 @@ void vdec_release(struct vdec_s *vdec)
+ 	if (vdec->vframe_provider.name) {
+ 		if (!vdec_single(vdec)) {
+ 			if (vdec_core->hint_fr_vdec == vdec
+-			&& vdec->fr_hint_state == VDEC_HINTED
+-			&& !vdec->is_reset)
++			&& vdec->fr_hint_state == VDEC_HINTED)
+ 				vf_notify_receiver(
+ 					vdec->vf_provider_name,
+ 					VFRAME_EVENT_PROVIDER_FR_END_HINT,
