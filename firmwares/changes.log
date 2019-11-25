@@ -1,37 +1,53 @@
-commit a0f34e4118548b843ec45793ee045aa8da8cc2cb
-Author: Conglin Guo <conglin.guo@amlogic.com>
-Date:   Mon Mar 11 19:12:55 2019 +0800
+commit bce374b6e36ec538a5d3e2f6ba5a2fde4ad2634b
+Author: shihong.zheng <shihong.zheng@amlogic.com>
+Date:   Wed Mar 20 10:13:14 2019 +0800
 
-    media_modules: g12b:Distinguish g12b vera verb [1/1]
+    vc1: oversize vc1 streams limit. [1/1]
     
-    PD#SWPL-5259
+    PD#TV-3303
     
     Problem:
-    Distinguish g12b  ver b ver a.
+    played vc1 oversize stream cause sys no response.
     
     Solution:
-    Distinguish g12b  ver b ver a.
+    limit oversize vc1 stream.
     
     Verify:
-    g12a vera verb
+    x301
     
-    Change-Id: I9ae2890384d245933fcccce6d574366714599b25
-    Signed-off-by: Conglin Guo <conglin.guo@amlogic.com>
+    Change-Id: Ifc75c1025b2bd81642b5659feffdd42111a286d8
+    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
 
-diff --git a/drivers/common/chips/decoder_cpu_ver_info.c b/drivers/common/chips/decoder_cpu_ver_info.c
-index 36b594a..c869df2 100644
---- a/drivers/common/chips/decoder_cpu_ver_info.c
-+++ b/drivers/common/chips/decoder_cpu_ver_info.c
-@@ -141,6 +141,12 @@ static void initial_cpu_id(void)
- 	{
- 		cpu_ver_id = (enum AM_MESON_CPU_MAJOR_ID)get_cpu_type();
- 	}
-+
-+	if (AM_MESON_CPU_MAJOR_ID_G12B == cpu_ver_id)
-+	{
-+		if (is_meson_rev_b())
-+		cpu_ver_id = AM_MESON_CPU_MAJOR_ID_TL1;
-+	}
- }
+diff --git a/drivers/frame_provider/decoder/vc1/vvc1.c b/drivers/frame_provider/decoder/vc1/vvc1.c
+index 86f171a..d5bbfe7 100644
+--- a/drivers/frame_provider/decoder/vc1/vvc1.c
++++ b/drivers/frame_provider/decoder/vc1/vvc1.c
+@@ -54,6 +54,8 @@
+ #define NV21
+ #endif
  
- enum AM_MESON_CPU_MAJOR_ID get_cpu_major_id(void)
++#define VC1_MAX_SUPPORT_SIZE (1920*1088)
++
+ #define I_PICTURE   0
+ #define P_PICTURE   1
+ #define B_PICTURE   2
+@@ -1143,9 +1145,18 @@ static int amvdec_vc1_probe(struct platform_device *pdev)
+ 		return -EFAULT;
+ 	}
+ 
+-	if (pdata->sys_info)
++	if (pdata->sys_info) {
+ 		vvc1_amstream_dec_info = *pdata->sys_info;
+ 
++		if ((vvc1_amstream_dec_info.height != 0) &&
++			(vvc1_amstream_dec_info.width >
++			(VC1_MAX_SUPPORT_SIZE/vvc1_amstream_dec_info.height))) {
++			pr_info("amvdec_vc1: over size, unsupport: %d * %d\n",
++				vvc1_amstream_dec_info.width,
++				vvc1_amstream_dec_info.height);
++			return -EFAULT;
++		}
++	}
+ 	pdata->dec_status = vvc1_dec_status;
+ 	pdata->set_isreset = vvc1_set_isreset;
+ 	is_reset = 0;
