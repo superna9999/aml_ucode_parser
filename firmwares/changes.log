@@ -1,79 +1,144 @@
-commit 8deb34495ce1381aee3ecbccca50c14935576efe
+commit 3d58646ade660e8505249cf37caaf11df89d887e
 Author: Nanxin Qin <nanxin.qin@amlogic.com>
-Date:   Sun Jun 23 02:20:32 2019 +0800
+Date:   Mon Jun 24 13:20:18 2019 +0800
 
-    vp9: fixed vp9 4k playback crash on the tl1. [1/1]
+    vp9: fixed issue of the width or height oversize for vp9. [1/1]
     
-    PD#TV-7024
+    PD#OTT-4780
     
     Problem:
-    vp9 4k playback cause to system halt.
+    the width or height abnomal cause to cts failed.
     
     Solution:
-    1. add seg_map to the struct workbuff of 8k.
-    2. fixed issue of use about container_of.
+    fixed issue of the width or height oversize for vp9.
     
     Verify:
     x301
     
-    Change-Id: I75ee2176f3b5ff9808679045df9837ebfaa6673d
+    Change-Id: Ie2f53863b64a0deeff02a52b41223fe2466f9b89
     Signed-off-by: Nanxin Qin <nanxin.qin@amlogic.com>
 
 diff --git a/drivers/frame_provider/decoder/vp9/vvp9.c b/drivers/frame_provider/decoder/vp9/vvp9.c
-index 8ee43a6..75f42a0 100644
+index 75f42a0..a1d8b12 100644
 --- a/drivers/frame_provider/decoder/vp9/vvp9.c
 +++ b/drivers/frame_provider/decoder/vp9/vvp9.c
-@@ -3144,6 +3144,10 @@ static struct BuffInfo_s amvvp9_workbuff_spec[WORK_BUF_SPEC_NUM] = {
- 		.dblk_data = {
- 			.buf_size = 0x80000*2,
- 		},
-+		.seg_map = {
-+			/*4096x2304/64/64 *24 = 0xd800 Bytes*/
-+			.buf_size = 0xd800*4,
-+		},
- 		.mmu_vbh = {
- 			.buf_size = 0x5000*2, //2*16*(more than 2304)/4, 4K
- 		},
-@@ -8121,14 +8125,13 @@ static irqreturn_t vvp9_isr(int irq, void *data)
- static void vp9_set_clk(struct work_struct *work)
+@@ -1178,6 +1178,42 @@ struct VP9Decoder_s {
+ 	struct vframe_qos_s vframe_qos;
+ };
+ 
++static int vp9_print(struct VP9Decoder_s *pbi,
++	int flag, const char *fmt, ...)
++{
++#define HEVC_PRINT_BUF		256
++	unsigned char buf[HEVC_PRINT_BUF];
++	int len = 0;
++
++	if (pbi == NULL ||
++		(flag == 0) ||
++		(debug & flag)) {
++		va_list args;
++
++		va_start(args, fmt);
++		if (pbi)
++			len = sprintf(buf, "[%d]", pbi->index);
++		vsnprintf(buf + len, HEVC_PRINT_BUF - len, fmt, args);
++		pr_debug("%s", buf);
++		va_end(args);
++	}
++	return 0;
++}
++
++static int is_oversize(int w, int h)
++{
++	int max = (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1)?
++		MAX_SIZE_8K : MAX_SIZE_4K;
++
++	if (w <= 0 || h <= 0)
++		return true;
++
++	if (h != 0 && (w > max / h))
++		return true;
++
++	return false;
++}
++
+ static int v4l_get_fb(struct aml_vcodec_ctx *ctx, struct vdec_fb **out)
  {
- 	struct VP9Decoder_s *pbi = container_of(work,
--		struct VP9Decoder_s, work);
-+		struct VP9Decoder_s, set_clk_work);
-+	int fps = 96000 / pbi->frame_dur;
+ 	int ret = 0;
+@@ -1242,6 +1278,11 @@ static int setup_frame_size(
  
--		int fps = 96000 / pbi->frame_dur;
--
--		if (hevc_source_changed(VFORMAT_VP9,
--			frame_width, frame_height, fps) > 0)
--			pbi->saved_resolution = frame_width *
--			frame_height * fps;
-+	if (hevc_source_changed(VFORMAT_VP9,
-+		frame_width, frame_height, fps) > 0)
-+		pbi->saved_resolution = frame_width *
-+		frame_height * fps;
- }
- 
- static void vvp9_put_timer_func(unsigned long arg)
-@@ -10116,21 +10119,6 @@ static int ammvdec_vp9_probe(struct platform_device *pdev)
- 			   pbi->buf_size);
+ 	width = params->p.width;
+ 	height = params->p.height;
++	if (is_oversize(width, height)) {
++		vp9_print(pbi, 0, "%s, Error: Invalid frame size\n", __func__);
++		return -1;
++	}
++
+ 	/*vp9_read_frame_size(rb, &width, &height);*/
+ 	if (print_header_info)
+ 		pr_info(" * 16-bits w read : %d (width : %d)\n", width, height);
+@@ -1361,8 +1402,8 @@ static int setup_frame_size_with_refs(
+ 		 */
  	}
  
--	if (pdata->sys_info) {
--		pbi->vvp9_amstream_dec_info = *pdata->sys_info;
--		if ((unsigned long) pbi->vvp9_amstream_dec_info.param
--			& 0x08){
--			pbi->low_latency_flag = 1;
--		} else
--			pbi->low_latency_flag = low_latency_flag;
--	}
--	else {
--		pbi->vvp9_amstream_dec_info.width = 0;
--		pbi->vvp9_amstream_dec_info.height = 0;
--		pbi->vvp9_amstream_dec_info.rate = 30;
--		pbi->low_latency_flag = low_latency_flag;
--	}
+-	if (width <= 0 || height <= 0) {
+-		pr_err("Error: Invalid frame size\r\n");
++	if (is_oversize(width, height)) {
++		vp9_print(pbi, 0, "%s, Error: Invalid frame size\n", __func__);
+ 		return -1;
+ 	}
+ 
+@@ -1457,32 +1498,6 @@ static int setup_frame_size_with_refs(
+ 	return ret;
+ }
+ 
 -
- 	pbi->cma_dev = pdata->cma_dev;
- 	if (vvp9_init(pdata) < 0) {
- 		pr_info("\namvdec_vp9 init failed.\n");
+-
+-
+-
+-static int vp9_print(struct VP9Decoder_s *pbi,
+-	int flag, const char *fmt, ...)
+-{
+-#define HEVC_PRINT_BUF		256
+-	unsigned char buf[HEVC_PRINT_BUF];
+-	int len = 0;
+-
+-	if (pbi == NULL ||
+-		(flag == 0) ||
+-		(debug & flag)) {
+-		va_list args;
+-
+-		va_start(args, fmt);
+-		if (pbi)
+-			len = sprintf(buf, "[%d]", pbi->index);
+-		vsnprintf(buf + len, HEVC_PRINT_BUF - len, fmt, args);
+-		pr_debug("%s", buf);
+-		va_end(args);
+-	}
+-	return 0;
+-}
+-
+ static inline bool close_to(int a, int b, int m)
+ {
+ 	return (abs(a - b) < m) ? true : false;
+@@ -4749,20 +4764,6 @@ static int config_pic(struct VP9Decoder_s *pbi,
+ 	return ret;
+ }
+ 
+-static int is_oversize(int w, int h)
+-{
+-	int max = (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1)?
+-		MAX_SIZE_8K : MAX_SIZE_4K;
+-
+-	if (w < 0 || h < 0)
+-		return true;
+-
+-	if (h != 0 && (w > max / h))
+-		return true;
+-
+-	return false;
+-}
+-
+ static int vvp9_mmu_compress_header_size(struct VP9Decoder_s *pbi)
+ {
+ 	if ((get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1) &&
