@@ -1,78 +1,36 @@
-commit d04cb28ec7e71170a9f559a5fc88b5ff0bd5c39d
-Author: Gan Zhang <gan.zhang@amlogic.com>
-Date:   Mon Sep 2 17:58:54 2019 +0800
+commit 84bbaed7966b2e048ca8207d2001c1b5f2c7bcc8
+Author: Hui Zhang <hui.zhang@amlogic.com>
+Date:   Thu Sep 5 19:38:38 2019 +0800
 
-    aats: fix mpeg2 and avs frame check fail. [1/1]
+    vmh264: fix frame drop issue in nts [1/1]
     
-    PD#NONE
+    PD#SWPL-13465
     
     Problem:
-    On X301 platform, the avs code stream has random frame errors.
-    On AB301 platform, 64bit code mpeg2 flush size is small.
+    force di happaned when resolution changed,which
+    cause frame drop in nts
     
     Solution:
-    1.Flush dcache buffer is used to ensure the correctness of data to
-    solve the problem of random frame check error of avs code stream.
-    2.By changing the y and uv sizes of canvas, the frame calibration error
-    caused by mpeg2 code stream in 64-bit system due to canvas buffer can be solved.
+    disable force di in secure mode
     
     Verify:
-    x301,ab311
+    U212
     
-    Change-Id: I7017a2b6768e73b8335ea6785f0cb4aeb12f466f
-    Signed-off-by: Gan Zhang <gan.zhang@amlogic.com>
+    Change-Id: Ie19edacef07c46ac3eb39385b674a1d366c3c3c3
+    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/utils/frame_check.c b/drivers/frame_provider/decoder/utils/frame_check.c
-index b46bf85..95d2609 100644
---- a/drivers/frame_provider/decoder/utils/frame_check.c
-+++ b/drivers/frame_provider/decoder/utils/frame_check.c
-@@ -42,7 +42,7 @@
- #include <linux/highmem.h>
- #include <linux/page-flags.h>
- #include "../../../common/chips/decoder_cpu_ver_info.h"
+diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+index aa065e5..e9fedd0 100644
+--- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
++++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+@@ -2382,7 +2382,9 @@ static int check_force_interlace(struct vdec_h264_hw_s *hw,
+ 	struct FrameStore *frame)
+ {
+ 	int bForceInterlace = 0;
 -
-+#include <asm/cacheflush.h>
- 
- #define FC_ERROR	0x0
- 
-@@ -137,7 +137,7 @@ static int get_frame_size(struct pic_check_mgr_t *pic,
- 			canvas_get_height(canvasY(vf->canvas0Addr));
- 	} else {
- 		pic->canvas_w = vf->canvas0_config[0].width;
--		pic->canvas_h = vf->canvas0_config[1].height;
-+		pic->canvas_h = vf->canvas0_config[0].height;
- 	}
- 
- 	if ((pic->canvas_h < 1) || (pic->canvas_w < 1)) {
-@@ -382,6 +382,9 @@ static int memcpy_phy_to_virt(char *to_virt,
- 					__func__, (unsigned int)phy_from);
- 				return -1;
- 			}
-+			/*Fixed frame error in random position of avs code stream.
-+			Called in an interrupt.*/
-+			flush_dcache_page(phys_to_page(phy_from));
- 			/*
- 			codec_mm_dma_flush(vaddr,
- 				tmp_size, DMA_FROM_DEVICE);
-@@ -624,6 +627,9 @@ static int crc32_vmap_le(unsigned int *crc32,
- 					__func__, (unsigned int)phyaddr);
- 				return -1;
- 			}
-+			/*Fixed frame error in random position of avs code stream.
-+			Called in an interrupt.*/
-+			flush_dcache_page(phys_to_page(phyaddr));
- 			/*
- 			codec_mm_dma_flush(vaddr,
- 				tmp_size, DMA_FROM_DEVICE);
-@@ -897,9 +903,9 @@ int decoder_do_frame_check(struct vdec_s *vdec, struct vframe_s *vf)
- 			return -2;
- 		if ((mgr->y_vaddr) && (mgr->uv_vaddr)) {
- 			codec_mm_dma_flush(mgr->y_vaddr,
--				mgr->size_y, DMA_FROM_DEVICE);
-+				mgr->canvas_w * mgr->canvas_h, DMA_FROM_DEVICE);
- 			codec_mm_dma_flush(mgr->uv_vaddr,
--				mgr->size_uv, DMA_FROM_DEVICE);
-+				((mgr->canvas_w * mgr->canvas_h) >> 1), DMA_FROM_DEVICE);
- 		}
- 		if (mgr->enable & CRC_MASK)
- 			ret = do_check_nv21(mgr, vf);
++	/* no di in secure mode, disable force di */
++	if (vdec_secure(hw_to_vdec(hw)))
++		return 0;
+ 	if (frame->frame) {
+ 		if (frame->frame->coded_frame
+ 			&& !frame->frame->frame_mbs_only_flag) {
