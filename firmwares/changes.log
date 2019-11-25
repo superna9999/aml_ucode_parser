@@ -1,38 +1,39 @@
-commit 460b57949687329d5074e64f55dd47d1cef6093e
-Author: Nanxin Qin <nanxin.qin@amlogic.com>
-Date:   Wed Mar 13 16:07:11 2019 +0800
+commit 593fb827f63834e6b9475d25c80deac95858380f
+Author: peter wang <peter.wang@amlogic.com>
+Date:   Fri Mar 15 18:18:40 2019 +0800
 
-    decode: fixd the bug of the vdec add frame. [1/2]
+    vmh264: fix alloc memory failed on cts accuracy test [1/1]
     
-    PD#SWPL-4597
+    PD#SWPL-5281
     
     Problem:
-    1. Probabilistic full-screen display mosaic after seek 8K H265
-    2. the wrong of the write point caused to flush cache area is error.
+    test cts android.media.cts.DecodeAccuracyTest have failed cases
     
     Solution:
-    corrected the error of flush cache range.
+    disable mmu when using ionvideo
     
     Verify:
-    X301
+    verified on local
     
-    Change-Id: I946a488329d02bc21f40546ac7185818e3f2f3ff
-    Signed-off-by: Nanxin Qin <nanxin.qin@amlogic.com>
+    Change-Id: I41a0ec051810369a69f2a7dce29fb6a913593445
+    Signed-off-by: peter wang <peter.wang@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/utils/vdec_input.c b/drivers/frame_provider/decoder/utils/vdec_input.c
-index d70b4aa..f571bcf 100644
---- a/drivers/frame_provider/decoder/utils/vdec_input.c
-+++ b/drivers/frame_provider/decoder/utils/vdec_input.c
-@@ -72,10 +72,8 @@ static int copy_from_user_to_phyaddr(void *virts, const char __user *buf,
- 		if (copy_from_user(p, buf, size))
- 			return -EFAULT;
- 
--		if (pading) {
--			p += size;
--			memset(p, 0, pading);
--		}
-+		if (pading)
-+			memset(p + size, 0, pading);
- 
- 		codec_mm_dma_flush(p, size + pading, DMA_TO_DEVICE);
- 
+diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+index 88c86a9..fdd0a2b 100644
+--- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
++++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+@@ -7732,6 +7732,14 @@ static int ammvdec_h264_probe(struct platform_device *pdev)
+ 			(pdata->sys_info->height * pdata->sys_info->width
+ 			> 1920 * 1088))
+ 			hw->mmu_enable = 1;
++
++	if (hw->mmu_enable &&
++		(pdata->frame_base_video_path == FRAME_BASE_PATH_IONVIDEO)) {
++		hw->mmu_enable = 0;
++		pr_info("ionvideo needs disable mmu, path= %d \n",
++				pdata->frame_base_video_path);
++	}
++
+ 	if (ammvdec_h264_mmu_init(hw)) {
+ 		h264_free_hw_stru(&pdev->dev, (void *)hw);
+ 		pr_info("\nammvdec_h264 mmu alloc failed!\n");
