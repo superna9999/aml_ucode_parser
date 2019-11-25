@@ -1,83 +1,53 @@
-commit 3aa4502f6b3fe152e9131e8219de804680c0bbbb
-Author: Yinming Ding <yinming.ding@amlogic.com>
-Date:   Thu Feb 14 14:10:01 2019 +0800
+commit 78532a937abbee8070a216670e4d0446e73c9030
+Author: Rui Wang <rui.wang@amlogic.com>
+Date:   Mon Feb 25 15:31:10 2019 +0800
 
-    device: amlogic: Add config for dtv tuner si2169 [3/3]
+    dvb: add interface of clearing audio and video pid [1/1]
     
-    PD#SWPL-2763
+    PD#TV-2151
     
     Problem:
-    Add config for dtv tuner si2169
+    no user mode clearing interface for audio and video pid
     
     Solution:
-    Add config for dtv tuner si2169
+    add interface of clearing audio and video pid
     
     Verify:
-    Verified by R314
+    Verify android p at x301
     
-    Change-Id: Ib196414949456281c1c1b87140f432f6a56b913b
-    Signed-off-by: Yinming Ding <yinming.ding@amlogic.com>
+    Change-Id: Ie619e49bea9f3ef358dbf4154d9f1181bd99dc43
+    Signed-off-by: Rui Wang <rui.wang@amlogic.com>
 
-diff --git a/drivers/stream_input/parser/hw_demux/aml_demod_gt.h b/drivers/stream_input/parser/hw_demux/aml_demod_gt.h
-index 1df0914..3a5b3b0 100644
---- a/drivers/stream_input/parser/hw_demux/aml_demod_gt.h
-+++ b/drivers/stream_input/parser/hw_demux/aml_demod_gt.h
-@@ -81,4 +81,9 @@ static inline struct dvb_frontend* atbm8881_attach (const struct amlfe_demod_con
- 	return NULL;
- }
- 
-+static inline struct dvb_frontend* si2168_attach (const struct amlfe_demod_config *config)
-+{
-+	return NULL;
-+}
-+
- #endif	/*__AML_DEMOD_GT_H__*/
 diff --git a/drivers/stream_input/parser/hw_demux/aml_dvb.c b/drivers/stream_input/parser/hw_demux/aml_dvb.c
-index ee903f5..1c85409 100644
+index 1c85409..f737b21 100644
 --- a/drivers/stream_input/parser/hw_demux/aml_dvb.c
 +++ b/drivers/stream_input/parser/hw_demux/aml_dvb.c
-@@ -63,6 +63,7 @@ typedef enum __demod_type
- 	DEMOD_INVALID,
- 	DEMOD_INTERNAL,
- 	DEMOD_ATBM8881,
-+	DEMOD_SI2168,
- 	DEMOD_MAX_NUM
- }demod_type;
+@@ -781,6 +781,20 @@ static ssize_t stb_show_source(struct class *class,
+ 	return ret;
+ }
  
-@@ -2201,6 +2202,16 @@ static int aml_dvb_probe(struct platform_device *pdev)
- 						s_demod_type[i] = DEMOD_ATBM8881;
- 					}
- 				}
-+				if (!strcmp(name,"Si2168")) {
-+					frontend[i] = dvb_attach(si2168_attach,&config);
-+					if (frontend[i] == NULL) {
-+						pr_error("dvb attach demod error\n");
-+						goto error_fe;
-+					} else {
-+						pr_inf("dtvdemod attatch sucess\n");
-+						s_demod_type[i] = DEMOD_SI2168;
-+					}
-+				}
- 				if (frontend[i]) {
- 					ret = dvb_register_frontend(&advb->dvb_adapter, frontend[i]);
- 					if (ret) {
-@@ -2221,6 +2232,10 @@ error_fe:
- 				dvb_detach(atbm8881_attach);
- 				frontend[i] = NULL;
- 				s_demod_type[i] = DEMOD_INVALID;
-+			}else if (s_demod_type[i] == DEMOD_SI2168) {
-+				dvb_detach(si2168_attach);
-+				frontend[i] = NULL;
-+				s_demod_type[i] = DEMOD_INVALID;
- 			}
- 			if (s_tuner_type[i] == TUNER_SI2151) {
- 				dvb_detach(si2151_attach);
-@@ -2272,6 +2287,8 @@ static int aml_dvb_remove(struct platform_device *pdev)
- 			dvb_detach(aml_dtvdm_attach);
- 		}else if (s_demod_type[i] == DEMOD_ATBM8881) {
- 			dvb_detach(atbm8881_attach);
-+		}else if (s_demod_type[i] == DEMOD_SI2168) {
-+			dvb_detach(si2168_attach);
- 		}
- 		if (s_tuner_type[i] == TUNER_SI2151) {
- 			dvb_detach(si2151_attach);
++static ssize_t stb_clear_av(struct class *class,
++				struct class_attribute *attr, const char *buf,
++				size_t size)
++{
++	if (!strncmp("1", buf, 1)) {
++		aml_tsdemux_set_vid(0x1fff);
++		aml_tsdemux_set_aid(0x1fff);
++		aml_tsdemux_set_sid(0x1fff);
++		aml_tsdemux_set_pcrid(0x1fff);
++	}
++
++	return size;
++}
++
+ /*Set the STB input source*/
+ static ssize_t stb_store_source(struct class *class,
+ 				struct class_attribute *attr, const char *buf,
+@@ -1700,6 +1714,7 @@ static struct class_attribute aml_stb_class_attrs[] = {
+ 	       NULL),
+ 	__ATTR(first_audio_pts, 0644, demux_show_first_audio_pts,
+ 	       NULL),
++	__ATTR(clear_av, 0644, NULL, stb_clear_av),
+ 
+ #define DSC_SOURCE_ATTR_DECL(i)\
+ 	__ATTR(dsc##i##_source,  0664,\
