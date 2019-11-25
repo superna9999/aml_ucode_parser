@@ -1,86 +1,103 @@
-commit 3004c81eac6b0603686c3a3ea0aed061b13bfcb5
-Author: Zhao Yi <zhao.yi@amlogic.com>
-Date:   Thu Apr 18 19:28:45 2019 +0800
+commit 0b6a7fae4efe2f17b0814facc528fded6d59ba24
+Author: shihong.zheng <shihong.zheng@amlogic.com>
+Date:   Wed Apr 17 10:21:23 2019 +0800
 
-    mh264: check I frame [1/1]
+    vdec: fix iptv vdec_sync_input error. [1/1]
     
-    PD#SWPL-7098
+    PD#IPTV-2248
     
     Problem:
-    frame's Slice type is not set
+    too many vdec_sync_input error while stream mode play
+    with frame mode at same time.
     
     Solution:
-    set slice type while a frame is decoded finished.
+    frame mode set a input ptr to VLD_MEM_VFIFO_RP, if it
+    do not restore the stream mode value, the input data
+    will be error and too many vdec_sync_input error. set
+    the vdec input restore to vdec_sync_input.
     
     Verify:
-    T962X_R311
+    S905L3
     
-    Change-Id: If024a3e49b6d5573a10f49e22e401f7d91399638
-    Signed-off-by: Zhao Yi <zhao.yi@amlogic.com>
+    Change-Id: I62c66c250f09680f8e792e63314b711ff925b9a1
+    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/h264_multi/h264_dpb.c b/drivers/frame_provider/decoder/h264_multi/h264_dpb.c
-index 2c90194..8008310 100644
---- a/drivers/frame_provider/decoder/h264_multi/h264_dpb.c
-+++ b/drivers/frame_provider/decoder/h264_multi/h264_dpb.c
-@@ -1509,6 +1509,7 @@ static void dpb_combine_field(struct h264_dpb_stru *p_H264_Dpb,
- 	fs->frame->buf_spec_num = fs->top_field->buf_spec_num;
- 	fs->frame->colocated_buf_index = fs->top_field->colocated_buf_index;
- 	fs->frame->data_flag = fs->top_field->data_flag;
-+	fs->frame->slice_type = fs->top_field->slice_type;
- 	if (fs->bottom_field)
- 		fs->frame->data_flag |= (fs->bottom_field->data_flag & 0xf0);
- #endif
-@@ -1613,6 +1614,7 @@ static void insert_picture_in_dpb(struct h264_dpb_stru *p_H264_Dpb,
- 	fs->buf_spec_num = p->buf_spec_num;
- 	fs->colocated_buf_index = p->colocated_buf_index;
- #endif
-+	p->slice_type = p_H264_Dpb->mSlice.slice_type;
- 	switch (p->structure) {
- 	case FRAME:
- 		fs->frame = p;
-diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-index 02c0489..4f04816 100644
---- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
-+++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-@@ -2426,6 +2426,17 @@ static void fill_frame_info(struct vdec_h264_hw_s *hw, struct FrameStore *frame)
- 	if (hw->frameinfo_enable)
- 		vdec_fill_frame_info(vframe_qos, 1);
+diff --git a/drivers/frame_provider/decoder/utils/vdec.c b/drivers/frame_provider/decoder/utils/vdec.c
+index 7e8988f..6492fc7 100644
+--- a/drivers/frame_provider/decoder/utils/vdec.c
++++ b/drivers/frame_provider/decoder/utils/vdec.c
+@@ -1520,12 +1520,74 @@ void vdec_clean_input(struct vdec_s *vdec)
  }
+ EXPORT_SYMBOL(vdec_clean_input);
+ 
 +
-+static int is_iframe(struct FrameStore *frame) {
++static int vdec_input_read_restore(struct vdec_s *vdec)
++{
++	struct vdec_input_s *input = &vdec->input;
 +
-+	if (frame->frame && frame->frame->slice_type == I_SLICE) {
-+		return 1;
++	if (!vdec_stream_based(vdec))
++		return 0;
++
++	if (!input->swap_valid) {
++		if (input->target == VDEC_INPUT_TARGET_VLD) {
++			WRITE_VREG(VLD_MEM_VIFIFO_START_PTR,
++				input->start);
++			WRITE_VREG(VLD_MEM_VIFIFO_END_PTR,
++				input->start + input->size - 8);
++			WRITE_VREG(VLD_MEM_VIFIFO_CURR_PTR,
++				input->start);
++			WRITE_VREG(VLD_MEM_VIFIFO_CONTROL, 1);
++			WRITE_VREG(VLD_MEM_VIFIFO_CONTROL, 0);
++
++			/* set to manual mode */
++			WRITE_VREG(VLD_MEM_VIFIFO_BUF_CNTL, 2);
++			WRITE_VREG(VLD_MEM_VIFIFO_RP, input->start);
++		} else if (input->target == VDEC_INPUT_TARGET_HEVC) {
++				WRITE_VREG(HEVC_STREAM_START_ADDR,
++					input->start);
++				WRITE_VREG(HEVC_STREAM_END_ADDR,
++					input->start + input->size);
++				WRITE_VREG(HEVC_STREAM_RD_PTR,
++					input->start);
++		}
++		return 0;
 +	}
++	if (input->target == VDEC_INPUT_TARGET_VLD) {
++		/* restore read side */
++		WRITE_VREG(VLD_MEM_SWAP_ADDR,
++			input->swap_page_phys);
++
++		/*swap active*/
++		WRITE_VREG(VLD_MEM_SWAP_CTL, 1);
++
++		/*wait swap busy*/
++		while (READ_VREG(VLD_MEM_SWAP_CTL) & (1<<7))
++			;
++
++		WRITE_VREG(VLD_MEM_SWAP_CTL, 0);
++	} else if (input->target == VDEC_INPUT_TARGET_HEVC) {
++		/* restore read side */
++		WRITE_VREG(HEVC_STREAM_SWAP_ADDR,
++			input->swap_page_phys);
++		WRITE_VREG(HEVC_STREAM_SWAP_CTRL, 1);
++
++		while (READ_VREG(HEVC_STREAM_SWAP_CTRL)
++			& (1<<7))
++			;
++		WRITE_VREG(HEVC_STREAM_SWAP_CTRL, 0);
++	}
++
 +	return 0;
 +}
 +
 +
-+
- int prepare_display_buf(struct vdec_s *vdec, struct FrameStore *frame)
+ int vdec_sync_input(struct vdec_s *vdec)
  {
- 	struct vdec_h264_hw_s *hw = (struct vdec_h264_hw_s *)vdec->private;
-@@ -2464,6 +2475,14 @@ int prepare_display_buf(struct vdec_s *vdec, struct FrameStore *frame)
- 			__func__, buffer_index,  frame->data_flag & ERROR_FLAG,
- 			frame->poc, hw->data_flag & ERROR_FLAG,
- 			error_proc_policy);
-+	if (frame->frame == NULL &&
-+			((frame->is_used == 1 && frame->top_field)
-+			|| (frame->is_used == 2 && frame->bottom_field))) {
-+			dpb_print(DECODE_ID(hw), PRINT_FLAG_ERRORFLAG_DBG,
-+				"%s Error  frame_num %d  used %d\n",
-+					frame->frame_num, frame->is_used);
-+			frame->data_flag |= ERROR_FLAG;
-+	}
+ 	struct vdec_input_s *input = &vdec->input;
+ 	u32 rp = 0, wp = 0, fifo_len = 0;
+ 	int size;
  
- 	if ((frame->data_flag & NODISP_FLAG) ||
- 		(frame->data_flag & NULL_FLAG) ||
-@@ -2511,7 +2530,7 @@ int prepare_display_buf(struct vdec_s *vdec, struct FrameStore *frame)
- 			return -1;
- 		}
- 		vf->duration_pulldown = 0;
--		if (!(frame->frame->slice_type == I_SLICE) && hw->unstable_pts) {
-+		if (!(is_iframe(frame)) && hw->unstable_pts) {
- 			vf->pts = 0;
- 			vf->pts_us64 = 0;
- 			vf->timestamp = 0;
++	vdec_input_read_restore(vdec);
+ 	vdec_sync_input_read(vdec);
+ 	vdec_sync_input_write(vdec);
+ 	if (input->target == VDEC_INPUT_TARGET_VLD) {
