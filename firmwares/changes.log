@@ -1,46 +1,78 @@
-commit 86f1c8fd9b07aa2396cbd8e4804a2d3958265184
-Author: Peng Yixin <yixin.peng@amlogic.com>
-Date:   Mon Jul 29 19:34:53 2019 +0800
+commit d04cb28ec7e71170a9f559a5fc88b5ff0bd5c39d
+Author: Gan Zhang <gan.zhang@amlogic.com>
+Date:   Mon Sep 2 17:58:54 2019 +0800
 
-    media_module: fixed gts h264 crash issue [1/1]
+    aats: fix mpeg2 and avs frame check fail. [1/1]
     
-    PD#SWPL-9611
+    PD#NONE
     
     Problem:
-    gts test crash.
-    Due to an internal scheduling problem with 264,
-    the state is unnormal, causeing kernel crash.
+    On X301 platform, the avs code stream has random frame errors.
+    On AB301 platform, 64bit code mpeg2 flush size is small.
     
     Solution:
-    Let it not exit the decoding schedule when
-    DEC_RESULT_CONFIG_PARAM logic in vh264_work.
+    1.Flush dcache buffer is used to ensure the correctness of data to
+    solve the problem of random frame check error of avs code stream.
+    2.By changing the y and uv sizes of canvas, the frame calibration error
+    caused by mpeg2 code stream in 64-bit system due to canvas buffer can be solved.
     
     Verify:
-    S805Y_P244
+    x301,ab311
     
-    Change-Id: I3019e88695aec9f6ca4f7e87a3bb3b67b921d672
-    Signed-off-by: Peng Yixin <yixin.peng@amlogic.com>
+    Change-Id: I7017a2b6768e73b8335ea6785f0cb4aeb12f466f
+    Signed-off-by: Gan Zhang <gan.zhang@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-index 39966d2..aa065e5 100644
---- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
-+++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-@@ -7740,13 +7740,13 @@ static void vh264_work(struct work_struct *work)
- 		u32 param3 = READ_VREG(AV_SCRATCH_6);
- 		u32 param4 = READ_VREG(AV_SCRATCH_B);
- 		if (vh264_set_params(hw, param1,
--			param2, param3, param4) < 0) {
--			WRITE_VREG(AV_SCRATCH_0, (hw->max_reference_size<<24) |
-+			param2, param3, param4) < 0)
-+			dpb_print(DECODE_ID(hw), 0, "set parameters error\n");
-+		WRITE_VREG(AV_SCRATCH_0, (hw->max_reference_size<<24) |
- 			(hw->dpb.mDPB.size<<16) |
- 			(hw->dpb.mDPB.size<<8));
--			start_process_time(hw);
--			return;
--		}
-+		start_process_time(hw);
-+		return;
- 	} else
- 	if (((hw->dec_result == DEC_RESULT_GET_DATA) ||
- 		(hw->dec_result == DEC_RESULT_GET_DATA_RETRY))
+diff --git a/drivers/frame_provider/decoder/utils/frame_check.c b/drivers/frame_provider/decoder/utils/frame_check.c
+index b46bf85..95d2609 100644
+--- a/drivers/frame_provider/decoder/utils/frame_check.c
++++ b/drivers/frame_provider/decoder/utils/frame_check.c
+@@ -42,7 +42,7 @@
+ #include <linux/highmem.h>
+ #include <linux/page-flags.h>
+ #include "../../../common/chips/decoder_cpu_ver_info.h"
+-
++#include <asm/cacheflush.h>
+ 
+ #define FC_ERROR	0x0
+ 
+@@ -137,7 +137,7 @@ static int get_frame_size(struct pic_check_mgr_t *pic,
+ 			canvas_get_height(canvasY(vf->canvas0Addr));
+ 	} else {
+ 		pic->canvas_w = vf->canvas0_config[0].width;
+-		pic->canvas_h = vf->canvas0_config[1].height;
++		pic->canvas_h = vf->canvas0_config[0].height;
+ 	}
+ 
+ 	if ((pic->canvas_h < 1) || (pic->canvas_w < 1)) {
+@@ -382,6 +382,9 @@ static int memcpy_phy_to_virt(char *to_virt,
+ 					__func__, (unsigned int)phy_from);
+ 				return -1;
+ 			}
++			/*Fixed frame error in random position of avs code stream.
++			Called in an interrupt.*/
++			flush_dcache_page(phys_to_page(phy_from));
+ 			/*
+ 			codec_mm_dma_flush(vaddr,
+ 				tmp_size, DMA_FROM_DEVICE);
+@@ -624,6 +627,9 @@ static int crc32_vmap_le(unsigned int *crc32,
+ 					__func__, (unsigned int)phyaddr);
+ 				return -1;
+ 			}
++			/*Fixed frame error in random position of avs code stream.
++			Called in an interrupt.*/
++			flush_dcache_page(phys_to_page(phyaddr));
+ 			/*
+ 			codec_mm_dma_flush(vaddr,
+ 				tmp_size, DMA_FROM_DEVICE);
+@@ -897,9 +903,9 @@ int decoder_do_frame_check(struct vdec_s *vdec, struct vframe_s *vf)
+ 			return -2;
+ 		if ((mgr->y_vaddr) && (mgr->uv_vaddr)) {
+ 			codec_mm_dma_flush(mgr->y_vaddr,
+-				mgr->size_y, DMA_FROM_DEVICE);
++				mgr->canvas_w * mgr->canvas_h, DMA_FROM_DEVICE);
+ 			codec_mm_dma_flush(mgr->uv_vaddr,
+-				mgr->size_uv, DMA_FROM_DEVICE);
++				((mgr->canvas_w * mgr->canvas_h) >> 1), DMA_FROM_DEVICE);
+ 		}
+ 		if (mgr->enable & CRC_MASK)
+ 			ret = do_check_nv21(mgr, vf);
