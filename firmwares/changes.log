@@ -1,251 +1,50 @@
-commit 9457f9af340b1766ec90a880f79a53b12a5416af
-Author: Nanxin Qin <nanxin.qin@amlogic.com>
-Date:   Mon May 27 00:24:55 2019 +0800
+commit 9d6acddf70a0b780f0d33dd32c60dcde6038ea7f
+Author: Peng Yixin <yixin.peng@amlogic.com>
+Date:   Tue May 28 20:55:57 2019 +0800
 
-    decode: default switch single to mult instance. [2/2]
+    media_module: CTS Test fail,wrong number of frames decode expect [1/1]
     
-    PD#SWPL-8648
+    PD#SWPL-9187
     
     Problem:
-    default switch single to mult instance.
+    CTS decoder Test fail, wrong number of frames decode expected
+    300, but was 297.
     
     Solution:
-    default switch single to mult instance.
+    the last three frames are not displayed because no decoding
+    scheduling after sending eos instruction. The problem is
+    solved by perform a decoding schedule after the eos
+    instruction is sent.
     
     Verify:
-    u212
+    verified on u212
     
-    Change-Id: I3e39492bb8155ede5fd9fef80e5b7ac5ec53ff5c
-    Signed-off-by: Nanxin Qin <nanxin.qin@amlogic.com>
+    Change-Id: I25ebec8b62eb9d9e314cdc1b1b4b7c131214c0db
+    Signed-off-by: Peng Yixin <yixin.peng@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/avs2/vavs2.c b/drivers/frame_provider/decoder/avs2/vavs2.c
-index dd7247b..3a3e515 100644
---- a/drivers/frame_provider/decoder/avs2/vavs2.c
-+++ b/drivers/frame_provider/decoder/avs2/vavs2.c
-@@ -6586,6 +6586,8 @@ static struct codec_profile_t amvdec_avs2_profile = {
- 	.profile = ""
- };
- 
-+static struct codec_profile_t amvdec_avs2_profile_mult;
-+
- static unsigned char get_data_check_sum
- 	(struct AVS2Decoder_s *dec, int size)
- {
-@@ -7522,7 +7524,6 @@ static int __init amvdec_avs2_driver_init_module(void)
- 	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1) {
- 		amvdec_avs2_profile.profile =
- 				"8k, 10bit, dwrite, compressed";
--		vcodec_profile_register(&amvdec_avs2_profile);
- 	} else if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_G12A) {
- 		if (vdec_is_support_4k())
- 			amvdec_avs2_profile.profile =
-@@ -7530,11 +7531,15 @@ static int __init amvdec_avs2_driver_init_module(void)
- 		else
- 			amvdec_avs2_profile.profile =
- 				"10bit, dwrite, compressed";
--		vcodec_profile_register(&amvdec_avs2_profile);
- 	} else {
- 		amvdec_avs2_profile.name = "avs2_unsupport";
- 	}
- 
-+	vcodec_profile_register(&amvdec_avs2_profile);
-+	amvdec_avs2_profile_mult = amvdec_avs2_profile;
-+	amvdec_avs2_profile_mult.name = "mavs2";
-+	vcodec_profile_register(&amvdec_avs2_profile_mult);
-+
- 	INIT_REG_NODE_CONFIGS("media.decoder", &avs2_node,
- 		"avs2", avs2_configs, CONFIG_FOR_RW);
- 
-diff --git a/drivers/frame_provider/decoder/h264/vh264_mvc.c b/drivers/frame_provider/decoder/h264/vh264_mvc.c
-index 5181a45..1f783e5 100644
---- a/drivers/frame_provider/decoder/h264/vh264_mvc.c
-+++ b/drivers/frame_provider/decoder/h264/vh264_mvc.c
-@@ -1673,6 +1673,8 @@ static struct codec_profile_t amvdec_hmvc_profile = {
- 	.name = "hmvc",
- 	.profile = ""
- };
-+static struct codec_profile_t amvdec_hmvc_profile_single;
-+
- static struct mconfig h264mvc_configs[] = {
- 	MC_PU32("stat", &stat),
- 	MC_PU32("dbg_mode", &dbg_mode),
-@@ -1693,6 +1695,9 @@ static int __init amvdec_h264mvc_driver_init_module(void)
- 	}
- 
- 	vcodec_profile_register(&amvdec_hmvc_profile);
-+	amvdec_hmvc_profile_single = amvdec_hmvc_profile;
-+	amvdec_hmvc_profile_single.name = "h264mvc";
-+	vcodec_profile_register(&amvdec_hmvc_profile_single);
- 	INIT_REG_NODE_CONFIGS("media.decoder", &h264mvc_node,
- 		"h264mvc", h264mvc_configs, CONFIG_FOR_RW);
- 	return 0;
-diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
-index c34ab90..ffff396 100644
---- a/drivers/frame_provider/decoder/h265/vh265.c
-+++ b/drivers/frame_provider/decoder/h265/vh265.c
-@@ -12397,6 +12397,10 @@ static struct codec_profile_t amvdec_h265_profile = {
- 	.name = "hevc",
- 	.profile = ""
- };
-+
-+static struct codec_profile_t amvdec_h265_profile_single,
-+		amvdec_h265_profile_mult;
-+
- static struct mconfig h265_configs[] = {
- 	MC_PU32("use_cma", &use_cma),
- 	MC_PU32("bit_depth_luma", &bit_depth_luma),
-@@ -12518,6 +12522,12 @@ static int __init amvdec_h265_driver_init_module(void)
- 	}
- 
- 	vcodec_profile_register(&amvdec_h265_profile);
-+	amvdec_h265_profile_single = amvdec_h265_profile;
-+	amvdec_h265_profile_single.name = "h265";
-+	vcodec_profile_register(&amvdec_h265_profile_single);
-+	amvdec_h265_profile_mult = amvdec_h265_profile;
-+	amvdec_h265_profile_mult.name = "mh265";
-+	vcodec_profile_register(&amvdec_h265_profile_mult);
- 	INIT_REG_NODE_CONFIGS("media.decoder", &decoder_265_node,
- 		"h265", h265_configs, CONFIG_FOR_RW);
- 	return 0;
-diff --git a/drivers/frame_provider/decoder/utils/amstream_profile.c b/drivers/frame_provider/decoder/utils/amstream_profile.c
-index 93f50c7..c8033ce 100644
---- a/drivers/frame_provider/decoder/utils/amstream_profile.c
-+++ b/drivers/frame_provider/decoder/utils/amstream_profile.c
-@@ -52,3 +52,19 @@ int vcodec_profile_register(const struct codec_profile_t *vdec_profile)
- }
- EXPORT_SYMBOL(vcodec_profile_register);
- 
-+bool is_support_profile(char *name)
-+{
-+	int ret = 0;
-+	int i, size = ARRAY_SIZE(vcodec_profile);
-+
-+	for (i = 0; i < size; i++) {
-+		if (!vcodec_profile[i])
-+			break;
-+		if (!strcmp(name, vcodec_profile[i]->name))
-+			return true;
-+	}
-+	return ret;
-+}
-+EXPORT_SYMBOL(is_support_profile);
-+
-+
 diff --git a/drivers/frame_provider/decoder/utils/vdec.c b/drivers/frame_provider/decoder/utils/vdec.c
-index 25c5b6f..b73e3f8 100644
+index 25c5b6f..00acd13 100644
 --- a/drivers/frame_provider/decoder/utils/vdec.c
 +++ b/drivers/frame_provider/decoder/utils/vdec.c
-@@ -102,6 +102,7 @@ static int fps_clear;
+@@ -615,7 +615,7 @@ static void vdec_update_buff_status(void)
+ 	list_for_each_entry(vdec, &core->connected_vdec_list, list) {
+ 		struct vdec_input_s *input = &vdec->input;
+ 		if (input_frame_based(input)) {
+-			if (input->have_frame_num)
++			if (input->have_frame_num || input->eos)
+ 				core->buff_flag |= vdec->core_mask;
+ 		} else if (input_stream_based(input)) {
+ 			core->stream_buff_flag |= vdec->core_mask;
+@@ -1464,10 +1464,12 @@ EXPORT_SYMBOL(vdec_set_flag);
  
- 
- static int force_nosecure_even_drm;
-+static int disable_switch_single_to_mult;
- 
- static DEFINE_SPINLOCK(vdec_spin_lock);
- 
-@@ -823,6 +824,22 @@ static const char * const vdec_device_name[] = {
- 
- #endif
- 
-+/*
-+ * Only support time sliced decoding for frame based input,
-+ * so legacy decoder can exist with time sliced decoder.
-+ */
-+static const char *get_dev_name(bool use_legacy_vdec, int format)
-+{
-+#ifdef CONFIG_AMLOGIC_MEDIA_MULTI_DEC
-+	if (use_legacy_vdec)
-+		return vdec_device_name[format * 2];
-+	else
-+		return vdec_device_name[format * 2 + 1];
-+#else
-+	return vdec_device_name[format];
-+#endif
-+}
-+
- #ifdef VDEC_DEBUG_SUPPORT
- static u64 get_current_clk(void)
+ void vdec_set_eos(struct vdec_s *vdec, bool eos)
  {
-@@ -903,6 +920,7 @@ struct vdec_s *vdec_create(struct stream_port_s *port,
- 	struct vdec_s *vdec;
- 	int type = VDEC_TYPE_SINGLE;
- 	int id;
-+
- 	if (is_mult_inc(port->type))
- 		type = (port->type & PORT_TYPE_FRAME) ?
- 			VDEC_TYPE_FRAME_BLOCK :
-@@ -957,6 +975,20 @@ int vdec_set_format(struct vdec_s *vdec, int format)
- 		vdec->slave->port_flag |= PORT_FLAG_VFORMAT;
- 	}
++	struct vdec_core_s *core = vdec_core;
+ 	vdec->input.eos = eos;
  
-+	/* force switch to mult instance if supports this profile. */
-+	if ((vdec->type == VDEC_TYPE_SINGLE) &&
-+		!disable_switch_single_to_mult) {
-+		const char *str = NULL;
-+		char fmt[16] = {0};
-+
-+		str = strchr(get_dev_name(false, format), '_');
-+		if (!str)
-+			return -1;
-+
-+		sprintf(fmt, "m%s", ++str);
-+		if (is_support_profile(fmt))
-+			vdec->type = VDEC_TYPE_STREAM_PARSER;
-+	}
- 	//trace_vdec_set_format(vdec, format);/*DEBUG_TMP*/
- 
- 	return 0;
-@@ -1931,22 +1963,6 @@ int vdec_destroy(struct vdec_s *vdec)
+ 	if (vdec->slave)
+ 		vdec->slave->input.eos = eos;
++	up(&core->sem);
  }
- EXPORT_SYMBOL(vdec_destroy);
- 
--/*
-- * Only support time sliced decoding for frame based input,
-- * so legacy decoder can exist with time sliced decoder.
-- */
--static const char *get_dev_name(bool use_legacy_vdec, int format)
--{
--#ifdef CONFIG_AMLOGIC_MEDIA_MULTI_DEC
--	if (use_legacy_vdec)
--		return vdec_device_name[format * 2];
--	else
--		return vdec_device_name[format * 2 + 1];
--#else
--	return vdec_device_name[format];
--#endif
--}
--
- /*
-  *register vdec_device
-  * create output, vfm or create ionvideo output
-@@ -5012,6 +5028,7 @@ module_param(parallel_decode, int, 0664);
- module_param(fps_detection, int, 0664);
- module_param(fps_clear, int, 0664);
- module_param(force_nosecure_even_drm, int, 0664);
-+module_param(disable_switch_single_to_mult, int, 0664);
- 
- module_param(frameinfo_flag, int, 0664);
- MODULE_PARM_DESC(frameinfo_flag,
-diff --git a/drivers/frame_provider/decoder/vp9/vvp9.c b/drivers/frame_provider/decoder/vp9/vvp9.c
-index f71a740..d112c65 100644
---- a/drivers/frame_provider/decoder/vp9/vvp9.c
-+++ b/drivers/frame_provider/decoder/vp9/vvp9.c
-@@ -9037,6 +9037,8 @@ static struct codec_profile_t amvdec_vp9_profile = {
- 	.profile = ""
- };
- 
-+static struct codec_profile_t amvdec_vp9_profile_mult;
-+
- static unsigned char get_data_check_sum
- 	(struct VP9Decoder_s *pbi, int size)
- {
-@@ -10265,6 +10267,9 @@ static int __init amvdec_vp9_driver_init_module(void)
- 		max_buf_num = MAX_BUF_NUM_LESS;
- 
- 	vcodec_profile_register(&amvdec_vp9_profile);
-+	amvdec_vp9_profile_mult = amvdec_vp9_profile;
-+	amvdec_vp9_profile_mult.name = "mvp9";
-+	vcodec_profile_register(&amvdec_vp9_profile_mult);
- 	INIT_REG_NODE_CONFIGS("media.decoder", &vp9_node,
- 		"vp9", vp9_configs, CONFIG_FOR_RW);
+ EXPORT_SYMBOL(vdec_set_eos);
  
