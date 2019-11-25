@@ -1,7 +1,44 @@
-commit a4e43db4c958fe7edc6881ef95381c259f287d19
-Merge: 7020d2f c1181ed
-Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Mon May 6 20:34:44 2019 -0700
+commit ea8881d9b8eee92692e937a0eed68ee14b204f12
+Author: Lifeng Cao <lifeng.cao@amlogic.com>
+Date:   Tue May 7 16:24:52 2019 +0800
 
-    Merge "avsync: amstream: fix dtv avsync problem when arc pluged [2/3]" into amlogic-4.9-dev
+    mmpeg12: Set valid pts false when last pts = this pts. [1/1]
+    
+    PD#OTT-3332
+    
+    Problem:
+    Some stream input pts is the same. If last pts = this pts.
+    Out pts will not change. Some video will stuck.
+    
+    Solution:
+    Set valid pts false when last pts = this pts.
+    
+    Verify:
+    A311D
+    
+    Change-Id: Ib35edda87bfc66f0da83c946c027e869f6024203
+    Signed-off-by: Lifeng Cao <lifeng.cao@amlogic.com>
 
+diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
+index a8962dd..41a81b3 100644
+--- a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
++++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
+@@ -226,6 +226,7 @@ struct vdec_mpeg12_hw_s {
+ 	u64 pts64[DECODE_BUFFER_NUM_MAX];
+ 	bool pts_valid[DECODE_BUFFER_NUM_MAX];
+ 	u32 canvas_spec[DECODE_BUFFER_NUM_MAX];
++	u64 lastpts64;
+ 	struct canvas_config_s canvas_config[DECODE_BUFFER_NUM_MAX][2];
+ 	struct dec_sysinfo vmpeg12_amstream_dec_info;
+ 
+@@ -1406,6 +1407,10 @@ static irqreturn_t vmpeg12_isr_thread_fn(struct vdec_s *vdec, int irq)
+ 		pts_valid = hw->pts_valid[index];
+ 		pts = hw->pts[index];
+ 		pts_us64 = hw->pts64[index];
++		if (hw->pts_valid[index] && hw->lastpts64 == pts_us64)
++			pts_valid = false;
++		if (hw->pts_valid[index])
++			hw->lastpts64 = pts_us64;
+ 
+ 		user_data_ready_notify(hw, pts, pts_valid);
+ 
