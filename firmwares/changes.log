@@ -1,130 +1,96 @@
-commit 0649fdd7a30f41858117e45a56dc57ee6a36eeab
-Author: Peng Yixin <yixin.peng@amlogic.com>
-Date:   Wed Sep 18 21:29:36 2019 +0800
+commit 368fc76d03c66ba7e0c4829509369f0c8876cf8e
+Author: shihong.zheng <shihong.zheng@amlogic.com>
+Date:   Wed Sep 25 19:53:58 2019 +0800
 
-    media_modules: h265 format playback appears mosaic [1/1]
+    decoder: fix mpeg4 multi frames in packet consume data abnormal. [1/1]
     
-    PD#SWPL-13111
+    PD#TV-10609
     
     Problem:
-    Garbage image is observed after forwarding/rewinding.
-    The HEVC decoder working buffer has missing initializing
-    before decoding and it may cause decoder internal
-    wrong state and generate bad output.
+    1. mpeg4 video black screen 20s at start. bug when deal with
+    frames size less than 8 bytes in one packets.
+    2. mpeg2 1088 height error.
     
     Solution:
-    Clear decoder internal working buffer before decoding.
+    1. no need set back align bytes when consume byte less then 8.
+    2. mpeg2 1080 height limit modify to 1088.
     
     Verify:
-    U212
+    x301
     
-    Change-Id: Ie3b942bbbf9470d1869cb2f4e20647e9dbbea86a
-    Signed-off-by: Peng Yixin <yixin.peng@amlogic.com>
+    Change-Id: Ia05018c04fc0224ee66071add819759243477bbd
+    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
-index 1229791..79e0c9a 100644
---- a/drivers/frame_provider/decoder/h265/vh265.c
-+++ b/drivers/frame_provider/decoder/h265/vh265.c
-@@ -2755,6 +2755,31 @@ static int alloc_mv_buf(struct hevc_state_s *hevc, int i)
- 			(void *)hevc->m_mv_BUF[i].start_adr,
- 			hevc->m_mv_BUF[i].size);
+diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
+index 8898743..e9f1e20 100644
+--- a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
++++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
+@@ -1482,9 +1482,9 @@ static irqreturn_t vmpeg12_isr_thread_fn(struct vdec_s *vdec, int irq)
  		}
-+		if (!vdec_secure(hw_to_vdec(hevc)) && (hevc->m_mv_BUF[i].start_adr)) {
-+			void *mem_start_virt;
-+			mem_start_virt =
-+					codec_mm_phys_to_virt(hevc->m_mv_BUF[i].start_adr);
-+			if (mem_start_virt) {
-+					memset(mem_start_virt, 0, hevc->m_mv_BUF[i].size);
-+					codec_mm_dma_flush(mem_start_virt,
-+							hevc->m_mv_BUF[i].size, DMA_TO_DEVICE);
-+			} else {
-+					mem_start_virt = codec_mm_vmap(
-+							hevc->m_mv_BUF[i].start_adr,
-+							hevc->m_mv_BUF[i].size);
-+					if (mem_start_virt) {
-+							memset(mem_start_virt, 0, hevc->m_mv_BUF[i].size);
-+							codec_mm_dma_flush(mem_start_virt,
-+									hevc->m_mv_BUF[i].size,
-+									DMA_TO_DEVICE);
-+							codec_mm_unmap_phyaddr(mem_start_virt);
-+					} else {
-+							/*not virt for tvp playing,
-+							may need clear on ucode.*/
-+							pr_err("ref %s	mem_start_virt failed\n", __func__);
+ 
+ 		tmp = READ_VREG(MREG_PIC_HEIGHT);
+-		if ((tmp > 1080) || (tmp == 0)) {
+-			new_pic->height = 1080;
+-			hw->frame_height = 1080;
++		if ((tmp > 1088) || (tmp == 0)) {
++			new_pic->height = 1088;
++			hw->frame_height = 1088;
+ 		} else {
+ 			new_pic->height = tmp;
+ 			hw->frame_height = tmp;
+diff --git a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
+index e8d62c2..4e870ba 100644
+--- a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
++++ b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
+@@ -139,6 +139,7 @@ static int pre_decode_buf_level = 0x800;
+ static int debug_enable;
+ static unsigned int radr;
+ static unsigned int rval;
++/* 0x40bit = 8byte */
+ static unsigned int frmbase_cont_bitlevel = 0x40;
+ 
+ #define VMPEG4_DEV_NUM        9
+@@ -1031,15 +1032,35 @@ static irqreturn_t vmpeg4_isr_thread_fn(struct vdec_s *vdec, int irq)
+ 		if (vdec_frame_based(vdec) &&
+ 			(frmbase_cont_bitlevel != 0) &&
+ 			(hw->first_i_frame_ready)) {
+-			u32 bitcnt = READ_VREG(VIFF_BIT_CNT);
+-			if (bitcnt > frmbase_cont_bitlevel) {
+-				hw->dec_result = DEC_RESULT_UNFINISH;
+-				hw->chunk_offset +=
+-					(hw->chunk_size - (bitcnt >> 3) - VDEC_FIFO_ALIGN);
+-				hw->chunk_size = (bitcnt >> 3);
+-				hw->chunk_frame_count++;
+-				hw->unstable_pts = 1;
++			u32 consume_byte, res_byte, bitcnt;
++
++			bitcnt = READ_VREG(VIFF_BIT_CNT);
++			res_byte = bitcnt >> 3;
++
++			if (hw->chunk_size > res_byte) {
++				if (bitcnt > frmbase_cont_bitlevel) {
++					consume_byte = hw->chunk_size - res_byte;
++
++					mmpeg4_debug_print(DECODE_ID(hw), PRINT_FLAG_RUN_FLOW,
++						"%s, size %d, consume %d, res %d\n", __func__,
++						hw->chunk_size, consume_byte, res_byte);
++
++					if (consume_byte > VDEC_FIFO_ALIGN) {
++						consume_byte -= VDEC_FIFO_ALIGN;
++						res_byte += VDEC_FIFO_ALIGN;
 +					}
-+			}
-+		}
- 	}
- 	/*put_cma_alloc_ref();*/ /*DEBUG_TMP*/
- 	return ret;
-@@ -3000,6 +3025,32 @@ static int alloc_buf(struct hevc_state_s *hevc)
- 					(void *)hevc->m_BUF[i].start_adr,
- 					hevc->m_BUF[i].size);
- 				}
-+				/*flush the buffer make sure no cache dirty*/
-+				if (!vdec_secure(hw_to_vdec(hevc)) && (hevc->m_BUF[i].start_adr)) {
-+					void *mem_start_virt;
-+					mem_start_virt =
-+					codec_mm_phys_to_virt(hevc->m_BUF[i].start_adr);
-+					if (mem_start_virt) {
-+						memset(mem_start_virt, 0, hevc->m_BUF[i].size);
-+						codec_mm_dma_flush(mem_start_virt,
-+						hevc->m_BUF[i].size, DMA_TO_DEVICE);
-+					} else {
-+						mem_start_virt = codec_mm_vmap(
-+						hevc->m_BUF[i].start_adr,
-+						hevc->m_BUF[i].size);
-+						if (mem_start_virt) {
-+							memset(mem_start_virt, 0, hevc->m_BUF[i].size);
-+							codec_mm_dma_flush(mem_start_virt,
-+							hevc->m_BUF[i].size,
-+							DMA_TO_DEVICE);
-+							codec_mm_unmap_phyaddr(mem_start_virt);
-+						} else {
-+							/*not virt for tvp playing,
-+							may need clear on ucode.*/
-+							pr_err("ref %s	mem_start_virt failed\n", __func__);
-+						}
-+					}
++					hw->chunk_offset += consume_byte;
++					hw->chunk_size = res_byte;
++					hw->dec_result = DEC_RESULT_UNFINISH;
++					hw->chunk_frame_count++;
++					hw->unstable_pts = 1;
++				} else {
++					hw->chunk_size = 0;
++					hw->chunk_offset = 0;
 +				}
+ 			} else {
++				mmpeg4_debug_print(DECODE_ID(hw), PRINT_FLAG_ERROR,
++					"error: bitbyte %d  hw->chunk_size %d\n", res_byte, hw->chunk_size);
+ 				hw->chunk_size = 0;
+ 				hw->chunk_offset = 0;
  			}
- 			/*put_cma_alloc_ref();*/ /*DEBUG_TMP*/
- 		} else
-@@ -11937,6 +11988,7 @@ static int amvdec_h265_probe(struct platform_device *pdev)
- 	struct vdec_dev_reg_s *pdata =
- 		(struct vdec_dev_reg_s *)pdev->dev.platform_data;
- #endif
-+	char *tmpbuf;
- 	int ret;
- 	struct hevc_state_s *hevc;
- 
-@@ -12001,6 +12053,29 @@ static int amvdec_h265_probe(struct platform_device *pdev)
- 	}
- 	hevc->buf_size = work_buf_size;
- 
-+
-+	if (!vdec_secure(pdata)) {
-+			tmpbuf = (char *)codec_mm_phys_to_virt(hevc->buf_start);
-+			if (tmpbuf) {
-+					memset(tmpbuf, 0, work_buf_size);
-+					dma_sync_single_for_device(amports_get_dma_device(),
-+							hevc->buf_start,
-+							work_buf_size, DMA_TO_DEVICE);
-+			} else {
-+					tmpbuf = codec_mm_vmap(hevc->buf_start,
-+							work_buf_size);
-+					if (tmpbuf) {
-+							memset(tmpbuf, 0, work_buf_size);
-+							dma_sync_single_for_device(
-+									amports_get_dma_device(),
-+									hevc->buf_start,
-+									work_buf_size,
-+									DMA_TO_DEVICE);
-+							codec_mm_unmap_phyaddr(tmpbuf);
-+					}
-+			}
-+	}
-+
- 	if (get_dbg_flag(hevc)) {
- 		hevc_print(hevc, 0,
- 			"===H.265 decoder mem resource 0x%lx size 0x%x\n",
