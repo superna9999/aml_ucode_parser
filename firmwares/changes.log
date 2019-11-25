@@ -1,115 +1,146 @@
-commit a1feb50416e8fba11d26892e604259aaa6b55a34
-Author: Chuangcheng Peng <chuangcheng.peng@amlogic.com>
-Date:   Mon Apr 15 13:57:18 2019 +0800
+commit e661515421c79861f044356cf4936f70b55392b5
+Author: jintao xu <jintao.xu@amlogic.com>
+Date:   Tue Mar 26 22:49:29 2019 +0800
 
-    dvb: tm2 support hiu1 [1/2]
+    encoder: bringup sm1 and tm2. [1/1]
     
-    PD#SWPL-6806
+    PD#SWPL-6373
     
     Problem:
-        tm2 support hiu1 in bringup
+    1.bringup sm1.
+    2.bringup tm2.
     
     Solution:
-       tm2 support hiu1 in bringup
+    1.modify the operation of the DOS power on/off
+    to compatible with soc sm1/tm2.
+    2.fix sm1 265 encoder cannot init driver
     
     Verify:
-       veify at AB301
+    AC200 & AB311
     
-    Change-Id: If158788a29b6e96395cb2f546276f516c1cb7a0b
-    Signed-off-by: Chuangcheng Peng <chuangcheng.peng@amlogic.com>
+    Change-Id: If8bfff5ac558cff7e93f1c48ea6eef0592427753
+    Signed-off-by: jintao xu <jintao.xu@amlogic.com>
 
-diff --git a/drivers/stream_input/parser/hw_demux/aml_dmx.c b/drivers/stream_input/parser/hw_demux/aml_dmx.c
-index 724bc0c..3b2b9a7 100644
---- a/drivers/stream_input/parser/hw_demux/aml_dmx.c
-+++ b/drivers/stream_input/parser/hw_demux/aml_dmx.c
-@@ -1715,7 +1715,9 @@ static void stb_enable(struct aml_dvb *dvb)
- 		WRITE_MPEG_REG(TS_HIU1_CONFIG,
- 			       (demux_skipbyte << FILE_M2TS_SKIP_BYTES_HIU1) |
- 			       (hiu << TS_HIU_ENABLE_HIU1) |
--			       (fec_clk << FEC_CLK_DIV_HIU1));
-+			       (fec_clk << FEC_CLK_DIV_HIU1) |
-+			       (0xBB << TS_PACKAGE_LENGTH_SUB_1_HIU1) |
-+				   (0x47 << FEC_SYNC_BYTE_HIU1));
- 	} else {
- 		/* invert ts out clk  end */
- 		WRITE_MPEG_REG(TS_FILE_CONFIG,
-@@ -3140,9 +3142,15 @@ static int dmx_enable(struct aml_dmx *dmx)
- 			      (7<<VIDEO_ENDIAN) |
- 			      (7 << OTHER_ENDIAN) |
- 			      (7 << BYPASS_ENDIAN) | (0 << SECTION_ENDIAN));
--		DMX_WRITE_REG(dmx->id, TS_HIU_CTL,
-+		if (fec_sel != 8) {
-+			DMX_WRITE_REG(dmx->id, TS_HIU_CTL,
- //			      (0 << LAST_BURST_THRESHOLD) |
- 			   (hi_bsf << USE_HI_BSF_INTERFACE));
-+		} else {
-+			DMX_WRITE_REG(dmx->id, TS_HIU_CTL,
-+				  (1 << PDTS_WR_SEL) |
-+			   (hi_bsf << USE_HI_BSF_INTERFACE));
-+		}
+diff --git a/drivers/frame_sink/encoder/h264/encoder.c b/drivers/frame_sink/encoder/h264/encoder.c
+index 68bdc52..fadff43 100644
+--- a/drivers/frame_sink/encoder/h264/encoder.c
++++ b/drivers/frame_sink/encoder/h264/encoder.c
+@@ -2418,7 +2418,11 @@ static s32 avc_poweron(u32 clock)
+ 	/* Powerup HCODEC */
+ 	/* [1:0] HCODEC */
+ 	WRITE_AOREG(AO_RTI_GEN_PWR_SLEEP0,
+-		(READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) & (~0x3)));
++			READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) &
++			((get_cpu_type() == MESON_CPU_MAJOR_ID_SM1 ||
++			 get_cpu_type() >= MESON_CPU_MAJOR_ID_TM2)
++			? ~0x1 : ~0x3));
++
+ 	udelay(10);
  
- 		if (fec_sel == -1) {
- 			dmx_cascade_set(dmx->id,dmx->source);
-@@ -3189,7 +3197,6 @@ static int dmx_enable(struct aml_dmx *dmx)
- 			(dmx->id != dmx->source-AM_TS_SRC_DMX0))
- 			dmx_cascade_set(dmx->id,dmx->source);
- 	}
--
- 	return 0;
- }
+ 	WRITE_VREG(DOS_SW_RESET1, 0xffffffff);
+@@ -2432,7 +2436,11 @@ static s32 avc_poweron(u32 clock)
  
-diff --git a/drivers/stream_input/parser/hw_demux/aml_dvb.c b/drivers/stream_input/parser/hw_demux/aml_dvb.c
-index 800c77e..1e5bcdf 100644
---- a/drivers/stream_input/parser/hw_demux/aml_dvb.c
-+++ b/drivers/stream_input/parser/hw_demux/aml_dvb.c
-@@ -890,10 +890,10 @@ static ssize_t stb_store_source(struct class *class,
- 		src = DMX_SOURCE_FRONT2;
- 	else if (!strncmp("ts3", buf, 3))
- 		src = DMX_SOURCE_FRONT3;
--	else if (!strncmp("hiu", buf, 3))
--		src = DMX_SOURCE_DVR0;
- 	else if (!strncmp("hiu1", buf, 4))
- 		src = DMX_SOURCE_DVR1;
-+	else if (!strncmp("hiu", buf, 3))
-+		src = DMX_SOURCE_DVR0;
- 	else if (!strncmp("dmx0", buf, 4))
- 		src = DMX_SOURCE_FRONT0 + 100;
- 	else if (!strncmp("dmx1", buf, 4))
-@@ -1150,10 +1150,10 @@ static ssize_t demux##i##_store_source(struct class *class,  \
- 		src = DMX_SOURCE_FRONT1;\
- 	} else if (!strncmp("ts2", buf, 3)) {\
- 		src = DMX_SOURCE_FRONT2;\
-+	} else if (!strncmp("hiu1", buf, 4)) {\
-+		src = DMX_SOURCE_DVR1;\
- 	} else if (!strncmp("hiu", buf, 3)) {\
- 		src = DMX_SOURCE_DVR0;\
--	} else if (!strncmp("hiu1", buf, 3)) {\
--		src = DMX_SOURCE_DVR1;\
- 	} else if (!strncmp("dmx0", buf, 4)) {\
- 		src = DMX_SOURCE_FRONT0_OFFSET;\
- 	} else if (!strncmp("dmx1", buf, 4)) {\
-diff --git a/drivers/stream_input/parser/hw_demux/c_stb_define.h b/drivers/stream_input/parser/hw_demux/c_stb_define.h
-index 5f7f4e3..6b815b6 100644
---- a/drivers/stream_input/parser/hw_demux/c_stb_define.h
-+++ b/drivers/stream_input/parser/hw_demux/c_stb_define.h
-@@ -758,8 +758,8 @@
- #define BYPASS_ENDIAN              3
- #define SECTION_ENDIAN             0
+ 	/* Remove HCODEC ISO */
+ 	WRITE_AOREG(AO_RTI_GEN_PWR_ISO0,
+-		(READ_AOREG(AO_RTI_GEN_PWR_ISO0) & (~0x30)));
++			READ_AOREG(AO_RTI_GEN_PWR_ISO0) &
++			((get_cpu_type() == MESON_CPU_MAJOR_ID_SM1 ||
++			  get_cpu_type() >= MESON_CPU_MAJOR_ID_TM2)
++			? ~0x1 : ~0x30));
++
+ 	udelay(10);
+ 	/* Disable auto-clock gate */
+ 	WRITE_VREG(DOS_GEN_CTRL0,
+@@ -2454,7 +2462,11 @@ static s32 avc_poweroff(void)
  
--/* Bit 15:8 -- last_burst_threshold*/
--/* Bit 7 -- use hi_bsf interface*/
-+/* Bit 10:9 -- PDTS_wr_sel: 0 select video_PDTS_wr_ptr; 1 select video_PDTS_wr_ptr_parser_B; */
-+/* Bit 7:8 -- use hi_bsf interface*/
- /* Bit 6:2 - fec_clk_div*/
- /* Bit 1 ts_source_sel */
- /* Bit 0 - Hiu TS generate enable */
-@@ -770,7 +770,8 @@
- /*#define TS_HIU_CTL_3
-  * (STB_CBUS_BASE + DEMUX_3_OFFSET + 0x25)  // 0x16c5*/
- /*----------- bit define -----------*/
--#define LAST_BURST_THRESHOLD       8
-+//#define LAST_BURST_THRESHOLD       8
-+#define PDTS_WR_SEL			       9
- #define USE_HI_BSF_INTERFACE       7
+ 	/* enable HCODEC isolation */
+ 	WRITE_AOREG(AO_RTI_GEN_PWR_ISO0,
+-		READ_AOREG(AO_RTI_GEN_PWR_ISO0) | 0x30);
++			READ_AOREG(AO_RTI_GEN_PWR_ISO0) |
++			((get_cpu_type() == MESON_CPU_MAJOR_ID_SM1 ||
++			  get_cpu_type() >= MESON_CPU_MAJOR_ID_TM2)
++			? 0x1 : 0x30));
++
+ 	/* power off HCODEC memories */
+ 	WRITE_VREG(DOS_MEM_PD_HCODEC, 0xffffffffUL);
  
- /* bit 15:0 -- base address for section buffer start
+@@ -2463,7 +2475,10 @@ static s32 avc_poweroff(void)
+ 
+ 	/* HCODEC power off */
+ 	WRITE_AOREG(AO_RTI_GEN_PWR_SLEEP0,
+-		READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) | 0x3);
++			READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) |
++			((get_cpu_type() == MESON_CPU_MAJOR_ID_SM1 ||
++			  get_cpu_type() >= MESON_CPU_MAJOR_ID_TM2)
++			? 0x1 : 0x3));
+ 
+ 	spin_unlock_irqrestore(&lock, flags);
+ 
+diff --git a/drivers/frame_sink/encoder/h265/vpu.c b/drivers/frame_sink/encoder/h265/vpu.c
+index bddf33d..3180b49 100644
+--- a/drivers/frame_sink/encoder/h265/vpu.c
++++ b/drivers/frame_sink/encoder/h265/vpu.c
+@@ -385,7 +385,9 @@ static s32 vpu_open(struct inode *inode, struct file *filp)
+ 		amports_switch_gate("vdec", 1);
+ 		spin_lock_irqsave(&s_vpu_lock, flags);
+ 		WRITE_AOREG(AO_RTI_GEN_PWR_SLEEP0,
+-			READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) & ~(0x3<<24));
++			READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) &
++			(get_cpu_type() == MESON_CPU_MAJOR_ID_SM1
++			? ~0x8 : ~(0x3<<24)));
+ 		udelay(10);
+ 
+ 		if (get_cpu_type() <= MESON_CPU_MAJOR_ID_TXLX) {
+@@ -418,7 +420,9 @@ static s32 vpu_open(struct inode *inode, struct file *filp)
+ 		WRITE_VREG(DOS_MEM_PD_WAVE420L, 0x0);
+ 
+ 		WRITE_AOREG(AO_RTI_GEN_PWR_ISO0,
+-			READ_AOREG(AO_RTI_GEN_PWR_ISO0) & ~(0x3<<12));
++			READ_AOREG(AO_RTI_GEN_PWR_ISO0) &
++			(get_cpu_type() == MESON_CPU_MAJOR_ID_SM1
++			? ~0x8 : ~(0x3<<12)));
+ 		udelay(10);
+ 
+ 		spin_unlock_irqrestore(&s_vpu_lock, flags);
+@@ -1368,7 +1372,9 @@ static s32 vpu_release(struct inode *inode, struct file *filp)
+ 			}
+ 			spin_lock_irqsave(&s_vpu_lock, flags);
+ 			WRITE_AOREG(AO_RTI_GEN_PWR_ISO0,
+-				READ_AOREG(AO_RTI_GEN_PWR_ISO0) | (0x3<<12));
++				READ_AOREG(AO_RTI_GEN_PWR_ISO0) |
++				(get_cpu_type() == MESON_CPU_MAJOR_ID_SM1
++				? 0x8 : (0x3<<12)));
+ 			udelay(10);
+ 
+ 			WRITE_VREG(DOS_MEM_PD_WAVE420L, 0xffffffff);
+@@ -1376,7 +1382,9 @@ static s32 vpu_release(struct inode *inode, struct file *filp)
+ 			vpu_clk_config(0);
+ #endif
+ 			WRITE_AOREG(AO_RTI_GEN_PWR_SLEEP0,
+-				READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) | (0x3<<24));
++				READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) |
++				(get_cpu_type() == MESON_CPU_MAJOR_ID_SM1
++				? 0x8 : (0x3<<24)));
+ 			udelay(10);
+ 			spin_unlock_irqrestore(&s_vpu_lock, flags);
+ 			amports_switch_gate("vdec", 0);
+@@ -1980,7 +1988,8 @@ static s32 __init vpu_init(void)
+ 	if ((get_cpu_type() != MESON_CPU_MAJOR_ID_GXM)
+ 		&& (get_cpu_type() != MESON_CPU_MAJOR_ID_G12A)
+ 			&& (get_cpu_type() != MESON_CPU_MAJOR_ID_GXLX)
+-				&& (get_cpu_type() != MESON_CPU_MAJOR_ID_G12B)) {
++				&& (get_cpu_type() != MESON_CPU_MAJOR_ID_G12B)
++				&& (get_cpu_type() != MESON_CPU_MAJOR_ID_SM1)) {
+ 		enc_pr(LOG_DEBUG,
+ 			"The chip is not support hevc encoder\n");
+ 		return -1;
+@@ -2005,7 +2014,8 @@ static void __exit vpu_exit(void)
+ 	if ((get_cpu_type() != MESON_CPU_MAJOR_ID_GXM) &&
+ 		(get_cpu_type() != MESON_CPU_MAJOR_ID_G12A) &&
+ 		(get_cpu_type() != MESON_CPU_MAJOR_ID_GXLX) &&
+-		(get_cpu_type() != MESON_CPU_MAJOR_ID_G12B)) {
++		(get_cpu_type() != MESON_CPU_MAJOR_ID_G12B) &&
++		(get_cpu_type() != MESON_CPU_MAJOR_ID_SM1)) {
+ 		enc_pr(LOG_INFO,
+ 			"The chip is not support hevc encoder\n");
+ 		return;
