@@ -1,7 +1,37 @@
-commit 42be49f5a7351c99bba43413bf14abb758e061d6
-Merge: 0c21b9e 627825a
-Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Thu Jun 27 19:00:16 2019 -0700
+commit 098dd3b155dd4fc34e8276df99bce3e6ad7b3110
+Author: Conglin Guo <conglin.guo@amlogic.com>
+Date:   Fri Jun 28 10:25:06 2019 +0800
 
-    Merge "media_module: add the instance id on the dump_vdec_chunks node [1/1]" into amlogic-4.9-dev
+    media_modules: init Open dec_control force interlace [1/1]
+    
+    PD#SWPL-5950
+    
+    Problem:
+    init Open dec_control force interlace.
+    
+    Solution:
+    init Open dec_control force interlace.
+    
+    Verify:
+    T962X2-X301
+    
+    Change-Id: Ib26c95154ca313860bf1d7ace35e681df2ceafcb
+    Signed-off-by: Conglin Guo <conglin.guo@amlogic.com>
 
+diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+index 921d46f..4d3bbd0 100644
+--- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
++++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+@@ -130,7 +130,11 @@ unsigned int h264_debug_mask = 0xff;
+ 	 *	0x1xx, force decoder id of xx to be disconnected
+ 	 */
+ unsigned int h264_debug_cmd;
+-static unsigned int dec_control;
++
++static unsigned int dec_control =
++	DEC_CONTROL_FLAG_FORCE_2997_1080P_INTERLACE |
++	DEC_CONTROL_FLAG_FORCE_2500_576P_INTERLACE;
++
+ static unsigned int force_rate_streambase;
+ static unsigned int force_rate_framebase;
+ static unsigned int force_disp_bufspec_num;
