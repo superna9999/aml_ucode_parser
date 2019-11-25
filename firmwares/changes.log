@@ -1,7 +1,22 @@
-commit 8518711284af698a304397b3fa7ed85ae6ec7c6a
-Merge: 78532a9 d8f0fce
+commit e57d258fb69c226c9ae182816b5abd2a94f1a4a1
+Merge: 8518711 d5c1c0f
 Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Mon Feb 25 23:27:55 2019 -0800
+Date:   Tue Feb 26 03:59:52 2019 -0800
 
-    Merge "media_module: avs [1/1]" into amlogic-4.9-dev
+    Merge "media_module: optimize frame check [1/1]" into amlogic-4.9-dev
 
+diff --cc drivers/frame_provider/decoder/avs/avs.c
+index acb3292,b2b7d1a..a82e9c7
+--- a/drivers/frame_provider/decoder/avs/avs.c
++++ b/drivers/frame_provider/decoder/avs/avs.c
+@@@ -1688,8 -1685,9 +1693,9 @@@ static int amvdec_avs_probe(struct plat
+  		pr_debug("user_data_buffer = 0x%p, user_data_buffer_phys = 0x%x\n",
+  			user_data_buffer, (u32)user_data_buffer_phys);
+  	}
+ -#endif
+ +
+  	INIT_WORK(&set_clk_work, avs_set_clk);
++ 	vdec = pdata;
+  	if (vavs_init() < 0) {
+  		pr_info("amvdec_avs init failed.\n");
+  		kfree(gvs);
