@@ -1,81 +1,501 @@
-commit b0f90dfa1fbf955fb3f6df6f94037f38d734c018
-Author: Zhizhong Zhang <zhizhong.zhang@amlogic.com>
-Date:   Fri Oct 25 13:22:58 2019 +0800
+commit bdf00f956395d7169988436b23122a6816694464
+Author: apollo.ling <apollo.ling@amlogic.com>
+Date:   Thu Oct 17 20:31:08 2019 +0800
 
-    amports: audio: Add mutex lock protect for audio port reset [1/1]
+    vdec: improve timeout handling for vmmpeg12/vmmh264/vmmh265 [1/1]
     
-    PD#OTT-6893
+    PD#SWPL-14196
     
     Problem:
-    System restart after launch/exit LiveTv multiple
+    {stress test} trunk crash and watchdog reboot happen when
+    do DTV h264 2s channel switch and 15s suspend.(1/5,none)
     
     Solution:
-    Add mutex lock protect for audio port reset
+    improve the timout handling mechanism
     
     Verify:
-    patch build of U212
+    X301
     
-    Change-Id: Id175422a3c829e23b59927aea6c60e8818b9dd37
-    Signed-off-by: Zhizhong Zhang <zhizhong.zhang@amlogic.com>
+    Change-Id: Id7bad614c3aff15630daef13ac598e3a86405e01
+    Signed-off-by: apollo.ling <apollo.ling@amlogic.com>
 
-diff --git a/drivers/stream_input/amports/amstream.c b/drivers/stream_input/amports/amstream.c
-index 8c9ef11..51fd4b7 100644
---- a/drivers/stream_input/amports/amstream.c
-+++ b/drivers/stream_input/amports/amstream.c
-@@ -555,6 +555,9 @@ static void port_set_inited(struct port_priv_s *priv)
- 		struct vdec_s *vdec = priv->vdec;
+diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+index bd1cd1f..4992872 100644
+--- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
++++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+@@ -483,6 +483,7 @@ static void vh264_vf_put(struct vframe_s *, void *);
+ static int vh264_vf_states(struct vframe_states *states, void *);
+ static int vh264_event_cb(int type, void *data, void *private_data);
+ static void vh264_work(struct work_struct *work);
++static void vh264_timeout_work(struct work_struct *work);
+ static void vh264_notify_work(struct work_struct *work);
+ #ifdef MH264_USERDATA_ENABLE
+ static void user_data_ready_notify_work(struct work_struct *work);
+@@ -846,10 +847,13 @@ struct vdec_h264_hw_s {
+ 	bool new_iframe_flag;
+ 	bool ref_err_flush_dpb_flag;
+ 	unsigned int first_i_policy;
++	u32 tfn_cnt;
++	u64 tfn_ns;
+ };
  
- 		vdec->port_flag |= PORT_FLAG_INITED;
-+		port->flag |= PORT_FLAG_INITED;
-+		pr_info("vdec->port_flag=0x%x, port_flag=0x%x\n",
-+			vdec->port_flag, port->flag);
- 	} else
- 		port->flag |= PORT_FLAG_INITED;
+ static u32 again_threshold;
+ 
++static void timeout_process(struct vdec_h264_hw_s *hw);
+ static void dump_bufspec(struct vdec_h264_hw_s *hw,
+ 	const char *caller);
+ static void h264_reconfig(struct vdec_h264_hw_s *hw);
+@@ -5327,6 +5331,20 @@ static irqreturn_t vh264_isr_thread_fn(struct vdec_s *vdec, int irq)
+ 	unsigned int dec_dpb_status = p_H264_Dpb->dec_dpb_status;
+ 	u32 debug_tag;
+ 	int ret;
++	if (++hw->tfn_cnt == 1) {
++		hw->tfn_ns = local_clock();
++	} else if (hw->tfn_cnt >= 10) {
++		u64 tenth_ns = local_clock();
++		/* Here borrow the varible debug_tag for use */
++		debug_tag = tenth_ns - hw->tfn_ns;
++		hw->tfn_cnt = 1;
++		hw->tfn_cnt = tenth_ns;
++		if (debug_tag <= 10000000) {
++			pr_err("Within 10ms 10 vh264_isr_thread_fn. Abnormal!\n");
++			timeout_process(hw);
++			return IRQ_HANDLED;
++		}
++	}
+ 
+ 	if (dec_dpb_status == H264_CONFIG_REQUEST) {
+ #if 1
+@@ -6210,6 +6228,13 @@ static void timeout_process(struct vdec_h264_hw_s *hw)
+ 	struct vdec_s *vdec = hw_to_vdec(hw);
+ 	struct h264_dpb_stru *p_H264_Dpb = &hw->dpb;
+ 
++	/*
++	 * In this very timeout point,the vh264_work arrives,
++	 * let it to handle the scenario.
++	 */
++	if (work_pending(&hw->work))
++		return;
++
+ 	hw->timeout_num++;
+ 	amvdec_stop();
+ 	vdec->mc_loaded = 0;
+@@ -6224,7 +6249,10 @@ static void timeout_process(struct vdec_h264_hw_s *hw)
+ 	release_cur_decoding_buf(hw);
+ 	hw->dec_result = DEC_RESULT_DONE;
+ 	hw->data_flag |= ERROR_FLAG;
+-	vdec_schedule_work(&hw->work);
++
++	if (work_pending(&hw->work))
++		return;
++	vdec_schedule_work(&hw->timeout_work);
  }
-@@ -716,23 +719,35 @@ static int audio_port_reset(struct stream_port_s *port,
- 				struct stream_buf_s *pbuf)
- {
- 	int r;
+ 
+ static void dump_bufspec(struct vdec_h264_hw_s *hw,
+@@ -6454,7 +6482,7 @@ static void check_timer_func(unsigned long arg)
+ 				if (hw->decode_timeout_count == 0)
+ 				{
+ 					reset_process_time(hw);
+-					vdec_schedule_work(&hw->timeout_work);
++					timeout_process(hw);
+ 				}
+ 			} else
+ 				start_process_time(hw);
+@@ -6466,7 +6494,7 @@ static void check_timer_func(unsigned long arg)
+ 				if (hw->decode_timeout_count == 0)
+ 				{
+ 					reset_process_time(hw);
+-					vdec_schedule_work(&hw->timeout_work);
++					timeout_process(hw);
+ 				}
+ 			}
+ 		}
+@@ -6791,14 +6819,6 @@ static void vh264_local_init(struct vdec_h264_hw_s *hw)
+ 	return;
+ }
+ 
+-static void timeout_process_work(struct work_struct *work)
+-{
+-	struct vdec_h264_hw_s *hw = container_of(work,
+-			struct vdec_h264_hw_s, timeout_work);
 -
-+	mutex_lock(&amstream_mutex);
- 	if ((port->flag & PORT_FLAG_AFORMAT) == 0) {
- 		pr_err("aformat not set\n");
-+		mutex_unlock(&amstream_mutex);
-+		return 0;
+-	timeout_process(hw);
+-}
+-
+ static s32 vh264_init(struct vdec_h264_hw_s *hw)
+ {
+ 	int size = -1;
+@@ -6826,7 +6846,7 @@ static s32 vh264_init(struct vdec_h264_hw_s *hw)
+ 	vh264_local_init(hw);
+ 	INIT_WORK(&hw->work, vh264_work);
+ 	INIT_WORK(&hw->notify_work, vh264_notify_work);
+-	INIT_WORK(&hw->timeout_work, timeout_process_work);
++	INIT_WORK(&hw->timeout_work, vh264_timeout_work);
+ #ifdef MH264_USERDATA_ENABLE
+ 	INIT_WORK(&hw->user_data_ready_work, user_data_ready_notify_work);
+ #endif
+@@ -7754,11 +7774,9 @@ static void vmh264_wakeup_userdata_poll(struct vdec_s *vdec)
+ #endif
+ 
+ 
+-static void vh264_work(struct work_struct *work)
++static void vh264_work_implement(struct vdec_h264_hw_s *hw,
++	struct vdec_s *vdec, int from)
+ {
+-	struct vdec_h264_hw_s *hw = container_of(work,
+-		struct vdec_h264_hw_s, work);
+-	struct vdec_s *vdec = hw_to_vdec(hw);
+ 	/* finished decoding one frame or error,
+ 	 * notify vdec core to switch context
+ 	 */
+@@ -7992,6 +8010,17 @@ result_done:
+ 		vdec_set_next_sched(vdec, vdec);
+ #endif
+ 
++	if (from == 1) {
++		/* This is a timeout work */
++		if (work_pending(&hw->work)) {
++			/*
++			 * The vh264_work arrives at the last second,
++			 * give it a chance to handle the scenario.
++			 */
++			return;
++		}
 +	}
 +
-+	pr_info("audio port reset, flag:0x%x\n", port->flag);
-+	if ((port->flag & PORT_FLAG_INITED) == 0) {
-+		pr_info("audio port not inited,return\n");
-+		mutex_unlock(&amstream_mutex);
- 		return 0;
- 	}
- 
-+	pr_info("audio_port_reset begin\n");
- 	pts_stop(PTS_TYPE_AUDIO);
- 
- 	stbuf_release(pbuf, false);
- 
- 	r = stbuf_init(pbuf, NULL, false);
--	if (r < 0)
-+	if (r < 0) {
-+		mutex_unlock(&amstream_mutex);
- 		return r;
-+	}
- 
- 	r = adec_init(port);
- 	if (r < 0) {
- 		audio_port_release(port, pbuf, 2);
-+		mutex_unlock(&amstream_mutex);
- 		return r;
- 	}
- 
-@@ -755,6 +770,8 @@ static int audio_port_reset(struct stream_port_s *port,
- 
- 	r = pts_start(PTS_TYPE_AUDIO);
- 
-+	pr_info("audio_port_reset done\n");
-+	mutex_unlock(&amstream_mutex);
- 	return r;
+ 	/* mark itself has all HW resource released and input released */
+ 	if (vdec->parallel_dec == 1) {
+ 		if (hw->mmu_enable == 0)
+@@ -8006,6 +8035,29 @@ result_done:
+ 		hw->vdec_cb(hw_to_vdec(hw), hw->vdec_cb_arg);
  }
  
++
++static void vh264_work(struct work_struct *work)
++{
++	struct vdec_h264_hw_s *hw = container_of(work,
++		struct vdec_h264_hw_s, work);
++	struct vdec_s *vdec = hw_to_vdec(hw);
++
++	vh264_work_implement(hw, vdec, 0);
++}
++
++
++static void vh264_timeout_work(struct work_struct *work)
++{
++	struct vdec_h264_hw_s *hw = container_of(work,
++		struct vdec_h264_hw_s, timeout_work);
++	struct vdec_s *vdec = hw_to_vdec(hw);
++
++	if (work_pending(&hw->work))
++		return;
++
++	vh264_work_implement(hw, vdec, 1);
++}
++
+ static unsigned long run_ready(struct vdec_s *vdec, unsigned long mask)
+ {
+ 	bool ret = 0;
+diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
+index 9cb3f22..e74aa4f 100644
+--- a/drivers/frame_provider/decoder/h265/vh265.c
++++ b/drivers/frame_provider/decoder/h265/vh265.c
+@@ -1426,6 +1426,7 @@ struct tile_s {
+ #define DEC_RESULT_FORCE_EXIT       10
+ 
+ static void vh265_work(struct work_struct *work);
++static void vh265_timeout_work(struct work_struct *work);
+ static void vh265_notify_work(struct work_struct *work);
+ 
+ #endif
+@@ -1443,6 +1444,7 @@ struct hevc_state_s {
+ 	struct vframe_chunk_s *chunk;
+ 	int dec_result;
+ 	struct work_struct work;
++	struct work_struct timeout_work;
+ 	struct work_struct notify_work;
+ 	struct work_struct set_clk_work;
+ 	/* timeout handle */
+@@ -10765,6 +10767,7 @@ static s32 vh265_init(struct hevc_state_s *hevc)
+ 		 */
+ 
+ 		INIT_WORK(&hevc->work, vh265_work);
++		INIT_WORK(&hevc->timeout_work, vh265_timeout_work);
+ 
+ 		hevc->fw = fw;
+ 
+@@ -11034,6 +11037,13 @@ static void restart_process_time(struct hevc_state_s *hevc)
+ 
+ static void timeout_process(struct hevc_state_s *hevc)
+ {
++	/*
++	 * In this very timeout point,the vh265_work arrives,
++	 * let it to handle the scenario.
++	 */
++	if (work_pending(&hevc->work))
++		return;
++
+ 	hevc->timeout_num++;
+ 	amhevc_stop();
+ 	read_decode_info(hevc);
+@@ -11046,7 +11056,10 @@ static void timeout_process(struct hevc_state_s *hevc)
+ 	hevc->decoding_pic = NULL;
+ 	hevc->dec_result = DEC_RESULT_DONE;
+ 	reset_process_time(hevc);
+-	vdec_schedule_work(&hevc->work);
++
++	if (work_pending(&hevc->work))
++		return;
++	vdec_schedule_work(&hevc->timeout_work);
+ }
+ 
+ #ifdef CONSTRAIN_MAX_BUF_NUM
+@@ -11201,6 +11214,7 @@ static int vmh265_stop(struct hevc_state_s *hevc)
+ 	cancel_work_sync(&hevc->notify_work);
+ 	cancel_work_sync(&hevc->set_clk_work);
+ 	cancel_work_sync(&hevc->work);
++	cancel_work_sync(&hevc->timeout_work);
+ 	uninit_mmu_buffers(hevc);
+ 
+ 	vfree(hevc->fw);
+@@ -11266,12 +11280,9 @@ static void vh265_notify_work(struct work_struct *work)
+ 	return;
+ }
+ 
+-static void vh265_work(struct work_struct *work)
++static void vh265_work_implement(struct hevc_state_s *hevc,
++	struct vdec_s *vdec,int from)
+ {
+-	struct hevc_state_s *hevc = container_of(work,
+-		struct hevc_state_s, work);
+-	struct vdec_s *vdec = hw_to_vdec(hevc);
+-
+ 	if (hevc->uninit_list) {
+ 		/*USE_BUF_BLOCK*/
+ 		uninit_pic_list(hevc);
+@@ -11661,6 +11672,18 @@ static void vh265_work(struct work_struct *work)
+ 		vdec_set_next_sched(vdec, vdec);
+ #endif
+ 
++	if (from == 1) {
++		/* This is a timeout work */
++		if (work_pending(&hevc->work)) {
++			/*
++			 * The vh265_work arrives at the last second,
++			 * give it a chance to handle the scenario.
++			 */
++			return;
++			//cancel_work_sync(&hevc->work);//reserved for future considraion
++		}
++	}
++
+ 	/* mark itself has all HW resource released and input released */
+ 	if (vdec->parallel_dec == 1)
+ 		vdec_core_finish_run(vdec, CORE_MASK_HEVC);
+@@ -11671,6 +11694,27 @@ static void vh265_work(struct work_struct *work)
+ 		hevc->vdec_cb(hw_to_vdec(hevc), hevc->vdec_cb_arg);
+ }
+ 
++static void vh265_work(struct work_struct *work)
++{
++	struct hevc_state_s *hevc = container_of(work,
++			struct hevc_state_s, work);
++	struct vdec_s *vdec = hw_to_vdec(hevc);
++
++	vh265_work_implement(hevc, vdec, 0);
++}
++
++static void vh265_timeout_work(struct work_struct *work)
++{
++	struct hevc_state_s *hevc = container_of(work,
++		struct hevc_state_s, timeout_work);
++	struct vdec_s *vdec = hw_to_vdec(hevc);
++
++	if (work_pending(&hevc->work))
++		return;
++	vh265_work_implement(hevc, vdec, 1);
++}
++
++
+ static int vh265_hw_ctx_restore(struct hevc_state_s *hevc)
+ {
+ 	/* new to do ... */
+diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
+index 6f64b7c..a466b2a 100644
+--- a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
++++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
+@@ -245,6 +245,7 @@ struct vdec_mpeg12_hw_s {
+ 	s32 refs[2];
+ 	int dec_result;
+ 	struct work_struct work;
++	struct work_struct timeout_work;
+ 	struct work_struct notify_work;
+ 	void (*vdec_cb)(struct vdec_s *, void *);
+ 	void *vdec_cb_arg;
+@@ -1088,9 +1089,10 @@ static void userdata_push_do_work(struct work_struct *work)
+ 	}
+ 
+ 	if (hw->cur_ud_idx >= MAX_UD_RECORDS) {
+-		debug_print(DECODE_ID(hw), 0,
++		debug_print(DECODE_ID(hw), PRINT_FLAG_DEC_DETAIL,
+ 			"UD Records over: %d, skip it\n", MAX_UD_RECORDS);
+ 		WRITE_VREG(AV_SCRATCH_J, 0);
++		hw->cur_ud_idx = 0;
+ 		return;
+ 	}
+ 
+@@ -1658,12 +1660,9 @@ static void flush_output(struct vdec_mpeg12_hw_s *hw)
+ 		prepare_display_buf(hw, &hw->pics[index]);
+ }
+ 
+-static void vmpeg12_work(struct work_struct *work)
++static void vmpeg12_work_implement(struct vdec_mpeg12_hw_s *hw,
++	struct vdec_s *vdec, int from)
+ {
+-	struct vdec_mpeg12_hw_s *hw =
+-	container_of(work, struct vdec_mpeg12_hw_s, work);
+-	struct vdec_s *vdec = hw_to_vdec(hw);
+-
+ 	if (hw->dec_result != DEC_RESULT_DONE)
+ 		debug_print(DECODE_ID(hw), PRINT_FLAG_RUN_FLOW,
+ 			"%s, result=%d, status=%d\n", __func__,
+@@ -1729,6 +1728,19 @@ static void vmpeg12_work(struct work_struct *work)
+ 		amvdec_stop();
+ 		hw->stat &= ~STAT_VDEC_RUN;
+ 	}
++
++	if (from == 1) {
++		/*This is a timeout work*/
++		if (work_pending(&hw->work)) {
++			pr_err("timeout work return befor finishing.");
++			/*
++			 * The vmpeg12_work arrives at the last second,
++			 * give it a chance to handle the scenario.
++			 */
++			return;
++		}
++	}
++
+ 	/*disable mbox interrupt */
+ 	WRITE_VREG(ASSIST_MBOX1_MASK, 0);
+ 	wait_vmmpeg12_search_done(hw);
+@@ -1743,6 +1755,28 @@ static void vmpeg12_work(struct work_struct *work)
+ 		hw->vdec_cb(vdec, hw->vdec_cb_arg);
+ }
+ 
++static void vmpeg12_work(struct work_struct *work)
++{
++	struct vdec_mpeg12_hw_s *hw =
++	container_of(work, struct vdec_mpeg12_hw_s, work);
++	struct vdec_s *vdec = hw_to_vdec(hw);
++
++	vmpeg12_work_implement(hw, vdec, 0);
++}
++static void vmpeg12_timeout_work(struct work_struct *work)
++{
++	struct vdec_mpeg12_hw_s *hw =
++	container_of(work, struct vdec_mpeg12_hw_s, timeout_work);
++	struct vdec_s *vdec = hw_to_vdec(hw);
++
++	if (work_pending(&hw->work)) {
++		pr_err("timeout work return befor executing.");
++		return;
++	}
++
++	vmpeg12_work_implement(hw, vdec, 1);
++}
++
+ static struct vframe_s *vmpeg_vf_peek(void *op_arg)
+ {
+ 	struct vframe_s *vf;
+@@ -2081,6 +2115,10 @@ static void timeout_process(struct vdec_mpeg12_hw_s *hw)
+ {
+ 	struct vdec_s *vdec = hw_to_vdec(hw);
+ 
++	if (work_pending(&hw->work)) {
++		pr_err("timeout_process return befor do anything.");
++		return;
++	}
+ 	reset_process_time(hw);
+ 	amvdec_stop();
+ 	debug_print(DECODE_ID(hw), PRINT_FLAG_ERROR,
+@@ -2088,7 +2126,16 @@ static void timeout_process(struct vdec_mpeg12_hw_s *hw)
+ 		__func__, vdec->status, READ_VREG(VLD_MEM_VIFIFO_LEVEL));
+ 	hw->dec_result = DEC_RESULT_DONE;
+ 	hw->first_i_frame_ready = 0;
+-	vdec_schedule_work(&hw->work);
++
++	/*
++	 * In this very timeout point,the vmpeg12_work arrives,
++	 * let it to handle the scenario.
++	 */
++	if (work_pending(&hw->work)) {
++		pr_err("timeout_process return befor schedule.");
++		return;
++	}
++	vdec_schedule_work(&hw->timeout_work);
+ }
+ 
+ static void check_timer_func(unsigned long arg)
+@@ -2312,6 +2359,7 @@ static s32 vmpeg12_init(struct vdec_mpeg12_hw_s *hw)
+ 
+ 	INIT_WORK(&hw->userdata_push_work, userdata_push_do_work);
+ 	INIT_WORK(&hw->work, vmpeg12_work);
++	INIT_WORK(&hw->timeout_work, vmpeg12_timeout_work);
+ 	INIT_WORK(&hw->notify_work, vmpeg12_notify_work);
+ 
+ 	if (NULL == hw->user_data_buffer) {
+@@ -2665,6 +2713,7 @@ static int ammvdec_mpeg12_remove(struct platform_device *pdev)
+ 	cancel_work_sync(&hw->userdata_push_work);
+ 	cancel_work_sync(&hw->notify_work);
+ 	cancel_work_sync(&hw->work);
++	cancel_work_sync(&hw->timeout_work);
+ 
+ 	if (hw->mm_blk_handle) {
+ 		decoder_bmmu_box_free(hw->mm_blk_handle);
+diff --git a/drivers/frame_provider/decoder/utils/vdec.c b/drivers/frame_provider/decoder/utils/vdec.c
+index 44f0934..54f9051 100644
+--- a/drivers/frame_provider/decoder/utils/vdec.c
++++ b/drivers/frame_provider/decoder/utils/vdec.c
+@@ -2544,8 +2544,10 @@ static irqreturn_t vdec_isr(int irq, void *dev_id)
+ 			vdec = NULL;
+ 	}
+ 
+-	if (vdec)
++	if (vdec) {
+ 		atomic_set(&vdec->inirq_flag, 1);
++		vdec->isr_ns = local_clock();
++	}
+ 	if (c->dev_isr) {
+ 		ret = c->dev_isr(irq, c->dev_id);
+ 		goto isr_done;
+@@ -2598,8 +2600,15 @@ static irqreturn_t vdec_thread_isr(int irq, void *dev_id)
+ 			vdec = NULL;
+ 	}
+ 
+-	if (vdec)
++	if (vdec) {
++		u32 isr2tfn = 0;
+ 		atomic_set(&vdec->inirq_thread_flag, 1);
++		vdec->tfn_ns = local_clock();
++		isr2tfn = vdec->tfn_ns - vdec->isr_ns;
++		if (isr2tfn > 10000000)
++			pr_err("!!!!!!! %s vdec_isr to %s took %uns !!!\n",
++				vdec->vf_provider_name, __func__, isr2tfn);
++	}
+ 	if (c->dev_threaded_isr) {
+ 		ret = c->dev_threaded_isr(irq, c->dev_id);
+ 		goto thread_isr_done;
+diff --git a/drivers/frame_provider/decoder/utils/vdec.h b/drivers/frame_provider/decoder/utils/vdec.h
+index 18d7cd1..80fa8dc 100644
+--- a/drivers/frame_provider/decoder/utils/vdec.h
++++ b/drivers/frame_provider/decoder/utils/vdec.h
+@@ -262,6 +262,8 @@ struct vdec_s {
+ 	atomic_t inirq_thread_flag;
+ 	atomic_t inirq_flag;
+ 	int parallel_dec;
++	volatile u64 isr_ns;
++	volatile u64 tfn_ns;
+ };
+ 
+ /* common decoder vframe provider name to use default vfm path */
