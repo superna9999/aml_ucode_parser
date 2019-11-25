@@ -1,144 +1,78 @@
-commit 3d58646ade660e8505249cf37caaf11df89d887e
-Author: Nanxin Qin <nanxin.qin@amlogic.com>
-Date:   Mon Jun 24 13:20:18 2019 +0800
+commit 6493894a60e2017e90cf1c6e20899ff0d1d800f7
+Author: shihong.zheng <shihong.zheng@amlogic.com>
+Date:   Tue Jun 25 17:55:46 2019 +0800
 
-    vp9: fixed issue of the width or height oversize for vp9. [1/1]
+    h265: fix h265 crash and frame check. [1/1]
     
-    PD#OTT-4780
+    PD#SWPL-10258
     
     Problem:
-    the width or height abnomal cause to cts failed.
+    gxl crash when play h265 video.
     
     Solution:
-    fixed issue of the width or height oversize for vp9.
+    remove some code in ucode.
+    gerrit id: 78086
+    change id: I024a20e
     
     Verify:
-    x301
+    ampere
     
-    Change-Id: Ie2f53863b64a0deeff02a52b41223fe2466f9b89
-    Signed-off-by: Nanxin Qin <nanxin.qin@amlogic.com>
+    Change-Id: I8095031caaa6315f89671f839391d7fcff74a81b
+    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/vp9/vvp9.c b/drivers/frame_provider/decoder/vp9/vvp9.c
-index 75f42a0..a1d8b12 100644
---- a/drivers/frame_provider/decoder/vp9/vvp9.c
-+++ b/drivers/frame_provider/decoder/vp9/vvp9.c
-@@ -1178,6 +1178,42 @@ struct VP9Decoder_s {
- 	struct vframe_qos_s vframe_qos;
- };
+diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
+index 569cbff..34b198c 100644
+--- a/drivers/frame_provider/decoder/h265/vh265.c
++++ b/drivers/frame_provider/decoder/h265/vh265.c
+@@ -8403,6 +8403,7 @@ static int prepare_display_buf(struct hevc_state_s *hevc, struct PIC_s *pic)
+ 				| VIDTYPE_VIU_NV21;
+ 			}
+ 			hevc->vf_pre_count++;
++			decoder_do_frame_check(hw_to_vdec(hevc), vf);
+ 			kfifo_put(&hevc->display_q,
+ 			(const struct vframe_s *)vf);
+ 			ATRACE_COUNTER(MODULE_NAME, vf->pts);
+@@ -8451,6 +8452,7 @@ static int prepare_display_buf(struct hevc_state_s *hevc, struct PIC_s *pic)
+ 				| VIDTYPE_VIU_NV21;
+ 			}
+ 			hevc->vf_pre_count++;
++			decoder_do_frame_check(hw_to_vdec(hevc), vf);
+ 			kfifo_put(&hevc->display_q,
+ 			(const struct vframe_s *)vf);
+ 			ATRACE_COUNTER(MODULE_NAME, vf->pts);
+@@ -8476,6 +8478,7 @@ static int prepare_display_buf(struct hevc_state_s *hevc, struct PIC_s *pic)
+ 			process_pending_vframe(hevc,
+ 			pic, (pic->pic_struct == 9));
  
-+static int vp9_print(struct VP9Decoder_s *pbi,
-+	int flag, const char *fmt, ...)
-+{
-+#define HEVC_PRINT_BUF		256
-+	unsigned char buf[HEVC_PRINT_BUF];
-+	int len = 0;
-+
-+	if (pbi == NULL ||
-+		(flag == 0) ||
-+		(debug & flag)) {
-+		va_list args;
-+
-+		va_start(args, fmt);
-+		if (pbi)
-+			len = sprintf(buf, "[%d]", pbi->index);
-+		vsnprintf(buf + len, HEVC_PRINT_BUF - len, fmt, args);
-+		pr_debug("%s", buf);
-+		va_end(args);
-+	}
-+	return 0;
-+}
-+
-+static int is_oversize(int w, int h)
-+{
-+	int max = (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1)?
-+		MAX_SIZE_8K : MAX_SIZE_4K;
-+
-+	if (w <= 0 || h <= 0)
-+		return true;
-+
-+	if (h != 0 && (w > max / h))
-+		return true;
-+
-+	return false;
-+}
-+
- static int v4l_get_fb(struct aml_vcodec_ctx *ctx, struct vdec_fb **out)
++			decoder_do_frame_check(hw_to_vdec(hevc), vf);
+ 			/* process current vf */
+ 			kfifo_put(&hevc->pending_q,
+ 			(const struct vframe_s *)vf);
+@@ -8521,6 +8524,7 @@ static int prepare_display_buf(struct hevc_state_s *hevc, struct PIC_s *pic)
+ 				VIDTYPE_VIU_NV21 | VIDTYPE_VIU_FIELD;
+ 				vf->index = (pic->index << 8) | 0xff;
+ 			}
++			decoder_do_frame_check(hw_to_vdec(hevc), vf);
+ 			kfifo_put(&hevc->pending_q,
+ 			(const struct vframe_s *)vf);
+ 
+@@ -8563,6 +8567,7 @@ static int prepare_display_buf(struct hevc_state_s *hevc, struct PIC_s *pic)
+ 				break;
+ 			}
+ 			hevc->vf_pre_count++;
++			decoder_do_frame_check(hw_to_vdec(hevc), vf);
+ 			kfifo_put(&hevc->display_q,
+ 			(const struct vframe_s *)vf);
+ 			ATRACE_COUNTER(MODULE_NAME, vf->pts);
+@@ -9972,7 +9977,7 @@ static irqreturn_t vh265_isr(int irq, void *data)
+ static void vh265_set_clk(struct work_struct *work)
  {
- 	int ret = 0;
-@@ -1242,6 +1278,11 @@ static int setup_frame_size(
+ 	struct hevc_state_s *hevc = container_of(work,
+-		struct hevc_state_s, work);
++		struct hevc_state_s, set_clk_work);
  
- 	width = params->p.width;
- 	height = params->p.height;
-+	if (is_oversize(width, height)) {
-+		vp9_print(pbi, 0, "%s, Error: Invalid frame size\n", __func__);
-+		return -1;
-+	}
-+
- 	/*vp9_read_frame_size(rb, &width, &height);*/
- 	if (print_header_info)
- 		pr_info(" * 16-bits w read : %d (width : %d)\n", width, height);
-@@ -1361,8 +1402,8 @@ static int setup_frame_size_with_refs(
- 		 */
- 	}
+ 		int fps = 96000 / hevc->frame_dur;
  
--	if (width <= 0 || height <= 0) {
--		pr_err("Error: Invalid frame size\r\n");
-+	if (is_oversize(width, height)) {
-+		vp9_print(pbi, 0, "%s, Error: Invalid frame size\n", __func__);
- 		return -1;
- 	}
- 
-@@ -1457,32 +1498,6 @@ static int setup_frame_size_with_refs(
- 	return ret;
- }
- 
--
--
--
--
--static int vp9_print(struct VP9Decoder_s *pbi,
--	int flag, const char *fmt, ...)
--{
--#define HEVC_PRINT_BUF		256
--	unsigned char buf[HEVC_PRINT_BUF];
--	int len = 0;
--
--	if (pbi == NULL ||
--		(flag == 0) ||
--		(debug & flag)) {
--		va_list args;
--
--		va_start(args, fmt);
--		if (pbi)
--			len = sprintf(buf, "[%d]", pbi->index);
--		vsnprintf(buf + len, HEVC_PRINT_BUF - len, fmt, args);
--		pr_debug("%s", buf);
--		va_end(args);
--	}
--	return 0;
--}
--
- static inline bool close_to(int a, int b, int m)
- {
- 	return (abs(a - b) < m) ? true : false;
-@@ -4749,20 +4764,6 @@ static int config_pic(struct VP9Decoder_s *pbi,
- 	return ret;
- }
- 
--static int is_oversize(int w, int h)
--{
--	int max = (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1)?
--		MAX_SIZE_8K : MAX_SIZE_4K;
--
--	if (w < 0 || h < 0)
--		return true;
--
--	if (h != 0 && (w > max / h))
--		return true;
--
--	return false;
--}
--
- static int vvp9_mmu_compress_header_size(struct VP9Decoder_s *pbi)
- {
- 	if ((get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1) &&
+diff --git a/firmware/video_ucode.bin b/firmware/video_ucode.bin
+index ffbccce..024f549 100644
+Binary files a/firmware/video_ucode.bin and b/firmware/video_ucode.bin differ
