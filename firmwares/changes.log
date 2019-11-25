@@ -1,62 +1,39 @@
-commit 421736244a366a41dd3b2b422d20546d6034e4ba
-Author: joy rao <joy.rao@amlogic.com>
-Date:   Thu Mar 28 17:01:22 2019 +0800
+commit e1549785b2c35c5a385984305787e7ee3068a655
+Author: nengwen.chen <nengwen.chen@amlogic.com>
+Date:   Thu Apr 18 14:38:19 2019 +0800
 
-    vdec: add force no-secure even process drmmode for vmx [1/1]
+    hardware_dmx: Remove unused code can cause memory corruption [1/1]
     
-    PD#SWPL-1822
+    PD#SWPL-7378
     
     Problem:
-    Usually in drmmode VDEC is allowed only can access secure.
-    vmx ultra hls is played in  drmmode and uses hw demux. Hw
-    demux will parse es data to nosecure. Then VDEC will read invalid data
-    and decoding failed.
+    Removing unused code can cause memory corruption.
     
     Solution:
-    Force setup no-secure when vmx hls is played.
+    Removing unused code can cause memory corruption.
     
     Verify:
-    S905d
+    verified by x301
     
-    Change-Id: I5771ecb403a71bc6ebced5c485de40e4583561a5
-    Signed-off-by: joy rao <joy.rao@amlogic.com>
+    Change-Id: Ie50472998247a19337c5bacd16606a0bfa45aef0
 
-diff --git a/drivers/frame_provider/decoder/utils/vdec.c b/drivers/frame_provider/decoder/utils/vdec.c
-index e5be3ae..7e8988f 100644
---- a/drivers/frame_provider/decoder/utils/vdec.c
-+++ b/drivers/frame_provider/decoder/utils/vdec.c
-@@ -99,6 +99,10 @@ static int no_powerdown;
- static int parallel_decode = 1;
- static int fps_detection;
- static int fps_clear;
-+
-+
-+static int force_nosecure_even_drm;
-+
- static DEFINE_SPINLOCK(vdec_spin_lock);
+diff --git a/drivers/stream_input/parser/hw_demux/aml_dvb.c b/drivers/stream_input/parser/hw_demux/aml_dvb.c
+index 1e5bcdf..b3ffbb7 100644
+--- a/drivers/stream_input/parser/hw_demux/aml_dvb.c
++++ b/drivers/stream_input/parser/hw_demux/aml_dvb.c
+@@ -2214,7 +2214,6 @@ static int aml_dvb_probe(struct platform_device *pdev)
+ 		struct device_node *node_tuner = NULL;
+ 		struct device_node *node_i2c = NULL;
+ 		u32 i2c_addr = 0xFFFFFFFF;
+-		struct tuner_config *cfg = NULL;
+ 		u32 value = 0;
+ 		int j = 0;
  
- #define HEVC_TEST_LIMIT 100
-@@ -2453,6 +2457,15 @@ void vdec_prepare_run(struct vdec_s *vdec, unsigned long mask)
- 	if (!vdec_core_with_input(mask))
- 		return;
+@@ -2237,7 +2236,6 @@ static int aml_dvb_probe(struct platform_device *pdev)
+ 					s_demod_type[i] = DEMOD_INTERNAL;
+ 				}
  
-+	if (secure && vdec_stream_based(vdec) && force_nosecure_even_drm)
-+	{
-+		/* Verimatrix ultra webclient (HLS) was played in drmmode and used hw demux. In drmmode VDEC only can access secure.
-+		Now HW demux parsed es data to no-secure buffer. So the VDEC input was no-secure, VDEC playback failed. Forcing
-+		use nosecure for verimatrix webclient HLS. If in the future HW demux can parse es data to secure buffer, make
-+		VDEC r/w secure.*/
-+		secure = 0;
-+		//pr_debug("allow VDEC can access nosecure even in drmmode\n");
-+	}
- 	if (input->target == VDEC_INPUT_TARGET_VLD)
- 		tee_config_device_secure(DMC_DEV_ID_VDEC, secure);
- 	else if (input->target == VDEC_INPUT_TARGET_HEVC)
-@@ -4757,6 +4770,7 @@ module_param(debugflags, int, 0664);
- module_param(parallel_decode, int, 0664);
- module_param(fps_detection, int, 0664);
- module_param(fps_clear, int, 0664);
-+module_param(force_nosecure_even_drm, int, 0664);
- 
- module_param(frameinfo_flag, int, 0664);
- MODULE_PARM_DESC(frameinfo_flag,
+-				memset(&cfg, 0, sizeof(struct tuner_config));
+ 				memset(buf, 0, 32);
+ 				snprintf(buf, sizeof(buf), "fe%d_tuner",i);
+ 				node_tuner = of_parse_phandle(pdev->dev.of_node, buf, 0);
