@@ -1,83 +1,33 @@
-commit 70a21cde7d5f0214330ab203f1b533e3d3dc9bdd
-Author: Peng Yixin <yixin.peng@amlogic.com>
-Date:   Wed Sep 18 20:09:10 2019 +0800
+commit 8e6e0470a578ad4ed993ed91d7eb514e941d4b6c
+Author: shihong.zheng <shihong.zheng@amlogic.com>
+Date:   Fri Sep 27 12:33:24 2019 +0800
 
-    media_module: the screen freeze when stream mode playback [1/1]
+    h264: h264 dpb_print error. [1/1]
     
-    PD#SWPL-13053
+    PD#SWPL-14595
     
     Problem:
-    Keeps entering the logic that waits for more data
-    to decode, but never gets more data, it cause the
-    screen freeze.
+    h264 crash when ref list error.
     
     Solution:
-    Modify wait more data's logic to solve this problem.
+    format print error fix.
     
     Verify:
     u212
     
-    Change-Id: I51091939dcdc0ff9bbf4ea00295b9bc87b5ff213
-    Signed-off-by: Peng Yixin <yixin.peng@amlogic.com>
+    Change-Id: Ifb40e465d5b7c536351dec8e0df4b932a76dd8dd
+    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/avs2/vavs2.c b/drivers/frame_provider/decoder/avs2/vavs2.c
-index e958825..31f76e6 100644
---- a/drivers/frame_provider/decoder/avs2/vavs2.c
-+++ b/drivers/frame_provider/decoder/avs2/vavs2.c
-@@ -250,7 +250,7 @@ static u32 work_buf_size = 32 * 1024 * 1024;
- 
- static u32 mv_buf_margin;
- static int pre_decode_buf_level = 0x1000;
--static u32 again_threshold = 0x40;
-+static u32 again_threshold;
- 
- 
- /* DOUBLE_WRITE_MODE is enabled only when NV21 8 bit output is needed */
 diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-index 075ce66..65105a0 100644
+index 075ce66..56ae411 100644
 --- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
 +++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-@@ -847,7 +847,7 @@ struct vdec_h264_hw_s {
- 	unsigned int first_i_policy;
- };
- 
--static u32 again_threshold = 0x40;
-+static u32 again_threshold;
- 
- static void dump_bufspec(struct vdec_h264_hw_s *hw,
- 	const char *caller);
-diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
-index 79e0c9a..d9e06fd 100644
---- a/drivers/frame_provider/decoder/h265/vh265.c
-+++ b/drivers/frame_provider/decoder/h265/vh265.c
-@@ -1730,7 +1730,7 @@ static int v4l_get_fb(struct aml_vcodec_ctx *ctx, struct vdec_fb **out)
- }
- 
- #ifdef AGAIN_HAS_THRESHOLD
--u32 again_threshold = 0x40;
-+u32 again_threshold;
- #endif
- #ifdef SEND_LMEM_WITH_RPM
- #define get_lmem_params(hevc, ladr) \
-@@ -11718,7 +11718,7 @@ static unsigned long run_ready(struct vdec_s *vdec, unsigned long mask)
- 			again_threshold) {
- 			int r = vdec_sync_input(vdec);
- 			hevc_print(hevc,
--			PRINT_FLAG_VDEC_DETAIL, "%s buf lelvel:%x\n",  __func__, r);
-+				PRINT_FLAG_VDEC_DETAIL, "%s buf lelvel:%x\n",  __func__, r);
- 			return 0;
- 		}
- 	}
-diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-index e9f1e20..6d37a0e 100644
---- a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-+++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-@@ -135,7 +135,7 @@ static unsigned int decode_timeout_val = 100;
- #define AGAIN_HAS_THRESHOLD
- 
- #ifdef AGAIN_HAS_THRESHOLD
--u32 again_threshold = 0x40;
-+u32 again_threshold;
- #endif
- 
- /*
+@@ -5623,7 +5623,7 @@ static irqreturn_t vh264_isr_thread_fn(struct vdec_s *vdec, int irq)
+ 				if (ret != 0) {
+ 					hw->reflist_error_count ++;
+ 					dpb_print(DECODE_ID(hw), 0,
+-						"reference list error %d frame count %d to skip % reflist_error_count %dd\n",
++						"reference list error %d frame count %d to skip %d reflist_error_count %d\n",
+ 						ret,
+ 						hw->decode_pic_count+1,
+ 						hw->skip_frame_count,
