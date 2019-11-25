@@ -1,77 +1,38 @@
-commit 8975d8721a4a46cf0b9cb7a3bfca4046dd8fd22d
-Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Wed Jan 30 19:34:12 2019 +0800
+commit b7fa8c54fc559341cb2bb260c31ec3ffef9d1e5f
+Author: rongrong zhou <rongrong.zhou@amlogic.com>
+Date:   Wed Feb 13 10:17:59 2019 +0800
 
-    media_module: vmh264: skip crop handle in mmu mode [1/1]
+    mh264: 8k h264 mmubox allocation check [1/1]
     
-    PD#SWPL-4349
+    PD#SWPL-4719
     
     Problem:
-    some stream with crop info. it cause decoding size is different
-    with display size. if using display size, timeout will be happened
-    in mmu hardware. it's root cause of cts fail
+        8k h264 crash
     
     Solution:
-    use acurate decoding size to mmu hardware instead of display size
+        we do not support 8k h264, no need to enlarge MAX_FRAME_4K_NUM to match 8K,
+        if cur_mmu_4k_number > MAX_FRAME_4K_NUM, return error
     
     Verify:
-    X301
+        Verified x301
     
-    Change-Id: Ib93f061c50c7ccb941950c8eeb3591fe4e65e00c
-    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
+    Change-Id: I1fb1d19a472cc00b0052cbe347b0e7541c99adac
 
 diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-index cb6e3d2..e6c8441 100644
+index e6c8441..15b5010 100644
 --- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
 +++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-@@ -1447,7 +1447,7 @@ static void  hevc_sao_set_pic_buffer(struct vdec_h264_hw_s *hw,
- #endif
- 
- 	ret = hevc_alloc_mmu(hw, pic->buf_spec_num,
--			hw->frame_width, hw->frame_height, 0x0,
-+			(hw->mb_width << 4), (hw->mb_height << 4), 0x0,
- 			hw->frame_mmu_map_addr);
- 	if (ret != 0) {
- 		dpb_print(DECODE_ID(hw),
-@@ -3965,13 +3965,17 @@ static int vh264_set_params(struct vdec_h264_hw_s *hw,
- 		if (hw->frame_height == 1088)
- 			hw->frame_height = 1080;
- #endif
--
--		mb_width = (mb_width+3) & 0xfffffffc;
--		mb_height = (mb_height+3) & 0xfffffffc;
-+		if (!hw->mmu_enable) {
-+			mb_width = (mb_width+3) & 0xfffffffc;
-+			mb_height = (mb_height+3) & 0xfffffffc;
-+		}
- 		mb_total = mb_width * mb_height;
-+		hw->mb_width = mb_width;
-+		hw->mb_height = mb_height;
-+		hw->mb_total = mb_total;
- 		if (hw->mmu_enable)
- 			hevc_mcr_sao_global_hw_init(hw,
--				hw->frame_width, hw->frame_height);
-+				(hw->mb_width << 4), (hw->mb_height << 4));
- 
- 		reg_val = param4;
- 		level_idc = reg_val & 0xff;
-@@ -3982,10 +3986,6 @@ static int vh264_set_params(struct vdec_h264_hw_s *hw,
- 			level_idc, max_reference_size);
- 
- 		p_H264_Dpb->colocated_buf_size = mb_total * 96;
--		hw->mb_total = mb_total;
--		hw->mb_width = mb_width;
--		hw->mb_height = mb_height;
--
- 		hw->dpb.reorder_pic_num =
- 			get_max_dec_frame_buf_size(level_idc,
- 			max_reference_size, mb_width, mb_height);
-@@ -7391,7 +7391,7 @@ static void run(struct vdec_s *vdec, unsigned long mask,
- 		amhevc_start();
- 		if (hw->config_bufmgr_done) {
- 			hevc_mcr_sao_global_hw_init(hw,
--					hw->frame_width, hw->frame_height);
-+					(hw->mb_width << 4), (hw->mb_height << 4));
- 			hevc_mcr_config_canv2axitbl(hw, 1);
- 		}
- 	}
+@@ -911,6 +911,13 @@ static int hevc_alloc_mmu(struct vdec_h264_hw_s *hw, int pic_idx,
+ 		PRINT_FLAG_MMU_DETAIL,
+ 		"alloc_mmu new_fb_idx %d picture_size %d cur_mmu_4k_number %d\n",
+ 		cur_buf_idx, picture_size, cur_mmu_4k_number);
++
++	if (cur_mmu_4k_number > MAX_FRAME_4K_NUM) {
++		pr_err("hevc_alloc_mmu cur_mmu_4k_number %d unsupport\n",
++		cur_mmu_4k_number);
++		return -1;
++	}
++
+ 	return decoder_mmu_box_alloc_idx(
+ 	hw->mmu_box,
+ 	cur_buf_idx,
