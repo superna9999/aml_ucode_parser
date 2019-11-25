@@ -1,56 +1,83 @@
-commit 6baa15ea185e2cd4bbe6c84373c84633aa4cca91
-Author: Peng Yixin <yixin.peng@amlogic.com>
-Date:   Fri May 24 23:58:47 2019 +0800
+commit ef1fce5465899c1ec81c2fe6b36743f7799ad515
+Author: shihong.zheng <shihong.zheng@amlogic.com>
+Date:   Wed Jul 3 20:25:32 2019 +0800
 
-    media: Solve can not play encrypt video of youtube [1/1]
+    mmpeg4: fix timeout repeatedly when vfifo empty. [1/1]
     
-    PD#SWPL-8977
+    PD#SWPL-8550
     
     Problem:
-    Can not play encrypt video of youtube
+    mpeg4 stuck, consuming input data,
+    decode timeout repeatedly.
     
     Solution:
-    Due to the competition, the number of input buff
-    was judged in the wrong position, cause nofurther scheduling.
+    retry and result done if it can't dec out.
+    do not save incomplete context.
+    ucode gerrit id: 79111
+    ucode change id: I40176d
     
     Verify:
-    U212
+    x301
     
-    Change-Id: If56cf9a4664d16520e54a2e327cf971e0481c17b
-    Signed-off-by: Peng Yixin <yixin.peng@amlogic.com>
+    Change-Id: Ie2b18508ebba1891ea52d82898a762b281eb025e
+    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/utils/vdec_input.c b/drivers/frame_provider/decoder/utils/vdec_input.c
-index 665099d..9c7ed4c 100644
---- a/drivers/frame_provider/decoder/utils/vdec_input.c
-+++ b/drivers/frame_provider/decoder/utils/vdec_input.c
-@@ -929,6 +929,9 @@ int vdec_input_add_chunk(struct vdec_input_s *input, const char *buf,
- 	list_add_tail(&chunk->list, &input->vframe_chunk_list);
- 	input->data_size += chunk->size;
- 	input->have_frame_num++;
-+
-+	if (input->have_frame_num == 1)
-+		input->vdec_up(vdec);
- 	ATRACE_COUNTER(MEM_NAME, input->have_frame_num);
- 	if (chunk->pts_valid) {
- 		input->last_inpts_u64 = chunk->pts64;
-@@ -956,7 +959,6 @@ int vdec_input_add_frame(struct vdec_input_s *input, const char *buf,
- 	struct drm_info drm;
- 	struct vdec_s *vdec = input->vdec;
- 	unsigned long phy_buf;
--	unsigned long flags;
+diff --git a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
+index 6483c96..05b2bec 100644
+--- a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
++++ b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
+@@ -290,6 +290,7 @@ struct vdec_mpeg4_hw_s {
+ 	struct firmware_s *fw;
+ 	u32 blkmode;
+ 	wait_queue_head_t wait_q;
++	u32 dec_again_cnt;
+ };
+ static void vmpeg4_local_init(struct vdec_mpeg4_hw_s *hw);
+ static int vmpeg4_hw_ctx_restore(struct vdec_mpeg4_hw_s *hw);
+@@ -752,7 +753,15 @@ static irqreturn_t vmpeg4_isr_thread_fn(struct vdec_s *vdec, int irq)
+ 			READ_VREG(VIFF_BIT_CNT));
  
- 	if (vdec_secure(vdec)) {
- 		while (count > 0) {
-@@ -980,11 +982,7 @@ int vdec_input_add_frame(struct vdec_input_s *input, const char *buf,
- 	} else {
- 		ret = vdec_input_add_chunk(input, buf, count, 0);
+ 		if (vdec_frame_based(vdec)) {
+-			vmpeg4_save_hw_context(hw);
++			if (++hw->dec_again_cnt > 3) {
++				hw->dec_again_cnt = 0;
++				hw->dec_result = DEC_RESULT_DONE;
++				vdec_schedule_work(&hw->work);
++			} else {
++				//vmpeg4_save_hw_context(hw);
++				hw->dec_result = DEC_RESULT_AGAIN;
++				vdec_schedule_work(&hw->work);
++			}
+ 		} else {
+ 			reset_process_time(hw);
+ 			hw->dec_result = DEC_RESULT_AGAIN;
+@@ -1083,8 +1092,7 @@ static void vmpeg4_work(struct work_struct *work)
+ 		vdec_vframe_dirty(vdec, hw->chunk);
+ 		hw->chunk = NULL;
+ 	} else if (hw->dec_result == DEC_RESULT_AGAIN
+-	&& (vdec->next_status !=
+-		VDEC_STATUS_DISCONNECTED)) {
++		&& (vdec->next_status != VDEC_STATUS_DISCONNECTED)) {
+ 		/*
+ 			stream base: stream buf empty or timeout
+ 			frame base: vdec_prepare_input fail
+@@ -1470,7 +1478,7 @@ static void timeout_process(struct vdec_mpeg4_hw_s *hw)
+ 		amvdec_stop();
+ 		hw->stat &= ~STAT_VDEC_RUN;
  	}
--	flags = vdec_input_lock(input);
--	if ((input->have_frame_num == 1) &&
--		input->vdec_is_input_frame_empty(vdec))
--		input->vdec_up(vdec);
--	vdec_input_unlock(input, flags);
-+
- 	return ret;
- }
- EXPORT_SYMBOL(vdec_input_add_frame);
+-	mmpeg4_debug_print(DECODE_ID(hw), PRINT_FLAG_TIMEOUT_STATUS,
++	mmpeg4_debug_print(DECODE_ID(hw), 0,
+ 		"%s decoder timeout\n", __func__);
+ 	reset_process_time(hw);
+ 	hw->first_i_frame_ready = 0;
+@@ -1671,6 +1679,7 @@ static void vmpeg4_local_init(struct vdec_mpeg4_hw_s *hw)
+ 	hw->buffer_not_ready = 0;
+ 	hw->init_flag = 0;
+ 	hw->dec_result = DEC_RESULT_NONE;
++	hw->dec_again_cnt = 0;
+ 
+ 	for (i = 0; i < DECODE_BUFFER_NUM_MAX; i++)
+ 		hw->vfbuf_use[i] = 0;
+diff --git a/firmware/video_ucode.bin b/firmware/video_ucode.bin
+index 024f549..ca6cc7d 100644
+Binary files a/firmware/video_ucode.bin and b/firmware/video_ucode.bin differ
