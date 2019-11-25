@@ -1,123 +1,33 @@
-commit db74b5174ff068a0d848dde9f293d986177d3a14
-Author: Zhiqiang Han <zhiqiang.han@amlogic.com>
-Date:   Fri May 17 10:48:09 2019 +0800
+commit 9350c90877a21e496d3d89434c623997285cffe0
+Author: Hui Zhang <hui.zhang@amlogic.com>
+Date:   Tue Jul 16 17:05:03 2019 +0800
 
-    ci: incorrect code sequence [1/1]
+    vmh264: fix video quality issue [1/1]
     
-    PD#SWPL-8317
+    PD#SWPL-10667
     
     Problem:
-    incorrect code sequence introduced NULL pointer
+    force di cause bad video qulity for some progressive
+    source.
     
     Solution:
-    set target 1st, then arm the operater
-    cut the func_p off when exit, because the thread not stopped
-    fixed conflict status value
+    add more condition constraint force di
     
     Verify:
-    Patchbuild on R314
+    x301
     
-    Change-Id: I9c88e244baa9f2f91eddb1753550a7e310333c44
-    Signed-off-by: Zhiqiang Han <zhiqiang.han@amlogic.com>
+    Change-Id: I77125e3a086905c36127c922e112c442e61a3a15
+    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
 
-diff --git a/drivers/stream_input/parser/dvb_ci/aml_ci.c b/drivers/stream_input/parser/dvb_ci/aml_ci.c
-index 227eea2..1462e2d 100644
---- a/drivers/stream_input/parser/dvb_ci/aml_ci.c
-+++ b/drivers/stream_input/parser/dvb_ci/aml_ci.c
-@@ -216,11 +216,10 @@ static int aml_ci_slot_status(struct dvb_ca_en50221 *en50221,
- 	if (ci->ci_poll_slot_status != NULL) {
- 		return ci->ci_poll_slot_status(ci, slot, open);
- 	} else {
--		pr_error("ci_poll_slot_status is null %s\r\n", __func__);
--		return -EINVAL;
-+		/*pr_error("ci_poll_slot_status is null %s\r\n", __func__);*/
+diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+index 6b871fa..1166a70 100644
+--- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
++++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+@@ -2390,6 +2390,7 @@ static int check_force_interlace(struct vdec_h264_hw_s *hw,
  	}
  
--	return -EINVAL;
-+	return 0;
- }
- static int aml_ci_cimax_slot_reset(struct dvb_ca_en50221_cimax *en50221,
- 		int slot)
-@@ -276,8 +275,8 @@ static int aml_ci_cimax_ts_control(struct dvb_ca_en50221_cimax *en50221,
- 	}
- 	return 0;
- }
--/**\brief aml_ci_slot_status:get slot status
-- * \param en50221: en50221 obj,used this data to get dvb_ci obj
-+/**\brief aml_ci_cimax_slot_status:get slot status
-+ * \param en50221: en50221_cimax obj,used this data to get dvb_ci obj
-  * \param slot: slot index
-  * \param open: no used
-  * \return
-@@ -294,11 +293,10 @@ static int aml_ci_cimax_slot_status(
- 	if (ci->ci_poll_slot_status != NULL) {
- 		return ci->ci_poll_slot_status(ci, slot, open);
- 	} else {
--		pr_error("ci_poll_slot_status is null %s\r\n", __func__);
--		return -EINVAL;
-+		/*pr_error("ci_poll_slot_status is null %s\r\n", __func__);*/
- 	}
- 
--	return -EINVAL;
-+	return 0;
- }
- 
- /**\brief aml_ci_read_cis: read cis
-@@ -472,14 +470,14 @@ static int aml_ci_get_capbility(struct dvb_ca_en50221_cimax *en50221, int slot)
- 
- 	if (slot != 0) {
- 		pr_error("slot !=0 %s :%d\r\n", __func__, slot);
--		return -EINVAL;
-+		return 0;
- 	}
- 
- 	if (ci->ci_get_capbility != NULL)
- 		return ci->ci_get_capbility(ci, slot);
- 
- 	pr_error("ci_get_capbility is null %s\r\n", __func__);
--	return -EINVAL;
-+	return 0;
- }
- 
- 
-diff --git a/drivers/stream_input/parser/dvb_ci/cimax/aml_cimax.c b/drivers/stream_input/parser/dvb_ci/cimax/aml_cimax.c
-index d6565a0..a462d88 100644
---- a/drivers/stream_input/parser/dvb_ci/cimax/aml_cimax.c
-+++ b/drivers/stream_input/parser/dvb_ci/cimax/aml_cimax.c
-@@ -212,6 +212,8 @@ int aml_cimax_init(struct platform_device *pdev, struct aml_ci *ci)
- 	if (ret != 0)
- 		return ret;
- 
-+	ci->data = cimax;
-+
- 	ci->ci_read_cis = aml_cimax_read_cis;
- 	ci->ci_write_cor = aml_cimax_write_cor;
- 	ci->ci_negotiate = aml_cimax_negotiate;
-@@ -225,7 +227,6 @@ int aml_cimax_init(struct platform_device *pdev, struct aml_ci *ci)
- 	ci->ci_slot_ts_enable = aml_cimax_slot_ts_enable;
- 	ci->ci_poll_slot_status = aml_cimax_slot_status;
- 
--	ci->data = cimax;
- 	return 0;
- }
- EXPORT_SYMBOL(aml_cimax_init);
-@@ -234,6 +235,19 @@ int aml_cimax_exit(struct aml_ci *ci)
- {
- 	struct aml_cimax *cimax = ci->data;
- 
-+	ci->ci_read_cis         = NULL;
-+	ci->ci_write_cor        = NULL;
-+	ci->ci_negotiate        = NULL;
-+	ci->ci_read_lpdu        = NULL;
-+	ci->ci_write_lpdu       = NULL;
-+	ci->ci_read_cam_status  = NULL;
-+	ci->ci_cam_reset        = NULL;
-+	ci->ci_get_capbility    = NULL;
-+	ci->ci_slot_reset       = NULL;
-+	ci->ci_slot_shutdown    = NULL;
-+	ci->ci_slot_ts_enable   = NULL;
-+	ci->ci_poll_slot_status = NULL;
-+
- 	aml_cimax_stop(cimax);
- 
- 	if (cimax->io_type == IO_TYPE_SPI) {
+ 	if ((dec_control & DEC_CONTROL_FLAG_FORCE_2997_1080P_INTERLACE)
++		&& hw->bitstream_restriction_flag
+ 		&& (hw->frame_width == 1920)
+ 		&& (hw->frame_height >= 1080)
+ 		&& (hw->frame_dur == 3203 || hw->frame_dur == 3840)) {
