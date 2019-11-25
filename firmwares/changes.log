@@ -1,35 +1,63 @@
-commit a7727e5c0ac1a4f3299209ed0351a10a3e3138ca
-Author: shihong.zheng <shihong.zheng@amlogic.com>
-Date:   Fri Jun 14 10:30:51 2019 +0800
+commit 96b88a8af905ed5b22c6a09a9365c349ffe9d0b2
+Author: Hui Zhang <hui.zhang@amlogic.com>
+Date:   Thu Jun 13 17:12:05 2019 +0800
 
-    vmpeg12: fix interlace vf type bug. [1/1]
+    vp9: fix vp9 decoder green screen issue [1/1]
     
-    PD#SWPL-9780
+    PD#TV-6406
     
     Problem:
-    pq test display sawtooth.
+    playback youtube, the value vp9_max_pic_x is not correct with some
+    APK. acutal size is beyond max value, cause canvas size overflow
     
     Solution:
-    fix the second vf type error.
+    add a vp9_max_pic_x value check, to use vp9_buf_x as max when
+    origanl  vp9_max_pic_x is less then vp9_buf_x
     
     Verify:
     x301
     
-    Change-Id: I2c0ae1578ab5b319c9700a91edbe47a48b478fdd
-    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
+    Change-Id: Ie9f256ff43ddd81effb1b8b9a990d26fe09d2ee0
+    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-index 668b134..731c645 100644
---- a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-+++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-@@ -1274,7 +1274,9 @@ static int prepare_display_buf(struct vdec_mpeg12_hw_s *hw,
- 			vf->duration = vf->duration / field_num;
- 			vf->duration_pulldown = (field_num == 3) ?
- 				(vf->duration >> 1):0;
--			if (i == 1)
-+			if (i > 0)
-+				type = VIDTYPE_VIU_NV21;
-+			if (i == 1) /* second field*/
- 				type |= (first_field_type == VIDTYPE_INTERLACE_TOP) ?
- 					VIDTYPE_INTERLACE_BOTTOM : VIDTYPE_INTERLACE_TOP;
- 			else
+diff --git a/drivers/frame_provider/decoder/vp9/vvp9.c b/drivers/frame_provider/decoder/vp9/vvp9.c
+index d112c65..8f67a01 100644
+--- a/drivers/frame_provider/decoder/vp9/vvp9.c
++++ b/drivers/frame_provider/decoder/vp9/vvp9.c
+@@ -9930,6 +9930,8 @@ static int ammvdec_vp9_probe(struct platform_device *pdev)
+ 	if ((debug & IGNORE_PARAM_FROM_CONFIG) == 0 &&
+ 			pdata->config_len) {
+ #ifdef MULTI_INSTANCE_SUPPORT
++		int vp9_buf_width = 0;
++		int vp9_buf_height = 0;
+ 		/*use ptr config for doubel_write_mode, etc*/
+ 		vp9_print(pbi, 0, "pdata->config=%s\n", pdata->config);
+ 		if (get_config_int(pdata->config, "vp9_double_write_mode",
+@@ -9943,6 +9945,14 @@ static int ammvdec_vp9_probe(struct platform_device *pdev)
+ 			pbi->save_buffer_mode = config_val;
+ 		else
+ 			pbi->save_buffer_mode = 0;
++		if (get_config_int(pdata->config, "vp9_buf_width",
++				&config_val) == 0) {
++			vp9_buf_width = config_val;
++		}
++		if (get_config_int(pdata->config, "vp9_buf_height",
++				&config_val) == 0) {
++			vp9_buf_height = config_val;
++		}
+ 
+ 		/*use ptr config for max_pic_w, etc*/
+ 		if (get_config_int(pdata->config, "vp9_max_pic_w",
+@@ -9953,6 +9963,12 @@ static int ammvdec_vp9_probe(struct platform_device *pdev)
+ 				&config_val) == 0) {
+ 				pbi->max_pic_h = config_val;
+ 		}
++		if ((pbi->max_pic_w * pbi->max_pic_h)
++			< (vp9_buf_width * vp9_buf_height)) {
++			pbi->max_pic_w = vp9_buf_width;
++			pbi->max_pic_h = vp9_buf_height;
++			vp9_print(pbi, 0, "use buf resolution\n");
++		}
+ #endif
+ 		if (get_config_int(pdata->config, "HDRStaticInfo",
+ 				&vf_dp.present_flag) == 0
