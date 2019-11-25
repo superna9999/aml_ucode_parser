@@ -75,9 +75,16 @@ int parse_package(void *buf)
 	return 512;
 }
 
-void dump_to_file(const char *name, void *buf, int size)
+void dump_to_file(const char *version, const char *name, void *buf, int size)
 {
-	int fd = open(name, O_CREAT | O_WRONLY, 0644);
+	char filename[255];
+	int fd;
+
+	snprintf(filename, 255, "%s/%s", version, name);
+
+	mkdir(version, 0777);
+
+	fd = open(filename, O_CREAT | O_WRONLY, 0644);
 
 	if (size <= 0x4000) {
 		write(fd, buf, size);
@@ -119,7 +126,7 @@ int parse_code(void *buf)
 	buf += 512;
 	real_size = code_real_size(buf, fh->data_size);
 	printf("RealSize: %d (%08X)\n", real_size, real_size);
-	dump_to_file(fh->name, buf, real_size);
+	dump_to_file(fh->version, fh->name, buf, real_size);
 	printf("\n");
 	return 512+fh->data_size;
 }
