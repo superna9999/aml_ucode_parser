@@ -1,27 +1,36 @@
-commit 37c10a56fd46fcc014deaf2e8fff291e31f15411
-Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Thu Sep 12 13:59:39 2019 +0800
+commit 7a1788b8a6b44fd1ea7514d1d836f78b0459ffe7
+Author: Song Zhao <song.zhao@amlogic.com>
+Date:   Thu Sep 12 13:40:51 2019 -0700
 
-    vmh264: fix memory pollution issue caused by LMEM DMA [1/1]
+    esparser: fix address mapping warning [1/1]
     
-    PD#SWPL-14018
+    PD#TV-10166
     
-    Problem
-    LMEM DMA caused memory pullotion
+    Problem:
+    End of AIU buf are not mapped.
     
     Solution:
-    read LMEM dma address from scratch regiest directly
-    
-    ucode gerrit: 85777
-    ucode change id: I98ef
-    ucode commit id: ee37df
+    Avoid converting it to virtual address
     
     Verify:
-    X301
+    T962E2
     
-    Change-Id: I25f129dc1d8b4f77633fbdf49c43794e2b7fe2bf
-    Signed-off-by: Sandy Luo <sandy.luo@amlogic.com>
+    Change-Id: I7ca5d8f987773cb96970a3f3f6bf7f10b28c0889
+    Signed-off-by: Song Zhao <song.zhao@amlogic.com>
 
-diff --git a/firmware/video_ucode.bin b/firmware/video_ucode.bin
-index 25ae9a5..5b83755 100755
-Binary files a/firmware/video_ucode.bin and b/firmware/video_ucode.bin differ
+diff --git a/drivers/stream_input/parser/esparser.c b/drivers/stream_input/parser/esparser.c
+index 1e45893..1cc3ac9 100644
+--- a/drivers/stream_input/parser/esparser.c
++++ b/drivers/stream_input/parser/esparser.c
+@@ -272,6 +272,11 @@ static ssize_t _esparser_write_s(const char __user *buf,
+ 	/*pr_info("write wp 0x%x, count %d, start 0x%x, end 0x%x\n",
+ 	*		 wp, (u32)count, buf_start, buf_end);*/
+ 	if (wp + count > buf_end) {
++		if (wp == buf_end) {
++			wp = buf_start;
++			set_buf_wp(type, wp);
++			return -EAGAIN;
++		}
+ 		vaddr = codec_mm_phys_to_virt(wp);
+ 		ret = copy_from_user(vaddr, p, buf_end - wp);
+ 		if (ret > 0) {
