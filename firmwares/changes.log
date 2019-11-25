@@ -1,83 +1,42 @@
-commit d80ccb9a9b954a7f3805abc31623ef533a1125ed
-Author: Cheng Tong <cheng.tong@amlogic.com>
-Date:   Mon May 13 10:56:20 2019 +0800
+commit da65f980ac37b11a36f8bd81817b8df7cfa249e3
+Author: Rui Wang <rui.wang@amlogic.com>
+Date:   Mon May 13 12:08:53 2019 +0800
 
-    device: add demod avl6762 support [2/3]
+    dvb: test with ts stream with large pts value [1/1]
     
-    PD#SWPL-8315
+    PD#TV-5775
     
     Problem:
-    avl6762 can't support attach mode
+    get a 33bit value error
     
     Solution:
-    add demod avl6762 support
+    Fix access to the correct register
     
     Verify:
-    verify it on franklin.
+    Verify android p at x301
     
-    Change-Id: I179ce385e4226884b510f1cda52e550a84f5dab3
-    Signed-off-by: Cheng Tong <cheng.tong@amlogic.com>
+    Change-Id: I99acfe1a931b616d9c43d55324fe27a0ebc0de5d
+    Signed-off-by: Rui Wang <rui.wang@amlogic.com>
 
-diff --git a/drivers/stream_input/parser/hw_demux/aml_demod_gt.h b/drivers/stream_input/parser/hw_demux/aml_demod_gt.h
-index d3541de..966e66b 100644
---- a/drivers/stream_input/parser/hw_demux/aml_demod_gt.h
-+++ b/drivers/stream_input/parser/hw_demux/aml_demod_gt.h
-@@ -91,4 +91,9 @@ static inline struct dvb_frontend* si2168_attach (const struct amlfe_demod_confi
- 	return NULL;
- }
- 
-+static inline struct dvb_frontend* avl6762_attach (const struct amlfe_demod_config *config)
-+{
-+	return NULL;
-+}
-+
- #endif	/*__AML_DEMOD_GT_H__*/
-diff --git a/drivers/stream_input/parser/hw_demux/aml_dvb.c b/drivers/stream_input/parser/hw_demux/aml_dvb.c
-index 91bf2f7..f24ce60 100644
---- a/drivers/stream_input/parser/hw_demux/aml_dvb.c
-+++ b/drivers/stream_input/parser/hw_demux/aml_dvb.c
-@@ -64,6 +64,7 @@ typedef enum __demod_type
- 	DEMOD_INTERNAL,
- 	DEMOD_ATBM8881,
- 	DEMOD_SI2168,
-+	DEMOD_AVL6762,
- 	DEMOD_MAX_NUM
- }demod_type;
- 
-@@ -2446,6 +2447,16 @@ static int aml_dvb_probe(struct platform_device *pdev)
- 						s_demod_type[i] = DEMOD_SI2168;
- 					}
- 				}
-+				if (!strcmp(name,"Avl6762")) {
-+					frontend[i] = dvb_attach(avl6762_attach,&config);
-+					if (frontend[i] == NULL) {
-+						pr_error("dvb attach demod error\n");
-+						goto error_fe;
-+					} else {
-+						pr_inf("dtvdemod attatch sucess\n");
-+						s_demod_type[i] = DEMOD_AVL6762;
-+					}
-+				}
- 				if (frontend[i]) {
- 					ret = dvb_register_frontend(&advb->dvb_adapter, frontend[i]);
- 					if (ret) {
-@@ -2470,6 +2481,10 @@ error_fe:
- 				dvb_detach(si2168_attach);
- 				frontend[i] = NULL;
- 				s_demod_type[i] = DEMOD_INVALID;
-+			}else if (s_demod_type[i] == DEMOD_AVL6762) {
-+				dvb_detach(avl6762_attach);
-+				frontend[i] = NULL;
-+				s_demod_type[i] = DEMOD_INVALID;
- 			}
- 			if (s_tuner_type[i] == TUNER_SI2151) {
- 				dvb_detach(si2151_attach);
-@@ -2527,6 +2542,8 @@ static int aml_dvb_remove(struct platform_device *pdev)
- 			dvb_detach(atbm8881_attach);
- 		}else if (s_demod_type[i] == DEMOD_SI2168) {
- 			dvb_detach(si2168_attach);
-+		}else if (s_demod_type[i] == DEMOD_AVL6762) {
-+			dvb_detach(avl6762_attach);
- 		}
- 		if (s_tuner_type[i] == TUNER_SI2151) {
- 			dvb_detach(si2151_attach);
+diff --git a/drivers/stream_input/parser/hw_demux/aml_dmx.c b/drivers/stream_input/parser/hw_demux/aml_dmx.c
+index 3b2b9a7..7eb3a61 100644
+--- a/drivers/stream_input/parser/hw_demux/aml_dmx.c
++++ b/drivers/stream_input/parser/hw_demux/aml_dmx.c
+@@ -1310,7 +1310,7 @@ static irqreturn_t dmx_irq_handler(int irq_number, void *para)
+ 		if (pdts_status & (1 << VIDEO_PTS_READY)) {
+ 			video_pts = DMX_READ_REG(dmx->id, VIDEO_PTS_DEMUX);
+ 			video_pts_bit32 =
+-				(status & (1 << VIDEO_PTS_BIT32)) ? 1 : 0;
++				(pdts_status & (1 << VIDEO_PTS_BIT32)) ? 1 : 0;
+ 			if (!first_video_pts
+ 			    || 0 > (int)(video_pts - first_video_pts))
+ 				first_video_pts = video_pts;
+@@ -1319,7 +1319,7 @@ static irqreturn_t dmx_irq_handler(int irq_number, void *para)
+ 		if (pdts_status & (1 << AUDIO_PTS_READY)) {
+ 			audio_pts = DMX_READ_REG(dmx->id, AUDIO_PTS_DEMUX);
+ 			audio_pts_bit32 =
+-				(status & (1 << AUDIO_PTS_BIT32)) ? 1 : 0;
++				(pdts_status & (1 << AUDIO_PTS_BIT32)) ? 1 : 0;
+ 			if (!first_audio_pts
+ 			    || 0 > (int)(audio_pts - first_audio_pts))
+ 				first_audio_pts = audio_pts;
