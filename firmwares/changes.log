@@ -1,36 +1,49 @@
-commit 5a78222678fb04203a784b1ba8ba3caece44588c
-Author: Nanxin Qin <nanxin.qin@amlogic.com>
-Date:   Mon Jan 7 21:10:23 2019 +0800
+commit aff1e3c271817d4021e9ae9705beae9de2293e90
+Author: Hui Zhang <hui.zhang@amlogic.com>
+Date:   Mon Dec 31 17:53:57 2018 +0800
 
-    vdec: fixed the issue of the pts to set fail with drm mode. [1/1]
+    media_module: fix cts test h265 hangup issue [1/1]
     
-    PD#SWPL-3780
+    PD#SWPL-3089
     
     Problem:
-    cast youtube drm video,the video play is very not smooth
+    h265 decoder hangup, cause system reboot
     
     Solution:
-    fixed the issue of the pts to set fail with drm mode.
+    skip error data to avoid decoder crash
     
     Verify:
-    p212
+    Verified p212
     
-    Change-Id: I556e3f2cdbc9b90cb90224ffdb3728ec96724ff6
-    Signed-off-by: Nanxin Qin <nanxin.qin@amlogic.com>
+    Change-Id: I8834eb9d7897a1f0d95c0d9534febf35beba0c51
+    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/utils/vdec_input.c b/drivers/frame_provider/decoder/utils/vdec_input.c
-index a4309b0..9b4f01e 100644
---- a/drivers/frame_provider/decoder/utils/vdec_input.c
-+++ b/drivers/frame_provider/decoder/utils/vdec_input.c
-@@ -937,6 +937,11 @@ int vdec_input_add_frame(struct vdec_input_s *input, const char *buf,
- 				(size_t)drm.drm_pktsize, drm.handle);
- 			count -= sizeof(struct drm_info);
- 			ret += sizeof(struct drm_info);
-+
-+			/* the drm frame data might include head infos and raw */
-+			/* data thus the next drm unit still need a valid pts.*/
-+			if (count >= sizeof(struct drm_info))
-+				vdec->pts_valid = true;
- 		}
- 	} else {
- 		ret = vdec_input_add_chunk(input, buf, count, 0);
+diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
+index 64aed88..544c35d 100644
+--- a/drivers/frame_provider/decoder/h265/vh265.c
++++ b/drivers/frame_provider/decoder/h265/vh265.c
+@@ -1648,6 +1648,7 @@ struct hevc_state_s {
+ 	struct mutex chunks_mutex;
+ 	int need_cache_size;
+ 	u64 sc_start_time;
++	u32 skip_first_nal;
+ } /*hevc_stru_t */;
+ 
+ #ifdef AGAIN_HAS_THRESHOLD
+@@ -8631,10 +8632,15 @@ pic_done:
+ 		hevc->lcu_size_log2 = log2i(hevc->lcu_size);
+ 		if (hevc->pic_w == 0 || hevc->pic_h == 0
+ 						|| hevc->lcu_size == 0
+-						|| is_oversize(hevc->pic_w, hevc->pic_h)) {
++						|| is_oversize(hevc->pic_w, hevc->pic_h)
++						||  (!hevc->skip_first_nal &&
++						(hevc->pic_h == 96) && (hevc->pic_w  == 160))) {
+ 			/* skip search next start code */
+ 			WRITE_VREG(HEVC_WAIT_FLAG, READ_VREG(HEVC_WAIT_FLAG)
+ 						& (~0x2));
++			if  ( !hevc->skip_first_nal &&
++				(hevc->pic_h == 96) && (hevc->pic_w  == 160))
++				hevc->skip_first_nal = 1;
+ 			hevc->skip_flag = 1;
+ 			WRITE_VREG(HEVC_DEC_STATUS_REG,	HEVC_ACTION_DONE);
+ 			/* Interrupt Amrisc to excute */
