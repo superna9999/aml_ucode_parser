@@ -1,158 +1,34 @@
-commit a65ca8a2593d2633620c8fee0e34885421af06aa
-Author: kunpeng.tang <kunpeng.tang@amlogic.com>
-Date:   Wed Mar 27 11:23:59 2019 +0800
+commit c6e96a61c178de159ac4557407e002c3ac14a2b8
+Author: Hui Zhang <hui.zhang@amlogic.com>
+Date:   Thu Mar 28 17:46:12 2019 +0800
 
-    H.265: fix vpu resume issue [1/1]
+    vmh264: fix video flicker issue when stream error  [1/1]
     
-    PD#SWPL-5533
+    PD#SWPL-5826
     
     Problem:
-    system crashed in vpu resume
+    DVB vmh264 playback will appears video flicker when back to
+    start playback, it's dpb innoemal when stream error. output
+    poc is not in sequence.
     
     Solution:
-    Only vpu open_ref_count more than zero,do resume
+    flush dpb first when dpb has error. avoid dpb error data inside
     
     Verify:
-    g12b_w400
+    X301
     
-    Change-Id: I9c2cd6242482293499ffddfea5309e5072014eba
-    Signed-off-by: kunpeng.tang <kunpeng.tang@amlogic.com>
+    Change-Id: Ib8a56c6d4b269a4961e500786939ebc5ea92ed45
+    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
 
-diff --git a/drivers/frame_sink/encoder/h265/vpu.c b/drivers/frame_sink/encoder/h265/vpu.c
-index 4739b21..bddf33d 100644
---- a/drivers/frame_sink/encoder/h265/vpu.c
-+++ b/drivers/frame_sink/encoder/h265/vpu.c
-@@ -1871,72 +1871,73 @@ static s32 vpu_resume(struct platform_device *pdev)
- 	enc_pr(LOG_DEBUG, "vpu_resume\n");
- 
- 	vpu_clk_config(1);
-+	if (s_vpu_open_ref_count > 0) {
-+		for (core = 0; core < MAX_NUM_VPU_CORE; core++) {
-+			if (s_bit_firmware_info[core].size == 0)
-+				continue;
-+			code_base = s_common_memory.phys_addr;
-+			/* ALIGN TO 4KB */
-+			code_size = (s_common_memory.size & ~0xfff);
-+			if (code_size < s_bit_firmware_info[core].size * 2)
-+				goto DONE_WAKEUP;
- 
--	for (core = 0; core < MAX_NUM_VPU_CORE; core++) {
--		if (s_bit_firmware_info[core].size == 0)
--			continue;
--		code_base = s_common_memory.phys_addr;
--		/* ALIGN TO 4KB */
--		code_size = (s_common_memory.size & ~0xfff);
--		if (code_size < s_bit_firmware_info[core].size * 2)
--			goto DONE_WAKEUP;
--
--		/*---- LOAD BOOT CODE */
--		for (i = 0; i < 512; i += 2) {
--			val = s_bit_firmware_info[core].bit_code[i];
--			val |= (s_bit_firmware_info[core].bit_code[i+1] << 16);
--			WriteVpu(code_base+(i*2), val);
--		}
-+			/*---- LOAD BOOT CODE */
-+			for (i = 0; i < 512; i += 2) {
-+				val = s_bit_firmware_info[core].bit_code[i];
-+				val |= (s_bit_firmware_info[core].bit_code[i+1] << 16);
-+				WriteVpu(code_base+(i*2), val);
-+			}
- 
--		regVal = 0;
--		WriteVpuRegister(W4_PO_CONF, regVal);
-+			regVal = 0;
-+			WriteVpuRegister(W4_PO_CONF, regVal);
- 
--		/* Reset All blocks */
--		regVal = 0x7ffffff;
--		WriteVpuRegister(W4_VPU_RESET_REQ, regVal);
-+			/* Reset All blocks */
-+			regVal = 0x7ffffff;
-+			WriteVpuRegister(W4_VPU_RESET_REQ, regVal);
- 
--		/* Waiting reset done */
--		while (ReadVpuRegister(W4_VPU_RESET_STATUS)) {
--			if (time_after(jiffies, timeout))
--				goto DONE_WAKEUP;
--		}
-+			/* Waiting reset done */
-+			while (ReadVpuRegister(W4_VPU_RESET_STATUS)) {
-+				if (time_after(jiffies, timeout))
-+					goto DONE_WAKEUP;
-+			}
- 
--		WriteVpuRegister(W4_VPU_RESET_REQ, 0);
--
--		/* remap page size */
--		remap_size = (code_size >> 12) & 0x1ff;
--		regVal = 0x80000000 | (W4_REMAP_CODE_INDEX<<12)
--			| (0 << 16) | (1<<11) | remap_size;
--		WriteVpuRegister(W4_VPU_REMAP_CTRL, regVal);
--		/* DO NOT CHANGE! */
--		WriteVpuRegister(W4_VPU_REMAP_VADDR, 0x00000000);
--		WriteVpuRegister(W4_VPU_REMAP_PADDR, code_base);
--		WriteVpuRegister(W4_ADDR_CODE_BASE, code_base);
--		WriteVpuRegister(W4_CODE_SIZE, code_size);
--		WriteVpuRegister(W4_CODE_PARAM, 0);
--		WriteVpuRegister(W4_INIT_VPU_TIME_OUT_CNT, timeout);
--		WriteVpuRegister(W4_HW_OPTION, hwOption);
--
--		/* Interrupt */
--		regVal = (1 << W4_INT_DEC_PIC_HDR);
--		regVal |= (1 << W4_INT_DEC_PIC);
--		regVal |= (1 << W4_INT_QUERY_DEC);
--		regVal |= (1 << W4_INT_SLEEP_VPU);
--		regVal |= (1 << W4_INT_BSBUF_EMPTY);
--		regVal = 0xfffffefe;
--		WriteVpuRegister(W4_VPU_VINT_ENABLE, regVal);
--		Wave4BitIssueCommand(core, W4_CMD_INIT_VPU);
--		WriteVpuRegister(W4_VPU_REMAP_CORE_START, 1);
--		while (ReadVpuRegister(W4_VPU_BUSY_STATUS)) {
--			if (time_after(jiffies, timeout))
--				goto DONE_WAKEUP;
--		}
-+			WriteVpuRegister(W4_VPU_RESET_REQ, 0);
-+
-+			/* remap page size */
-+			remap_size = (code_size >> 12) & 0x1ff;
-+			regVal = 0x80000000 | (W4_REMAP_CODE_INDEX<<12)
-+				| (0 << 16) | (1<<11) | remap_size;
-+			WriteVpuRegister(W4_VPU_REMAP_CTRL, regVal);
-+			/* DO NOT CHANGE! */
-+			WriteVpuRegister(W4_VPU_REMAP_VADDR, 0x00000000);
-+			WriteVpuRegister(W4_VPU_REMAP_PADDR, code_base);
-+			WriteVpuRegister(W4_ADDR_CODE_BASE, code_base);
-+			WriteVpuRegister(W4_CODE_SIZE, code_size);
-+			WriteVpuRegister(W4_CODE_PARAM, 0);
-+			WriteVpuRegister(W4_INIT_VPU_TIME_OUT_CNT, timeout);
-+			WriteVpuRegister(W4_HW_OPTION, hwOption);
-+
-+			/* Interrupt */
-+			regVal = (1 << W4_INT_DEC_PIC_HDR);
-+			regVal |= (1 << W4_INT_DEC_PIC);
-+			regVal |= (1 << W4_INT_QUERY_DEC);
-+			regVal |= (1 << W4_INT_SLEEP_VPU);
-+			regVal |= (1 << W4_INT_BSBUF_EMPTY);
-+			regVal = 0xfffffefe;
-+			WriteVpuRegister(W4_VPU_VINT_ENABLE, regVal);
-+			Wave4BitIssueCommand(core, W4_CMD_INIT_VPU);
-+			WriteVpuRegister(W4_VPU_REMAP_CORE_START, 1);
-+			while (ReadVpuRegister(W4_VPU_BUSY_STATUS)) {
-+				if (time_after(jiffies, timeout))
-+					goto DONE_WAKEUP;
-+			}
- 
--		if (ReadVpuRegister(W4_RET_SUCCESS) == 0) {
--			enc_pr(LOG_ERROR,
--				"WAKEUP_VPU failed [0x%x]",
--				ReadVpuRegister(W4_RET_FAIL_REASON));
--			goto DONE_WAKEUP;
-+			if (ReadVpuRegister(W4_RET_SUCCESS) == 0) {
-+				enc_pr(LOG_ERROR,
-+					"WAKEUP_VPU failed [0x%x]",
-+					ReadVpuRegister(W4_RET_FAIL_REASON));
-+				goto DONE_WAKEUP;
-+			}
- 		}
- 	}
- 
+diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+index 1523bdc..fd92bcc 100644
+--- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
++++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+@@ -4845,6 +4845,7 @@ static irqreturn_t vh264_isr_thread_fn(struct vdec_s *vdec, int irq)
+ 						ret,
+ 						hw->decode_pic_count+1,
+ 						hw->skip_frame_count);
++					flush_dpb(p_H264_Dpb);
+ 					hw->data_flag |= ERROR_FLAG;
+ 					p_H264_Dpb->mVideo.dec_picture->data_flag |= ERROR_FLAG;
+ 					if ((error_proc_policy & 0x80)
