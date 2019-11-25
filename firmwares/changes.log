@@ -1,35 +1,79 @@
-commit 6729b94acfd5315c5564a8689b9119591f5e47d2
-Author: kunpeng.tang <kunpeng.tang@amlogic.com>
-Date:   Tue Jun 18 11:33:28 2019 +0800
+commit 8deb34495ce1381aee3ecbccca50c14935576efe
+Author: Nanxin Qin <nanxin.qin@amlogic.com>
+Date:   Sun Jun 23 02:20:32 2019 +0800
 
-    Encoder: validate pgoff for VPU mmap handler [1/1]
+    vp9: fixed vp9 4k playback crash on the tl1. [1/1]
     
-    PD#OTT-3685
+    PD#TV-7024
     
     Problem:
-    unchecked pgoff for VPU mmap handler
+    vp9 4k playback cause to system halt.
     
     Solution:
-    check pgoff for VPU mmap handler
+    1. add seg_map to the struct workbuff of 8k.
+    2. fixed issue of use about container_of.
     
     Verify:
-    S922X-W200 & Android-9.0
+    x301
     
-    Change-Id: I9c329332b56b73a1f855af01103e3074d03211d4
-    Signed-off-by: kunpeng.tang <kunpeng.tang@amlogic.com>
+    Change-Id: I75ee2176f3b5ff9808679045df9837ebfaa6673d
+    Signed-off-by: Nanxin Qin <nanxin.qin@amlogic.com>
 
-diff --git a/drivers/frame_sink/encoder/h265/vpu.c b/drivers/frame_sink/encoder/h265/vpu.c
-index 8775930..40b47d0 100644
---- a/drivers/frame_sink/encoder/h265/vpu.c
-+++ b/drivers/frame_sink/encoder/h265/vpu.c
-@@ -1477,6 +1477,10 @@ static s32 vpu_map_to_physical_memory(
- 				pgprot_noncached(vm->vm_page_prot);
- 	}
- 	/* vm->vm_page_prot = pgprot_writecombine(vm->vm_page_prot); */
-+	if (!pfn_valid(vm->vm_pgoff)) {
-+		enc_pr(LOG_ERROR, "%s invalid pfn\n", __FUNCTION__);
-+		return -EAGAIN;
-+	}
- 	return remap_pfn_range(vm, vm->vm_start, vm->vm_pgoff,
- 		vm->vm_end - vm->vm_start, vm->vm_page_prot) ? -EAGAIN : 0;
+diff --git a/drivers/frame_provider/decoder/vp9/vvp9.c b/drivers/frame_provider/decoder/vp9/vvp9.c
+index 8ee43a6..75f42a0 100644
+--- a/drivers/frame_provider/decoder/vp9/vvp9.c
++++ b/drivers/frame_provider/decoder/vp9/vvp9.c
+@@ -3144,6 +3144,10 @@ static struct BuffInfo_s amvvp9_workbuff_spec[WORK_BUF_SPEC_NUM] = {
+ 		.dblk_data = {
+ 			.buf_size = 0x80000*2,
+ 		},
++		.seg_map = {
++			/*4096x2304/64/64 *24 = 0xd800 Bytes*/
++			.buf_size = 0xd800*4,
++		},
+ 		.mmu_vbh = {
+ 			.buf_size = 0x5000*2, //2*16*(more than 2304)/4, 4K
+ 		},
+@@ -8121,14 +8125,13 @@ static irqreturn_t vvp9_isr(int irq, void *data)
+ static void vp9_set_clk(struct work_struct *work)
+ {
+ 	struct VP9Decoder_s *pbi = container_of(work,
+-		struct VP9Decoder_s, work);
++		struct VP9Decoder_s, set_clk_work);
++	int fps = 96000 / pbi->frame_dur;
+ 
+-		int fps = 96000 / pbi->frame_dur;
+-
+-		if (hevc_source_changed(VFORMAT_VP9,
+-			frame_width, frame_height, fps) > 0)
+-			pbi->saved_resolution = frame_width *
+-			frame_height * fps;
++	if (hevc_source_changed(VFORMAT_VP9,
++		frame_width, frame_height, fps) > 0)
++		pbi->saved_resolution = frame_width *
++		frame_height * fps;
  }
+ 
+ static void vvp9_put_timer_func(unsigned long arg)
+@@ -10116,21 +10119,6 @@ static int ammvdec_vp9_probe(struct platform_device *pdev)
+ 			   pbi->buf_size);
+ 	}
+ 
+-	if (pdata->sys_info) {
+-		pbi->vvp9_amstream_dec_info = *pdata->sys_info;
+-		if ((unsigned long) pbi->vvp9_amstream_dec_info.param
+-			& 0x08){
+-			pbi->low_latency_flag = 1;
+-		} else
+-			pbi->low_latency_flag = low_latency_flag;
+-	}
+-	else {
+-		pbi->vvp9_amstream_dec_info.width = 0;
+-		pbi->vvp9_amstream_dec_info.height = 0;
+-		pbi->vvp9_amstream_dec_info.rate = 30;
+-		pbi->low_latency_flag = low_latency_flag;
+-	}
+-
+ 	pbi->cma_dev = pdata->cma_dev;
+ 	if (vvp9_init(pdata) < 0) {
+ 		pr_info("\namvdec_vp9 init failed.\n");
