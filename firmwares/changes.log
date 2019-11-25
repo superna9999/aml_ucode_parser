@@ -1,38 +1,61 @@
-commit b7fa8c54fc559341cb2bb260c31ec3ffef9d1e5f
-Author: rongrong zhou <rongrong.zhou@amlogic.com>
-Date:   Wed Feb 13 10:17:59 2019 +0800
+commit daa682836fdcdeaebdd3783eae69cdb6dcf68afe
+Author: Conglin Guo <conglin.guo@amlogic.com>
+Date:   Wed Jan 30 10:11:34 2019 +0800
 
-    mh264: 8k h264 mmubox allocation check [1/1]
+    media_modules: Some of h265  video Loop play stop [1/1]
     
-    PD#SWPL-4719
+    PD#SWPL-4466
     
     Problem:
-        8k h264 crash
+    video Loop play stop,dump decoder state, There is no bufspec
+    available, general sps_max_dec_pic_buffering_minus1_0 and
+    sps_num_reorder_pics_0 diff is 1,Some special h265 video,
+    sps_max_dec_pic_buffering_minus1_0 - sps_num_reorder_pics_0 >= 4,
+    video Loop play,no bufspec available.
     
     Solution:
-        we do not support 8k h264, no need to enlarge MAX_FRAME_4K_NUM to match 8K,
-        if cur_mmu_4k_number > MAX_FRAME_4K_NUM, return error
+    1.sps_max_dec_pic_buffering_minus1_0 - sps_num_reorder_pics_0 >=4,
+    add one decode buf.
     
     Verify:
-        Verified x301
+    T962x2
     
-    Change-Id: I1fb1d19a472cc00b0052cbe347b0e7541c99adac
+    Change-Id: I87c631da4c022fa0e59b939bea5750c5cb1ae227
+    Signed-off-by: Conglin Guo <conglin.guo@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-index e6c8441..15b5010 100644
---- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
-+++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-@@ -911,6 +911,13 @@ static int hevc_alloc_mmu(struct vdec_h264_hw_s *hw, int pic_idx,
- 		PRINT_FLAG_MMU_DETAIL,
- 		"alloc_mmu new_fb_idx %d picture_size %d cur_mmu_4k_number %d\n",
- 		cur_buf_idx, picture_size, cur_mmu_4k_number);
+diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
+index 758b344..6845e1b 100644
+--- a/drivers/frame_provider/decoder/h265/vh265.c
++++ b/drivers/frame_provider/decoder/h265/vh265.c
+@@ -2967,6 +2967,8 @@ static void dealloc_pic_buf(struct hevc_state_s *hevc,
+ static int get_work_pic_num(struct hevc_state_s *hevc)
+ {
+ 	int used_buf_num = 0;
++	int sps_pic_buf_diff = 0;
 +
-+	if (cur_mmu_4k_number > MAX_FRAME_4K_NUM) {
-+		pr_err("hevc_alloc_mmu cur_mmu_4k_number %d unsupport\n",
-+		cur_mmu_4k_number);
-+		return -1;
+ 	if (get_dynamic_buf_num_margin(hevc) > 0) {
+ 		if ((!hevc->sps_num_reorder_pics_0) &&
+ 			(hevc->param.p.sps_max_dec_pic_buffering_minus1_0)) {
+@@ -2977,6 +2979,10 @@ static int get_work_pic_num(struct hevc_state_s *hevc)
+ 		} else
+ 			used_buf_num = hevc->sps_num_reorder_pics_0
+ 				+ get_dynamic_buf_num_margin(hevc);
++
++		sps_pic_buf_diff = hevc->param.p.sps_max_dec_pic_buffering_minus1_0
++					- hevc->sps_num_reorder_pics_0;
++
+ #ifdef MULTI_INSTANCE_SUPPORT
+ 		/*
+ 		need one more for multi instance, as
+@@ -2994,6 +3000,11 @@ static int get_work_pic_num(struct hevc_state_s *hevc)
+ 				"save buf _mode : dynamic_buf_num_margin %d ----> %d \n",
+ 				dynamic_buf_num_margin,  hevc->dynamic_buf_num_margin);
+ 
++	if (sps_pic_buf_diff >= 4)
++	{
++		used_buf_num += 1;
 +	}
 +
- 	return decoder_mmu_box_alloc_idx(
- 	hw->mmu_box,
- 	cur_buf_idx,
+ 	if (used_buf_num > MAX_BUF_NUM)
+ 		used_buf_num = MAX_BUF_NUM;
+ 	return used_buf_num;
