@@ -1,550 +1,61 @@
-commit ca482a9ce3892e74185a4e551a9858a5665eedc3
-Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Fri Dec 21 09:15:26 2018 +0800
+commit 2e50e35d8c28bd54ff4207fba29a7fa088bb5990
+Author: Nanxin Qin <nanxin.qin@amlogic.com>
+Date:   Thu Dec 27 16:14:46 2018 +0800
 
-    media_module: not to block to wait scatter cache done [2/2]
+    vmh264: fixed the issue of the mb size checking. [1/1]
     
-    PD#SWPL-2206
+    PD#SWPL-3564
     
     Problem:
-    decoding thread was blocked to wait scatter memory to be cached done. it
-    may take 30+ ms and lead to cts/vts fail
+    Black screen occured when playing 2160x3840 4K video.
     
     Solution:
-    not to wait scatter cached done. it save timing of system
+    fixed the issue of the mb size checking.
     
     Verify:
-    Verified U212
+    u212
     
-    Change-Id: I1811c9796a93452342f91a66d984cf48561903d3
-    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
+    Change-Id: Ief18170dc8a8e41ce4d558794f1b07a78f77de04
+    Signed-off-by: Nanxin Qin <nanxin.qin@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/avs2/vavs2.c b/drivers/frame_provider/decoder/avs2/vavs2.c
-index 571fb5d..b6c72ec 100644
---- a/drivers/frame_provider/decoder/avs2/vavs2.c
-+++ b/drivers/frame_provider/decoder/avs2/vavs2.c
-@@ -625,6 +625,7 @@ struct AVS2Decoder_s {
- 	u32 frame_ar;
- 	int fatal_error;
- 	uint8_t init_flag;
-+	uint8_t first_sc_checked;
- 	uint8_t process_busy;
- #define PROC_STATE_INIT			0
- #define PROC_STATE_HEAD_DONE	1
-@@ -744,7 +745,8 @@ struct AVS2Decoder_s {
- 	uint32_t mpred_abv_start_addr_bak;
- 	u8 next_again_flag;
- 	u32 pre_parser_wr_ptr;
--
-+	int need_cache_size;
-+	u64 sc_start_time;
- };
- 
- static int  compute_losless_comp_body_size(
-@@ -5714,12 +5716,6 @@ static s32 vavs2_init(struct vdec_s *vdec)
- 	dec->stat |= STAT_TIMER_ARM;
- 
- 	/* dec->stat |= STAT_KTHREAD; */
--
--	amhevc_start();
--
--	dec->stat |= STAT_VDEC_RUN;
--
--	dec->init_flag = 1;
- 	dec->process_busy = 0;
- 	avs2_print(dec, AVS2_DBG_BUFMGR_MORE,
- 		"%d, vavs2_init, RP=0x%x\n",
-@@ -5730,7 +5726,7 @@ static s32 vavs2_init(struct vdec_s *vdec)
- static int vmavs2_stop(struct AVS2Decoder_s *dec)
- {
- 	dec->init_flag = 0;
--
-+	dec->first_sc_checked = 0;
- 	if (dec->stat & STAT_TIMER_ARM) {
- 		del_timer_sync(&dec->timer);
- 		dec->stat &= ~STAT_TIMER_ARM;
-@@ -5762,7 +5758,7 @@ static int vavs2_stop(struct AVS2Decoder_s *dec)
- {
- 
- 	dec->init_flag = 0;
--
-+	dec->first_sc_checked = 0;
- 	if (dec->stat & STAT_VDEC_RUN) {
- 		amhevc_stop();
- 		dec->stat &= ~STAT_VDEC_RUN;
-@@ -5804,11 +5800,14 @@ static int amvdec_avs2_mmu_init(struct AVS2Decoder_s *dec)
- {
- 	int tvp_flag = vdec_secure(hw_to_vdec(dec)) ?
- 		CODEC_MM_FLAGS_TVP : 0;
-+	int buf_size = 48;
- 
- #ifdef AVS2_10B_MMU
-+	dec->need_cache_size = buf_size * SZ_1M;
-+	dec->sc_start_time = get_jiffies_64();
- 	dec->mmu_box = decoder_mmu_box_alloc_box(DRIVER_NAME,
- 		dec->index, FRAME_BUFFERS,
--		48 * SZ_1M,
-+		dec->need_cache_size,
- 		tvp_flag
- 		);
- 	if (!dec->mmu_box) {
-@@ -5845,7 +5844,7 @@ static int amvdec_avs2_probe(struct platform_device *pdev)
- 	memcpy(&dec->m_BUF[0], &BUF[0], sizeof(struct BUF_s) * MAX_BUF_NUM);
- 
- 	dec->init_flag = 0;
--
-+	dec->first_sc_checked = 0;
- 	dec->eos = 0;
- 	dec->start_process_time = 0;
- 	dec->timeout_num = 0;
-@@ -6190,6 +6189,8 @@ static unsigned long run_ready(struct vdec_s *vdec, unsigned long mask)
- {
- 	struct AVS2Decoder_s *dec =
- 		(struct AVS2Decoder_s *)vdec->private;
-+	int tvp = vdec_secure(hw_to_vdec(dec)) ?
-+		CODEC_MM_FLAGS_TVP : 0;
- 	unsigned long ret = 0;
- 	avs2_print(dec,
- 		PRINT_FLAG_VDEC_DETAIL, "%s\r\n", __func__);
-@@ -6198,6 +6199,13 @@ static unsigned long run_ready(struct vdec_s *vdec, unsigned long mask)
- 
- 	if (dec->eos)
- 		return ret;
-+	if (!dec->first_sc_checked) {
-+		int size = decoder_mmu_box_sc_check(dec->mmu_box, tvp);
-+		dec->first_sc_checked = 1;
-+		avs2_print(dec, 0, "vavs2 cached=%d  need_size=%d speed= %d ms\n",
-+			size, (dec->need_cache_size >> PAGE_SHIFT),
-+					(int)(get_jiffies_64() - dec->sc_start_time) * 1000/HZ);
-+	}
- 
- 	if (dec->next_again_flag &&
- 		(!vdec_frame_based(vdec))) {
-@@ -6669,6 +6677,7 @@ static int ammvdec_avs2_probe(struct platform_device *pdev)
- 	dec->buf_size = work_buf_size;
- #endif
- 	dec->init_flag = 0;
-+	dec->first_sc_checked = 0;
- 	dec->fatal_error = 0;
- 	dec->show_frame_num = 0;
- 	if (pdata == NULL) {
 diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-index b687045..e6675e4 100644
+index e6675e4..c86e738 100644
 --- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
 +++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-@@ -643,6 +643,7 @@ struct vdec_h264_hw_s {
- 	struct vframe_s switching_fense_vf;
- 	struct h264_dpb_stru dpb;
- 	u8 init_flag;
-+	u8 first_sc_checked;
- 	u8 has_i_frame;
- 	u8 config_bufmgr_done;
- 	u32 max_reference_size;
-@@ -813,6 +814,8 @@ struct vdec_h264_hw_s {
- 	wait_queue_head_t wait_q;
- 	u32 reg_g_status;
- 	struct mutex chunks_mutex;
-+	int need_cache_size;
-+	u64 sc_start_time;
- };
+@@ -872,6 +872,23 @@ static void h264_clear_dpb(struct vdec_h264_hw_s *hw);
+ /* 0:linear 1:32x32 2:64x32 ; m8baby test1902 */
+ static u32 mem_map_mode = H265_MEM_MAP_MODE;
  
- static u32 again_threshold = 0x40;
-@@ -5675,6 +5678,7 @@ static void vh264_local_init(struct vdec_h264_hw_s *hw)
- {
- 	int i;
- 	hw->init_flag = 0;
-+	hw->first_sc_checked= 0;
- 	hw->eos = 0;
- 	hw->valve_count = 0;
- 	hw->config_bufmgr_done = 0;
-@@ -6973,16 +6977,17 @@ static unsigned long run_ready(struct vdec_s *vdec, unsigned long mask)
- 	bool ret = 0;
- 	struct vdec_h264_hw_s *hw =
- 		(struct vdec_h264_hw_s *)vdec->private;
-+	int tvp = vdec_secure(hw_to_vdec(hw)) ?
-+		CODEC_MM_FLAGS_TVP : 0;
- 
--	/*
--	if (hw->mmu_enable && vdec_stream_based(vdec)) {
--		if( (pts_get_rec_num(PTS_TYPE_VIDEO,
--			vdec->input.total_rd_count) < stream_mode_start_num)) {
--			vdec->need_more_data |= VDEC_NEED_MORE_DATA;
--			return false;
--		}
--		vdec->need_more_data &= ~VDEC_NEED_MORE_DATA;
--	}*/
-+	if (!hw->first_sc_checked && hw->mmu_enable) {
-+		int size = decoder_mmu_box_sc_check(hw->mmu_box, tvp);
-+		hw->first_sc_checked =1;
-+		dpb_print(DECODE_ID(hw), 0,
-+			"vmh264 cached=%d  need_size=%d speed= %d ms\n",
-+			size, (hw->need_cache_size >> PAGE_SHIFT),
-+			(int)(get_jiffies_64() - hw->sc_start_time) * 1000/HZ);
-+	}
- 
- 	if (vdec_stream_based(vdec) && (hw->init_flag == 0)
- 		&& pre_decode_buf_level != 0) {
-@@ -7499,14 +7504,17 @@ int ammvdec_h264_mmu_init(struct vdec_h264_hw_s *hw)
- 	int ret = -1;
- 	int tvp_flag = vdec_secure(hw_to_vdec(hw)) ?
- 		CODEC_MM_FLAGS_TVP : 0;
-+	int buf_size = 64;
- 
- 	pr_debug("ammvdec_h264_mmu_init tvp = 0x%x mmu_enable %d\n",
- 			tvp_flag, hw->mmu_enable);
-+	hw->need_cache_size = buf_size * SZ_1M;
-+	hw->sc_start_time = get_jiffies_64();
- 	if (hw->mmu_enable && !hw->mmu_box) {
- 		hw->mmu_box = decoder_mmu_box_alloc_box(DRIVER_NAME,
- 				hw->id,
- 				MMU_MAX_BUFFERS,
--				64 * SZ_1M,
-+				hw->need_cache_size,
- 				tvp_flag);
- 		if (!hw->mmu_box) {
- 			pr_err("h264 4k alloc mmu box failed!!\n");
-diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
-index 4917c1e..432d050 100644
---- a/drivers/frame_provider/decoder/h265/vh265.c
-+++ b/drivers/frame_provider/decoder/h265/vh265.c
-@@ -1587,6 +1587,7 @@ struct hevc_state_s {
- #endif
- 	struct dec_sysinfo vh265_amstream_dec_info;
- 	unsigned char init_flag;
-+	unsigned char first_sc_checked;
- 	unsigned char uninit_list;
- 	u32 start_decoding_time;
- 
-@@ -1645,6 +1646,8 @@ struct hevc_state_s {
- 	u32 first_pic_flag;
- 	u32 decode_size;
- 	struct mutex chunks_mutex;
-+	int need_cache_size;
-+	u64 sc_start_time;
- } /*hevc_stru_t */;
- 
- #ifdef AGAIN_HAS_THRESHOLD
-@@ -2167,10 +2170,8 @@ static unsigned int log2i(unsigned int val)
- }
- 
- static int init_buf_spec(struct hevc_state_s *hevc);
--
- static void uninit_mmu_buffers(struct hevc_state_s *hevc)
- {
--
- 	if (hevc->mmu_box)
- 		decoder_mmu_box_free(hevc->mmu_box);
- 	hevc->mmu_box = NULL;
-@@ -2192,6 +2193,8 @@ static int init_mmu_buffers(struct hevc_state_s *hevc)
- 		hevc_print(hevc, 0, "%s max_w %d max_h %d\n",
- 			__func__, hevc->max_pic_w, hevc->max_pic_h);
- 	}
-+	hevc->need_cache_size = buf_size * SZ_1M;
-+	hevc->sc_start_time = get_jiffies_64();
- 	if (hevc->mmu_enable
- 		&& ((get_double_write_mode(hevc) & 0x10) == 0)) {
- 		hevc->mmu_box = decoder_mmu_box_alloc_box(DRIVER_NAME,
-@@ -2205,6 +2208,7 @@ static int init_mmu_buffers(struct hevc_state_s *hevc)
- 			return -1;
- 		}
- 	}
++#define MAX_SIZE_8K (8192 * 4608)
++#define MAX_SIZE_4K (4096 * 2304)
 +
- 	hevc->bmmu_box = decoder_bmmu_box_alloc_box(DRIVER_NAME,
- 			hevc->index,
- 			BMMU_MAX_BUFFERS,
-@@ -9087,7 +9091,7 @@ static int h265_task_handle(void *data)
- 			hevc_print(hevc, 0, "uninit list\n");
- 			hevc->uninit_list = 0;
- #ifdef USE_UNINIT_SEMA
--			if (use_cma && hevc->init_flag) {
-+			if (use_cma) {
- 				up(&hevc->h265_uninit_done_sema);
- 				while (!kthread_should_stop())
- 					msleep(1);
-@@ -9552,17 +9556,14 @@ static s32 vh265_init(struct hevc_state_s *hevc)
- 				(1 << 3));	/* 3 */
- 	}
- #endif
--	amhevc_start();
- 
--	hevc->stat |= STAT_VDEC_RUN;
- #ifndef MULTI_INSTANCE_SUPPORT
- 	set_vdec_func(&vh265_dec_status);
- #endif
-+	amhevc_start();
-+	hevc->stat |= STAT_VDEC_RUN;
- 	hevc->init_flag = 1;
--	if (hevc->mmu_enable)
--		error_handle_threshold = 300;
--	else
--		error_handle_threshold = 30;
-+	error_handle_threshold = 30;
- 	/* pr_info("%d, vh265_init, RP=0x%x\n",
- 	 *   __LINE__, READ_VREG(HEVC_STREAM_RD_PTR));
- 	 */
-@@ -9620,12 +9621,10 @@ static int vh265_stop(struct hevc_state_s *hevc)
- 		hevc->uninit_list = 1;
- 		up(&h265_sema);
- #ifdef USE_UNINIT_SEMA
--		if (hevc->init_flag) {
--			down(&hevc->h265_uninit_done_sema);
--			if (!IS_ERR(h265_task)) {
--				kthread_stop(h265_task);
--				h265_task = NULL;
--			}
-+		down(&hevc->h265_uninit_done_sema);
-+		if (!IS_ERR(h265_task)) {
-+			kthread_stop(h265_task);
-+			h265_task = NULL;
- 		}
- #else
- 		while (hevc->uninit_list)	/* wait uninit complete */
-@@ -9634,6 +9633,7 @@ static int vh265_stop(struct hevc_state_s *hevc)
- 
- 	}
- 	hevc->init_flag = 0;
-+	hevc->first_sc_checked = 0;
- 	cancel_work_sync(&hevc->notify_work);
- 	cancel_work_sync(&hevc->set_clk_work);
- 	uninit_mmu_buffers(hevc);
-@@ -9755,6 +9755,7 @@ static int vmh265_stop(struct hevc_state_s *hevc)
- #endif
- 	}
- 	hevc->init_flag = 0;
-+	hevc->first_sc_checked = 0;
- 	cancel_work_sync(&hevc->work);
- 	cancel_work_sync(&hevc->notify_work);
- 	cancel_work_sync(&hevc->set_clk_work);
-@@ -10217,11 +10218,12 @@ static int vh265_hw_ctx_restore(struct hevc_state_s *hevc)
- 	vh265_prot_init(hevc);
- 	return 0;
- }
--
- static unsigned long run_ready(struct vdec_s *vdec, unsigned long mask)
- {
- 	struct hevc_state_s *hevc =
- 		(struct hevc_state_s *)vdec->private;
-+	int tvp = vdec_secure(hw_to_vdec(hevc)) ?
-+		CODEC_MM_FLAGS_TVP : 0;
- 	bool ret = 0;
- 	if (step == 0x12)
- 		return 0;
-@@ -10230,7 +10232,14 @@ static unsigned long run_ready(struct vdec_s *vdec, unsigned long mask)
- 
- 	if (hevc->eos)
- 		return 0;
--
-+	if (!hevc->first_sc_checked && hevc->mmu_enable) {
-+		int size = decoder_mmu_box_sc_check(hevc->mmu_box, tvp);
-+		hevc->first_sc_checked =1;
-+		hevc_print(hevc, 0,
-+			"vh265 cached=%d  need_size=%d speed= %d ms\n",
-+			size, (hevc->need_cache_size >> PAGE_SHIFT),
-+			(int)(get_jiffies_64() - hevc->sc_start_time) * 1000/HZ);
-+	}
- 	if (vdec_stream_based(vdec) && (hevc->init_flag == 0)
- 			&& pre_decode_buf_level != 0) {
- 			u32 rp, wp, level;
-@@ -10244,8 +10253,7 @@ static unsigned long run_ready(struct vdec_s *vdec, unsigned long mask)
- 
- 			if (level < pre_decode_buf_level)
- 				return 0;
--		}
--
-+	}
- 
- #ifdef AGAIN_HAS_THRESHOLD
- 	if (hevc->next_again_flag &&
-@@ -10317,7 +10325,6 @@ static void run(struct vdec_s *vdec, unsigned long mask,
- 	}
- 	input_empty[hevc->index] = 0;
- 	hevc->dec_result = DEC_RESULT_NONE;
--
- 	if (vdec_frame_based(vdec) &&
- 		((get_dbg_flag(hevc) & PRINT_FLAG_VDEC_STATUS)
- 		|| is_log_enable(hevc)))
-@@ -10396,7 +10403,6 @@ static void run(struct vdec_s *vdec, unsigned long mask,
- 		vdec_schedule_work(&hevc->work);
- 		return;
- 	}
--
- 	vdec_enable_input(vdec);
- 
- 	WRITE_VREG(HEVC_DEC_STATUS_REG, HEVC_ACTION_DONE);
-@@ -10489,6 +10495,7 @@ static int amvdec_h265_probe(struct platform_device *pdev)
- 		parser_sei_enable = 7; /*old 1*/
- 	hevc->m_ins_flag = 0;
- 	hevc->init_flag = 0;
-+	hevc->first_sc_checked = 0;
- 	hevc->uninit_list = 0;
- 	hevc->fatal_error = 0;
- 	hevc->show_frame_num = 0;
-@@ -10936,6 +10943,7 @@ static int ammvdec_h265_probe(struct platform_device *pdev)
- 		(parser_sei_enable & 0x100) == 0)
- 		parser_sei_enable = 7;
- 	hevc->init_flag = 0;
-+	hevc->first_sc_checked = 0;
- 	hevc->uninit_list = 0;
- 	hevc->fatal_error = 0;
- 	hevc->show_frame_num = 0;
-diff --git a/drivers/frame_provider/decoder/utils/decoder_mmu_box.c b/drivers/frame_provider/decoder/utils/decoder_mmu_box.c
-index 87b0509..cc9e7a9 100644
---- a/drivers/frame_provider/decoder/utils/decoder_mmu_box.c
-+++ b/drivers/frame_provider/decoder/utils/decoder_mmu_box.c
-@@ -74,6 +74,16 @@ static int decoder_mmu_box_mgr_del_box(struct decoder_mmu_box *box)
- 	return 0;
- }
- 
-+int decoder_mmu_box_sc_check(void *handle, int is_tvp)
++static int is_oversize(int w, int h)
 +{
-+	struct decoder_mmu_box *box = handle;
-+	if (!box) {
-+			pr_err("mmu box NULL !!!\n");
-+			return 0;
-+	}
-+	return codec_mm_scatter_size(is_tvp);
++	int max = (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1)?
++		MAX_SIZE_8K : MAX_SIZE_4K;
++
++	if (w < 0 || h < 0)
++		return true;
++
++	if (h != 0 && (w > max / h))
++		return true;
++
++	return false;
 +}
-+EXPORT_SYMBOL(decoder_mmu_box_sc_check);
- 
- 
- void *decoder_mmu_box_alloc_box(const char *name,
-diff --git a/drivers/frame_provider/decoder/utils/decoder_mmu_box.h b/drivers/frame_provider/decoder/utils/decoder_mmu_box.h
-index 4aa9bf5..9f4e098 100644
---- a/drivers/frame_provider/decoder/utils/decoder_mmu_box.h
-+++ b/drivers/frame_provider/decoder/utils/decoder_mmu_box.h
-@@ -24,6 +24,8 @@ void *decoder_mmu_box_alloc_box(const char *name,
- 	int min_size_M,
- 	int mem_flags);
- 
-+int decoder_mmu_box_sc_check(void *handle, int is_tvp);
 +
- int decoder_mmu_box_alloc_idx(
- 	void *handle, int idx, int num_pages,
- 	unsigned int *mmu_index_adr);
-diff --git a/drivers/frame_provider/decoder/vp9/vvp9.c b/drivers/frame_provider/decoder/vp9/vvp9.c
-index 2e4868a..7968a30 100644
---- a/drivers/frame_provider/decoder/vp9/vvp9.c
-+++ b/drivers/frame_provider/decoder/vp9/vvp9.c
-@@ -984,6 +984,7 @@ struct VP9Decoder_s {
- 	u32 frame_ar;
- 	int fatal_error;
- 	uint8_t init_flag;
-+	uint8_t first_sc_checked;
- 	uint8_t process_busy;
- #define PROC_STATE_INIT			0
- #define PROC_STATE_DECODESLICE	1
-@@ -1135,6 +1136,8 @@ struct VP9Decoder_s {
- 	union param_u s1_param;
- 	u8 back_not_run_ready;
- #endif
-+	int need_cache_size;
-+	u64 sc_start_time;
- };
- 
- static void resize_context_buffers(struct VP9Decoder_s *pbi,
-@@ -8131,17 +8134,14 @@ static s32 vvp9_init(struct VP9Decoder_s *pbi)
- 	pbi->timer.function = vvp9_put_timer_func;
- 	pbi->timer.expires = jiffies + PUT_INTERVAL;
- 
-+	pbi->stat |= STAT_VDEC_RUN;
- 
- 	add_timer(&pbi->timer);
- 
- 	pbi->stat |= STAT_TIMER_ARM;
- 
--	/* pbi->stat |= STAT_KTHREAD; */
--
- 	amhevc_start();
- 
--	pbi->stat |= STAT_VDEC_RUN;
--
- 	pbi->init_flag = 1;
- 	pbi->process_busy = 0;
- 	pr_info("%d, vvp9_init, RP=0x%x\n",
-@@ -8194,7 +8194,7 @@ static int vvp9_stop(struct VP9Decoder_s *pbi)
- {
- 
- 	pbi->init_flag = 0;
--
-+	pbi->first_sc_checked = 0;
- 	if (pbi->stat & STAT_VDEC_RUN) {
- 		amhevc_stop();
- 		pbi->stat &= ~STAT_VDEC_RUN;
-@@ -8244,12 +8244,12 @@ static int vvp9_stop(struct VP9Decoder_s *pbi)
- 	pbi->fw = NULL;
- 	return 0;
- }
--
- static int amvdec_vp9_mmu_init(struct VP9Decoder_s *pbi)
- {
- 	int tvp_flag = vdec_secure(hw_to_vdec(pbi)) ?
- 		CODEC_MM_FLAGS_TVP : 0;
- 	int buf_size = 48;
-+
- 	if ((pbi->max_pic_w * pbi->max_pic_h > 1280*736) &&
- 		(pbi->max_pic_w * pbi->max_pic_h <= 1920*1088)) {
- 		buf_size = 12;
-@@ -8257,10 +8257,12 @@ static int amvdec_vp9_mmu_init(struct VP9Decoder_s *pbi)
- 		(pbi->max_pic_w * pbi->max_pic_h <= 1280*736)) {
- 		buf_size = 4;
- 	}
-+	pbi->need_cache_size = buf_size * SZ_1M;
-+	pbi->sc_start_time = get_jiffies_64();
- 	if (pbi->mmu_enable && ((pbi->double_write_mode & 0x10) == 0)) {
- 		pbi->mmu_box = decoder_mmu_box_alloc_box(DRIVER_NAME,
- 			pbi->index, FRAME_BUFFERS,
--			buf_size * SZ_1M,
-+			pbi->need_cache_size,
- 			tvp_flag
- 			);
- 		if (!pbi->mmu_box) {
-@@ -8268,7 +8270,6 @@ static int amvdec_vp9_mmu_init(struct VP9Decoder_s *pbi)
- 			return -1;
- 		}
- 	}
--
- 	pbi->bmmu_box = decoder_bmmu_box_alloc_box(
- 			DRIVER_NAME,
- 			pbi->index,
-@@ -8311,7 +8312,7 @@ static int amvdec_vp9_probe(struct platform_device *pdev)
- 	memcpy(&pbi->m_BUF[0], &BUF[0], sizeof(struct BUF_s) * MAX_BUF_NUM);
- 
- 	pbi->init_flag = 0;
--
-+	pbi->first_sc_checked= 0;
- 	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1) {
- 		vp9_max_pic_w = 8192;
- 		vp9_max_pic_h = 4608;
-@@ -8717,15 +8718,23 @@ static int vp9_hw_ctx_restore(struct VP9Decoder_s *pbi)
- #endif
- 	return 0;
- }
--
- static unsigned long run_ready(struct vdec_s *vdec, unsigned long mask)
- {
- 	struct VP9Decoder_s *pbi =
- 		(struct VP9Decoder_s *)vdec->private;
-+	int tvp = vdec_secure(hw_to_vdec(pbi)) ?
-+		CODEC_MM_FLAGS_TVP : 0;
- 	unsigned long ret = 0;
- 
- 	if (pbi->eos)
- 		return ret;
-+	if (!pbi->first_sc_checked && pbi->mmu_enable) {
-+		int size = decoder_mmu_box_sc_check(pbi->mmu_box, tvp);
-+		pbi->first_sc_checked = 1;
-+		vp9_print(pbi, 0, "vp9 cached=%d  need_size=%d speed= %d ms\n",
-+			size, (pbi->need_cache_size >> PAGE_SHIFT),
-+			(int)(get_jiffies_64() - pbi->sc_start_time) * 1000/HZ);
-+	}
- #ifdef SUPPORT_FB_DECODING
- 	if (pbi->used_stage_buf_num > 0) {
- 		if (mask & CORE_MASK_HEVC_FRONT) {
-@@ -9421,6 +9430,7 @@ static int ammvdec_vp9_probe(struct platform_device *pdev)
- #endif
- 
- 	pbi->init_flag = 0;
-+	pbi->first_sc_checked = 0;
- 	pbi->fatal_error = 0;
- 	pbi->show_frame_num = 0;
- 
+ static int  compute_losless_comp_body_size(int width,
+ 				int height, int bit_depth_10);
+ static int  compute_losless_comp_header_size(int width, int height);
+@@ -3786,10 +3803,8 @@ static int vh264_set_params(struct vdec_h264_hw_s *hw,
+ 		mb_width = 256;
+ 	if (mb_width)
+ 		mb_height = mb_total/mb_width;
+-	if (mb_width > 0x110 ||
+-		mb_height > 0xa0 ||
+-		mb_width <= 0 ||
+-		mb_height <= 0) {
++	if (mb_width <= 0 || mb_height <= 0 ||
++		is_oversize(mb_width << 4, mb_height << 4)) {
+ 		dpb_print(DECODE_ID(hw), 0,
+ 			"!!!wrong seq_info2 0x%x mb_width/mb_height (0x%x/0x%x) %x\r\n",
+ 			seq_info2,
