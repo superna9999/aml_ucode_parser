@@ -1,53 +1,57 @@
-commit bce374b6e36ec538a5d3e2f6ba5a2fde4ad2634b
-Author: shihong.zheng <shihong.zheng@amlogic.com>
-Date:   Wed Mar 20 10:13:14 2019 +0800
+commit 68b3857a1adccaa82c51fea26a7b9c70edc0dbc9
+Author: Hui Zhang <hui.zhang@amlogic.com>
+Date:   Thu Mar 21 15:48:50 2019 +0800
 
-    vc1: oversize vc1 streams limit. [1/1]
+    vmh264: fix frame mode playback not smooth issue  [1/1]
     
-    PD#TV-3303
+    PD#SWPL-5926
     
     Problem:
-    played vc1 oversize stream cause sys no response.
+    In frame mode and frmbase_cont_bitlevel > 0 case. with some stream
+    driver will finish search start code until H264_SEARCH_BUFEMPTY. it
+    will cost 2+ vsync time. decoder will be blocked. actually, in frame mode
+    decoder don't need to wait for timeout. decoder should return with
+    H264_SEARCH_BUFEMPTY once bitlevel is very low.
     
     Solution:
-    limit oversize vc1 stream.
+    skip search start code vsync timeout wait in frame mode
+    
+    ucode gerrit: 63873 63932
     
     Verify:
-    x301
+    X301
     
-    Change-Id: Ifc75c1025b2bd81642b5659feffdd42111a286d8
-    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
+    Change-Id: Id7a8f08aef41c16f00b56745ac8ffbced632e97e
+    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/vc1/vvc1.c b/drivers/frame_provider/decoder/vc1/vvc1.c
-index 86f171a..d5bbfe7 100644
---- a/drivers/frame_provider/decoder/vc1/vvc1.c
-+++ b/drivers/frame_provider/decoder/vc1/vvc1.c
-@@ -54,6 +54,8 @@
- #define NV21
- #endif
+diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+index fdd0a2b..1523bdc 100644
+--- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
++++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+@@ -5139,8 +5139,8 @@ pic_done_proc:
+ 			(dec_dpb_status == H264_DECODE_TIMEOUT)) {
+ empty_proc:
+ 		reset_process_time(hw);
+-
+-		release_cur_decoding_buf(hw);
++		if (!hw->frmbase_cont_flag)
++			release_cur_decoding_buf(hw);
  
-+#define VC1_MAX_SUPPORT_SIZE (1920*1088)
-+
- #define I_PICTURE   0
- #define P_PICTURE   1
- #define B_PICTURE   2
-@@ -1143,9 +1145,18 @@ static int amvdec_vc1_probe(struct platform_device *pdev)
- 		return -EFAULT;
- 	}
+ 		if (input_frame_based(vdec) ||
+ 			(READ_VREG(VLD_MEM_VIFIFO_LEVEL) > 0x200)) {
+@@ -5171,8 +5171,8 @@ empty_proc:
+ 				hw->decode_timeout_num++;
+ 			else if (dec_dpb_status == H264_DECODE_BUFEMPTY)
+ 				hw->decode_dataempty_num++;
+-
+-			hw->data_flag |= ERROR_FLAG;
++			if (!hw->frmbase_cont_flag)
++				hw->data_flag |= ERROR_FLAG;
  
--	if (pdata->sys_info)
-+	if (pdata->sys_info) {
- 		vvc1_amstream_dec_info = *pdata->sys_info;
- 
-+		if ((vvc1_amstream_dec_info.height != 0) &&
-+			(vvc1_amstream_dec_info.width >
-+			(VC1_MAX_SUPPORT_SIZE/vvc1_amstream_dec_info.height))) {
-+			pr_info("amvdec_vc1: over size, unsupport: %d * %d\n",
-+				vvc1_amstream_dec_info.width,
-+				vvc1_amstream_dec_info.height);
-+			return -EFAULT;
-+		}
-+	}
- 	pdata->dec_status = vvc1_dec_status;
- 	pdata->set_isreset = vvc1_set_isreset;
- 	is_reset = 0;
+ 			vdec_schedule_work(&hw->work);
+ 		} else {
+diff --git a/firmware/video_ucode.bin b/firmware/video_ucode.bin
+old mode 100644
+new mode 100755
+index 386394b..a514560
+Binary files a/firmware/video_ucode.bin and b/firmware/video_ucode.bin differ
