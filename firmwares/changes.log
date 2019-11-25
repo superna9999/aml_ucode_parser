@@ -1,183 +1,83 @@
-commit 6f5516d330516983fe73ab06d811fc6a4beacc2f
-Author: shihong.zheng <shihong.zheng@amlogic.com>
-Date:   Wed Apr 17 16:53:06 2019 +0800
+commit d80ccb9a9b954a7f3805abc31623ef533a1125ed
+Author: Cheng Tong <cheng.tong@amlogic.com>
+Date:   Mon May 13 10:56:20 2019 +0800
 
-    vdec: optmize frame check code. [1/1]
+    device: add demod avl6762 support [2/3]
     
-    PD#SWPL-7395
+    PD#SWPL-8315
     
     Problem:
-    optimize frame check code.
+    avl6762 can't support attach mode
     
     Solution:
-    1. add a size check before do frame check avoid crash.
-    2. remove some code no use.
+    add demod avl6762 support
     
     Verify:
-    x301
+    verify it on franklin.
     
-    Change-Id: I08553b53a98d47c12bfbeb09e18e42710ae69210
-    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
+    Change-Id: I179ce385e4226884b510f1cda52e550a84f5dab3
+    Signed-off-by: Cheng Tong <cheng.tong@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-index 0acd7f6..65fb835 100644
---- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
-+++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-@@ -2656,12 +2656,8 @@ int prepare_display_buf(struct vdec_s *vdec, struct FrameStore *frame)
- 			vf->duration = vf->duration/2;
- 		}
- 
--		if (i == 0) {
--			if (hw->mmu_enable)
--				decoder_do_frame_check(hw_to_vdec(hw), vf);
--			else
--				decoder_do_frame_check(hw_to_vdec(hw), vf);
--		}
-+		if (i == 0)
-+			decoder_do_frame_check(hw_to_vdec(hw), vf);
- 
- 		vf->ratio_control |= (0x3FF << DISP_RATIO_ASPECT_RATIO_BIT);
- 		vf->sar_width = vf->width;
-diff --git a/drivers/frame_provider/decoder/utils/frame_check.c b/drivers/frame_provider/decoder/utils/frame_check.c
-index e783dbc..2fcc0e5 100644
---- a/drivers/frame_provider/decoder/utils/frame_check.c
-+++ b/drivers/frame_provider/decoder/utils/frame_check.c
-@@ -55,6 +55,7 @@
- #define YUV_MASK	0x01
- #define CRC_MASK	0x02
- 
-+#define MAX_YUV_SIZE (4096 * 2304)
- #define YUV_DEF_SIZE (1920*1088*3/2)
- #define YUV_DEF_NUM	 1
- 
-@@ -99,12 +100,28 @@ static inline void check_schedule(struct pic_check_mgr_t *mgr)
- 		vdec_schedule_work(&mgr->frame_check_work);
+diff --git a/drivers/stream_input/parser/hw_demux/aml_demod_gt.h b/drivers/stream_input/parser/hw_demux/aml_demod_gt.h
+index d3541de..966e66b 100644
+--- a/drivers/stream_input/parser/hw_demux/aml_demod_gt.h
++++ b/drivers/stream_input/parser/hw_demux/aml_demod_gt.h
+@@ -91,4 +91,9 @@ static inline struct dvb_frontend* si2168_attach (const struct amlfe_demod_confi
+ 	return NULL;
  }
  
-+static bool is_oversize(int w, int h)
++static inline struct dvb_frontend* avl6762_attach (const struct amlfe_demod_config *config)
 +{
-+	if (w <= 0 || h <= 0)
-+		return true;
-+
-+	if (h != 0 && (w > (MAX_YUV_SIZE / h)))
-+		return true;
-+
-+	return false;
++	return NULL;
 +}
 +
-+
- static int get_frame_size(struct pic_check_mgr_t *pic,
- 	struct vframe_s *vf)
- {
--	if ((vf->width < 1) || (vf->height < 1))
-+	if (is_oversize(vf->width, vf->height)) {
-+			dbg_print(FC_ERROR, "vf size err: w=%d, h=%d\n",
-+				vf->width, vf->height);
- 			return -1;
--	pic->size_y = vf->width* vf->height;
-+	}
-+
-+	pic->size_y = vf->width * vf->height;
- 	pic->size_uv = pic->size_y >> 1;
- 	pic->size_pic = pic->size_y + pic->size_uv;
+ #endif	/*__AML_DEMOD_GT_H__*/
+diff --git a/drivers/stream_input/parser/hw_demux/aml_dvb.c b/drivers/stream_input/parser/hw_demux/aml_dvb.c
+index 91bf2f7..f24ce60 100644
+--- a/drivers/stream_input/parser/hw_demux/aml_dvb.c
++++ b/drivers/stream_input/parser/hw_demux/aml_dvb.c
+@@ -64,6 +64,7 @@ typedef enum __demod_type
+ 	DEMOD_INTERNAL,
+ 	DEMOD_ATBM8881,
+ 	DEMOD_SI2168,
++	DEMOD_AVL6762,
+ 	DEMOD_MAX_NUM
+ }demod_type;
  
-@@ -246,7 +263,7 @@ static struct file* file_open(int mode, const char *str, ...)
- static int write_yuv_work(struct pic_check_mgr_t *mgr)
- {
- 	mm_segment_t old_fs;
--	unsigned int i, wr_size;
-+	unsigned int i, wr_size, pic_num;
- 	struct pic_dump_t *dump = &mgr->pic_dump;
- 
- 	if (dump->dump_cnt > 0) {
-@@ -260,6 +277,7 @@ static int write_yuv_work(struct pic_check_mgr_t *mgr)
- 			(dump->yuv_fp != NULL) &&
- 			(dump->dump_cnt >= dump->num)) {
- 
-+			pic_num = dump->dump_cnt;
- 			old_fs = get_fs();
- 			set_fs(KERNEL_DS);
- 
-@@ -271,7 +289,7 @@ static int write_yuv_work(struct pic_check_mgr_t *mgr)
- 					dbg_print(FC_ERROR, "buf failed to write yuv file\n");
- 					break;
+@@ -2446,6 +2447,16 @@ static int aml_dvb_probe(struct platform_device *pdev)
+ 						s_demod_type[i] = DEMOD_SI2168;
+ 					}
  				}
--				dump->dump_cnt--;
-+				pic_num--;
++				if (!strcmp(name,"Avl6762")) {
++					frontend[i] = dvb_attach(avl6762_attach,&config);
++					if (frontend[i] == NULL) {
++						pr_error("dvb attach demod error\n");
++						goto error_fe;
++					} else {
++						pr_inf("dtvdemod attatch sucess\n");
++						s_demod_type[i] = DEMOD_AVL6762;
++					}
++				}
+ 				if (frontend[i]) {
+ 					ret = dvb_register_frontend(&advb->dvb_adapter, frontend[i]);
+ 					if (ret) {
+@@ -2470,6 +2481,10 @@ error_fe:
+ 				dvb_detach(si2168_attach);
+ 				frontend[i] = NULL;
+ 				s_demod_type[i] = DEMOD_INVALID;
++			}else if (s_demod_type[i] == DEMOD_AVL6762) {
++				dvb_detach(avl6762_attach);
++				frontend[i] = NULL;
++				s_demod_type[i] = DEMOD_INVALID;
  			}
- 			set_fs(old_fs);
- 			vfs_fsync(dump->yuv_fp, 0);
-@@ -545,7 +563,7 @@ static int crc32_vmap_le(unsigned int *crc32,
- 	ulong phyaddr, unsigned int size)
- {
- 	void *vaddr = NULL;
--	unsigned int crc = 0;
-+	unsigned int crc = *crc32;
- 	unsigned int tmp_size = 0;
- 
- 	/*single mode cannot use codec_mm_vmap*/
-@@ -1066,7 +1084,7 @@ ssize_t dump_yuv_store(struct class *class,
- 			num, YUV_MAX_DUMP_NUM);
- 		return size;
- 	}
--	vdec = vdec_get_with_id(id);
-+	vdec = vdec_get_vdec_by_id(id);
- 	if (vdec == NULL) {
- 		yuv_start[id] = start;
- 		yuv_num[id] = num;
-@@ -1141,7 +1159,7 @@ ssize_t frame_check_show(struct class *class,
- 	if (fc_debug & FC_ERR_CRC_BLOCK_MODE) {
- 		/* cat frame_check to next frame when block */
- 		struct vdec_s *vdec = NULL;
--		vdec = vdec_get_with_id(__ffs(check_enable));
-+		vdec = vdec_get_vdec_by_id(__ffs(check_enable));
- 		if (vdec)
- 			vdec->vfc.err_crc_block = 0;
- 	}
-diff --git a/drivers/frame_provider/decoder/utils/vdec.c b/drivers/frame_provider/decoder/utils/vdec.c
-index 8f5a8b2..c1a3ad6 100644
---- a/drivers/frame_provider/decoder/utils/vdec.c
-+++ b/drivers/frame_provider/decoder/utils/vdec.c
-@@ -1788,30 +1788,6 @@ static const char *get_dev_name(bool use_legacy_vdec, int format)
- #endif
- }
- 
--struct vdec_s *vdec_get_with_id(unsigned int id)
--{
--	struct vdec_s *vdec, *ret_vdec = NULL;
--	struct vdec_core_s *core = vdec_core;
--	unsigned long flags;
--
--	if (id >= MAX_INSTANCE_MUN)
--		return NULL;
--
--	flags = vdec_core_lock(vdec_core);
--	if (!list_empty(&core->connected_vdec_list)) {
--		list_for_each_entry(vdec, &core->connected_vdec_list, list) {
--			if (vdec->id == id) {
--				pr_info("searched avaliable vdec connected, id = %d\n", id);
--				ret_vdec = vdec;
--				break;
--			}
--		}
--	}
--	vdec_core_unlock(vdec_core, flags);
--
--	return ret_vdec;
--}
--
- /*
-  *register vdec_device
-  * create output, vfm or create ionvideo output
-diff --git a/drivers/frame_provider/decoder/utils/vdec.h b/drivers/frame_provider/decoder/utils/vdec.h
-index cbabeb4..94fe73d 100644
---- a/drivers/frame_provider/decoder/utils/vdec.h
-+++ b/drivers/frame_provider/decoder/utils/vdec.h
-@@ -444,7 +444,5 @@ int vdec_get_status(struct vdec_s *vdec);
- 
- void vdec_set_timestamp(struct vdec_s *vdec, u64 timestamp);
- 
--struct vdec_s *vdec_get_with_id(unsigned int id);
--
- extern struct vframe_qos_s *vdec_get_qos_info(void);
- #endif				/* VDEC_H */
+ 			if (s_tuner_type[i] == TUNER_SI2151) {
+ 				dvb_detach(si2151_attach);
+@@ -2527,6 +2542,8 @@ static int aml_dvb_remove(struct platform_device *pdev)
+ 			dvb_detach(atbm8881_attach);
+ 		}else if (s_demod_type[i] == DEMOD_SI2168) {
+ 			dvb_detach(si2168_attach);
++		}else if (s_demod_type[i] == DEMOD_AVL6762) {
++			dvb_detach(avl6762_attach);
+ 		}
+ 		if (s_tuner_type[i] == TUNER_SI2151) {
+ 			dvb_detach(si2151_attach);
