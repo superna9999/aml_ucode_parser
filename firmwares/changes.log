@@ -1,25 +1,38 @@
-commit 126df2bf18ad6fe580f809d53c3c7f1deabcde70
-Author: Nanxin.Qin <nanxin.qin@amlogic.com>
-Date:   Tue Apr 2 15:55:07 2019 +0800
+commit 27f94fbd6d1e6f1958648b6ece5e35b28b9e907c
+Author: Hui Zhang <hui.zhang@amlogic.com>
+Date:   Wed Apr 3 10:12:56 2019 +0800
 
-    firmware: fixed issue of playback h264. [2/2]
+    vh264: fix channel switching system hangup issue in vh264 remove  [1/1]
     
-    PD#SWPL-5261
+    PD#SWPL-6377
     
     Problem:
-    the wrong building for h264.
+    hw bus dead lock in h264 remove.
     
     Solution:
-    1. fixed issue of playback h264.
-    2. ucode commit id:
-       59f2de9e64980a9240b7a72e8a171bdf9d7c41ab
+    wait for decoder hw stopped completely before h264 remove
     
     Verify:
     X301
     
-    Change-Id: Ic45aa022ae706d31f1ebfc007dab65585f989e5c
-    Signed-off-by: Nanxin.Qin <nanxin.qin@amlogic.com>
+    Change-Id: Ia3555e687ecfe452948922d3e221c0fae0ad499d
+    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
 
-diff --git a/firmware/video_ucode.bin b/firmware/video_ucode.bin
-index ec0dfaa..61bc150 100755
-Binary files a/firmware/video_ucode.bin and b/firmware/video_ucode.bin differ
+diff --git a/drivers/frame_provider/decoder/h264/vh264.c b/drivers/frame_provider/decoder/h264/vh264.c
+index 1781bb7..f5be8ed 100644
+--- a/drivers/frame_provider/decoder/h264/vh264.c
++++ b/drivers/frame_provider/decoder/h264/vh264.c
+@@ -3712,11 +3712,10 @@ static int amvdec_h264_remove(struct platform_device *pdev)
+ 	cancel_work_sync(&notify_work);
+ 	cancel_work_sync(&set_clk_work);
+ 	cancel_work_sync(&userdata_push_work);
+-
+-	mutex_lock(&vh264_mutex);
+ 	vh264_stop(MODE_FULL);
++	wait_vh264_search_done();
++	mutex_lock(&vh264_mutex);
+ 	vdec_source_changed(VFORMAT_H264, 0, 0, 0);
+-
+ #ifdef DUMP_USER_DATA
+ 	vh264_dump_userdata();
+ #endif
