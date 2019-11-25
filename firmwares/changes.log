@@ -1,51 +1,7 @@
-commit 630e09ed6e40221dce5eff6eeb7b9eb30146ecc3
-Author: shihong.zheng <shihong.zheng@amlogic.com>
-Date:   Thu Apr 18 17:07:42 2019 +0800
+commit 912cc23ed95801da408ba12c920578e1c91f0caf
+Merge: 630e09e fda8275
+Author: Hui Zhang <hui.zhang@amlogic.com>
+Date:   Mon Apr 22 23:18:23 2019 -0700
 
-    vdec: fix crash in vdec_get_default_vdec_for_userdata. [1/1]
-    
-    PD#SWPL-6811
-    
-    Problem:
-    Unable to handle kernel NULL pointer dereference at virtual address 00000114
-    PC is at vdec_get_default_vdec_for_userdata+0x50/0x8c [decoder_common]
-    LR is at 0x0
-    
-    Solution:
-    vdec in vdec_connect_list searched is NULL, it's
-    may moved to disconnect list.
-    
-    Verify:
-    x301
-    
-    Change-Id: I407b0115fd4dfacf2bf575f1d981e079702b8800
-    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
+    Merge "module: use new interface to increase accuracy of ar calculation [2/2]" into amlogic-4.9-dev
 
-diff --git a/drivers/frame_provider/decoder/utils/vdec.c b/drivers/frame_provider/decoder/utils/vdec.c
-index 6492fc7..9f65381 100644
---- a/drivers/frame_provider/decoder/utils/vdec.c
-+++ b/drivers/frame_provider/decoder/utils/vdec.c
-@@ -2554,6 +2554,7 @@ static int vdec_core_thread(void *data)
- {
- 	struct vdec_core_s *core = (struct vdec_core_s *)data;
- 	struct sched_param param = {.sched_priority = MAX_RT_PRIO/2};
-+	unsigned long flags;
- 	int i;
- 
- 	sched_setscheduler(current, SCHED_FIFO, &param);
-@@ -2629,6 +2630,7 @@ static int vdec_core_thread(void *data)
- 		 */
- 
- 		/* check disconnected decoders */
-+		flags = vdec_core_lock(vdec_core);
- 		list_for_each_entry_safe(vdec, tmp,
- 			&core->connected_vdec_list, list) {
- 			if ((vdec->status == VDEC_STATUS_CONNECTED) &&
-@@ -2644,6 +2646,7 @@ static int vdec_core_thread(void *data)
- 				list_move(&vdec->list, &disconnecting_list);
- 			}
- 		}
-+		vdec_core_unlock(vdec_core, flags);
- 		mutex_unlock(&vdec_mutex);
- 		/* elect next vdec to be scheduled */
- 		vdec = core->last_vdec;
