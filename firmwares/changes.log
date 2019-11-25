@@ -1,200 +1,176 @@
-commit 6d2907a6cfb90e385bebc97b1c6a7c3ba60ab4c6
-Author: Lifeng Cao <lifeng.cao@amlogic.com>
-Date:   Sat Feb 16 19:31:26 2019 +0800
+commit 01129db9a3b2b18a46e7da53e145eb9fd80d443c
+Author: Conglin Guo <conglin.guo@amlogic.com>
+Date:   Mon Feb 18 10:16:57 2019 +0800
 
-    media_module: frame rate policy back not check reset flag [1/1]
+    media_modules: video decode err frame drop policy [1/1]
     
-    PD#SWPL-4908
+    PD#OTT-1921
     
     Problem:
-    frame rate policy end hint check fr_hint_status and reset flag
-    When releasing hinted vdec the reset flag is true. Then reset flag
-    is false, hinted vdec has release at first time. In this case
-    vdec could not call end hint.
+    Add control node, Distinguish between the current frame error and
+    the error caused by the reference frame.
     
     Solution:
-    hint check reset flag, end hint check fr_hint_status.
+    vmh264,h265 Multiple instances Add control node
     
     Verify:
-    X301
+    s905x2
     
-    Change-Id: I0403182910eabba2620eae9b512533ca90c91dcf
-    Signed-off-by: Lifeng Cao <lifeng.cao@amlogic.com>
+    Change-Id: Ie9c6264db018009082d12a08d75cce5b6e9aeff0
+    Signed-off-by: Conglin Guo <conglin.guo@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/avs/avs.c b/drivers/frame_provider/decoder/avs/avs.c
-index a82e9c7..0e9282c 100644
---- a/drivers/frame_provider/decoder/avs/avs.c
-+++ b/drivers/frame_provider/decoder/avs/avs.c
-@@ -1610,12 +1610,13 @@ static s32 vavs_init(void)
- #endif
+diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+index 15b5010..bcb26a1 100644
+--- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
++++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+@@ -193,6 +193,8 @@ static unsigned int max_get_frame_interval[H264_DEV_NUM];
+ static unsigned int run_count[H264_DEV_NUM];
+ static unsigned int input_empty[H264_DEV_NUM];
+ static unsigned int not_run_ready[H264_DEV_NUM];
++static unsigned int ref_frame_mark_flag[H264_DEV_NUM] =
++{1, 1, 1, 1, 1, 1, 1, 1, 1};
  
- 	if (vavs_amstream_dec_info.rate != 0) {
--		if (!is_reset)
-+		if (!is_reset) {
- 			vf_notify_receiver(PROVIDER_NAME,
- 					VFRAME_EVENT_PROVIDER_FR_HINT,
- 					(void *)((unsigned long)
- 					vavs_amstream_dec_info.rate));
--		fr_hint_status = VDEC_HINTED;
-+			fr_hint_status = VDEC_HINTED;
-+		}
- 	} else
- 		fr_hint_status = VDEC_NEED_HINT;
+ #define VDEC_CLOCK_ADJUST_FRAME 30
+ static unsigned int clk_adj_frame_count;
+@@ -244,6 +246,7 @@ static unsigned int i_only_flag;
+ */
+ static unsigned int error_proc_policy = 0xf36; /*0x1f14*/
  
-@@ -1774,7 +1775,7 @@ static int amvdec_avs_remove(struct platform_device *pdev)
++
+ /*
+ 	error_skip_count:
+ 	bit[11:0] error skip frame count
+@@ -2406,6 +2409,7 @@ int prepare_display_buf(struct vdec_s *vdec, struct FrameStore *frame)
+ 			__func__, buffer_index,  frame->data_flag & ERROR_FLAG,
+ 			frame->poc, hw->data_flag & ERROR_FLAG,
+ 			error_proc_policy);
++
+ 	if ((frame->data_flag & NODISP_FLAG) ||
+ 		(frame->data_flag & NULL_FLAG) ||
+ 		(frame->data_flag & ERROR_FLAG) ||
+@@ -2418,6 +2422,7 @@ int prepare_display_buf(struct vdec_s *vdec, struct FrameStore *frame)
+ 		return 0; /*do not return -1,
+ 			otherwise flush_dpb() will not flush all dbp frames*/
  	}
- #endif
- 	if (stat & STAT_VF_HOOK) {
--		if (fr_hint_status == VDEC_HINTED && !is_reset)
-+		if (fr_hint_status == VDEC_HINTED)
- 			vf_notify_receiver(PROVIDER_NAME,
- 				VFRAME_EVENT_PROVIDER_FR_END_HINT, NULL);
- 		fr_hint_status = VDEC_NO_NEED_HINT;
-diff --git a/drivers/frame_provider/decoder/h264/vh264.c b/drivers/frame_provider/decoder/h264/vh264.c
-index db7f4af..74799ba 100644
---- a/drivers/frame_provider/decoder/h264/vh264.c
-+++ b/drivers/frame_provider/decoder/h264/vh264.c
-@@ -2743,11 +2743,12 @@ static s32 vh264_init(void)
- #endif
++
+ 	display_frame_count[DECODE_ID(hw)]++;
  
- 	if (frame_dur != 0) {
--		if (!is_reset)
-+		if (!is_reset) {
- 			vf_notify_receiver(PROVIDER_NAME,
- 					VFRAME_EVENT_PROVIDER_FR_HINT,
- 					(void *)((unsigned long)frame_dur));
--		fr_hint_status = VDEC_HINTED;
-+			fr_hint_status = VDEC_HINTED;
-+		}
- 	} else
- 		fr_hint_status = VDEC_NEED_HINT;
+ 	if (dpb_is_debug(DECODE_ID(hw),
+@@ -3076,14 +3081,14 @@ int config_decode_buf(struct vdec_h264_hw_s *hw, struct StorablePicture *pic)
+ 		/* bit[6:5] - frame/field info,
+ 		 * 01 - top, 10 - bottom, 11 - frame
+ 		 */
+-#ifdef ERROR_CHECK
++	#ifdef ERROR_CHECK
+ 		if (ref == NULL) {
+ 			hw->data_flag |= ERROR_FLAG;
+ 			pic->data_flag  |= ERROR_FLAG;
+ 			dpb_print(DECODE_ID(hw), PRINT_FLAG_ERRORFLAG_DBG, " ref list0 NULL\n");
+ 			return -1;
+ 		}
+-		if (ref->data_flag & ERROR_FLAG) {
++		if ((ref->data_flag & ERROR_FLAG) && ref_frame_mark_flag[DECODE_ID(hw)]) {
+ 			hw->data_flag |= ERROR_FLAG;
+ 			pic->data_flag |= ERROR_FLAG;
+ 			dpb_print(DECODE_ID(hw), PRINT_FLAG_ERRORFLAG_DBG, " ref error mark1 \n");
+@@ -3145,14 +3150,15 @@ int config_decode_buf(struct vdec_h264_hw_s *hw, struct StorablePicture *pic)
+ 		/* bit[6:5] - frame/field info,
+ 		 * 01 - top, 10 - bottom, 11 - frame
+ 		 */
+-#ifdef ERROR_CHECK
++
++	#ifdef ERROR_CHECK
+ 		if (ref == NULL) {
+ 			hw->data_flag |= ERROR_FLAG;
+ 			pic->data_flag  |= ERROR_FLAG;
+ 			dpb_print(DECODE_ID(hw), PRINT_FLAG_ERRORFLAG_DBG, " ref error list1 NULL\n");
+ 			return -2;
+ 		}
+-		if (ref->data_flag & ERROR_FLAG) {
++		if ((ref->data_flag & ERROR_FLAG) && (ref_frame_mark_flag[DECODE_ID(hw)])) {
+ 			pic->data_flag  |= ERROR_FLAG;
+ 			hw->data_flag |= ERROR_FLAG;
+ 			dpb_print(DECODE_ID(hw), PRINT_FLAG_ERRORFLAG_DBG, " ref error mark2\n");
+@@ -4800,6 +4806,7 @@ static irqreturn_t vh264_isr_thread_fn(struct vdec_s *vdec, int irq)
+ 							p->data_flag |= MAYBE_ERROR_FLAG;
+ 					}
+ 				}
++
+ 			if (error_proc_policy & 0x400) {
+ 				int ret = dpb_check_ref_list_error(p_H264_Dpb);
+ 				if (ret != 0) {
+@@ -8209,6 +8216,8 @@ module_param_array(max_get_frame_interval, uint,
  
-@@ -2799,7 +2800,7 @@ static int vh264_stop(int mode)
+ module_param_array(step, uint, &max_decode_instance_num, 0664);
  
- 	if (stat & STAT_VF_HOOK) {
- 		if (mode == MODE_FULL) {
--			if (fr_hint_status == VDEC_HINTED && !is_reset)
-+			if (fr_hint_status == VDEC_HINTED)
- 				vf_notify_receiver(PROVIDER_NAME,
- 					VFRAME_EVENT_PROVIDER_FR_END_HINT,
- 					NULL);
++module_param_array(ref_frame_mark_flag, uint, &max_decode_instance_num, 0664);
++
+ module_param(disp_vframe_valve_level, uint, 0664);
+ MODULE_PARM_DESC(disp_vframe_valve_level, "\n disp_vframe_valve_level\n");
+ 
 diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
-index 6845e1b..7cb34b0 100644
+index 7cb34b0..9653427 100644
 --- a/drivers/frame_provider/decoder/h265/vh265.c
 +++ b/drivers/frame_provider/decoder/h265/vh265.c
-@@ -10091,12 +10091,13 @@ static s32 vh265_init(struct hevc_state_s *hevc)
- 	vf_notify_receiver(hevc->provider_name, VFRAME_EVENT_PROVIDER_START,
- 				NULL);
- 	if (hevc->frame_dur != 0) {
--		if (!is_reset)
-+		if (!is_reset) {
- 			vf_notify_receiver(hevc->provider_name,
- 					VFRAME_EVENT_PROVIDER_FR_HINT,
- 					(void *)
- 					((unsigned long)hevc->frame_dur));
--		fr_hint_status = VDEC_HINTED;
-+			fr_hint_status = VDEC_HINTED;
-+		}
- 	} else
- 		fr_hint_status = VDEC_NEED_HINT;
- #else
-@@ -10223,7 +10224,7 @@ static int vh265_stop(struct hevc_state_s *hevc)
- 	}
+@@ -447,7 +447,6 @@ static unsigned int force_disp_pic_index;
+ static unsigned int disp_vframe_valve_level;
+ static int pre_decode_buf_level = 0x1000;
  
- 	if (hevc->stat & STAT_VF_HOOK) {
--		if (fr_hint_status == VDEC_HINTED && !is_reset) {
-+		if (fr_hint_status == VDEC_HINTED) {
- 			vf_notify_receiver(hevc->provider_name,
- 					VFRAME_EVENT_PROVIDER_FR_END_HINT,
- 					NULL);
-diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
-index f758076..2100433 100644
---- a/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
-+++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
-@@ -1989,13 +1989,14 @@ static s32 vmpeg12_init(void)
- 	vf_reg_provider(&vmpeg_vf_prov);
+-
+ #ifdef MULTI_INSTANCE_SUPPORT
+ static unsigned int max_decode_instance_num
+ 				= MAX_DECODE_INSTANCE_NUM;
+@@ -458,6 +457,8 @@ static unsigned int max_get_frame_interval[MAX_DECODE_INSTANCE_NUM];
+ static unsigned int run_count[MAX_DECODE_INSTANCE_NUM];
+ static unsigned int input_empty[MAX_DECODE_INSTANCE_NUM];
+ static unsigned int not_run_ready[MAX_DECODE_INSTANCE_NUM];
++static unsigned int ref_frame_mark_flag[MAX_DECODE_INSTANCE_NUM] =
++{1, 1, 1, 1, 1, 1, 1, 1, 1};
+ 
+ #ifdef CONFIG_AMLOGIC_MEDIA_MULTI_DEC
+ static unsigned char get_idx(struct hevc_state_s *hevc);
+@@ -3535,7 +3536,7 @@ static int config_mc_buffer(struct hevc_state_s *hevc, struct PIC_s *cur_pic)
+ 						pic->width, pic->height);
+ 					cur_pic->error_mark = 1;
+ 				}
+-				if (pic->error_mark)
++				if (pic->error_mark && (ref_frame_mark_flag[hevc->index]))
+ 					cur_pic->error_mark = 1;
+ 				WRITE_VREG(HEVCD_MPP_ANC_CANVAS_DATA_ADDR,
+ 						(pic->mc_canvas_u_v << 16)
+@@ -3570,6 +3571,7 @@ static int config_mc_buffer(struct hevc_state_s *hevc, struct PIC_s *cur_pic)
+ 				"config_mc_buffer RefNum_L1\n");
+ 		WRITE_VREG(HEVCD_MPP_ANC_CANVAS_ACCCONFIG_ADDR,
+ 				   (16 << 8) | (0 << 1) | 1);
++
+ 		for (i = 0; i < cur_pic->RefNum_L1; i++) {
+ 			pic =
+ 				get_ref_pic_by_POC(hevc,
+@@ -3586,7 +3588,7 @@ static int config_mc_buffer(struct hevc_state_s *hevc, struct PIC_s *cur_pic)
+ 					cur_pic->error_mark = 1;
+ 				}
+ 
+-				if (pic->error_mark)
++				if (pic->error_mark && (ref_frame_mark_flag[hevc->index]))
+ 					cur_pic->error_mark = 1;
+ 				WRITE_VREG(HEVCD_MPP_ANC_CANVAS_DATA_ADDR,
+ 						   (pic->mc_canvas_u_v << 16)
+@@ -11454,6 +11456,7 @@ static void vh265_dump_state(struct vdec_s *vdec)
+ 
+ }
+ 
++
+ static int ammvdec_h265_probe(struct platform_device *pdev)
+ {
+ 
+@@ -12044,6 +12047,10 @@ module_param_array(input_empty, uint,
+ 
+ module_param_array(not_run_ready, uint,
+ 	&max_decode_instance_num, 0664);
++
++module_param_array(ref_frame_mark_flag, uint,
++	&max_decode_instance_num, 0664);
++
  #endif
- 	if (vmpeg12_amstream_dec_info.rate != 0) {
--		if (!is_reset)
-+		if (!is_reset) {
- 			vf_notify_receiver(PROVIDER_NAME,
- 				VFRAME_EVENT_PROVIDER_FR_HINT,
- 				(void *)
- 				((unsigned long)
- 				vmpeg12_amstream_dec_info.rate));
--		fr_hint_status = VDEC_HINTED;
-+			fr_hint_status = VDEC_HINTED;
-+		}
- 	} else
- 		fr_hint_status = VDEC_NEED_HINT;
- 
-@@ -2105,7 +2106,7 @@ static int amvdec_mpeg12_remove(struct platform_device *pdev)
- 	}
- 
- 	if (stat & STAT_VF_HOOK) {
--		if (fr_hint_status == VDEC_HINTED && !is_reset)
-+		if (fr_hint_status == VDEC_HINTED)
- 			vf_notify_receiver(PROVIDER_NAME,
- 				VFRAME_EVENT_PROVIDER_FR_END_HINT, NULL);
- 		fr_hint_status = VDEC_NO_NEED_HINT;
-diff --git a/drivers/frame_provider/decoder/mpeg4/vmpeg4.c b/drivers/frame_provider/decoder/mpeg4/vmpeg4.c
-index 56351f7..a930e84 100644
---- a/drivers/frame_provider/decoder/mpeg4/vmpeg4.c
-+++ b/drivers/frame_provider/decoder/mpeg4/vmpeg4.c
-@@ -1088,13 +1088,14 @@ static s32 vmpeg4_init(void)
- 	vf_reg_provider(&vmpeg_vf_prov);
- #endif
- 	if (vmpeg4_amstream_dec_info.rate != 0) {
--		if (!is_reset)
-+		if (!is_reset) {
- 			vf_notify_receiver(PROVIDER_NAME,
- 						VFRAME_EVENT_PROVIDER_FR_HINT,
- 						(void *)
- 						((unsigned long)
- 						vmpeg4_amstream_dec_info.rate));
--		fr_hint_status = VDEC_HINTED;
-+			fr_hint_status = VDEC_HINTED;
-+		}
- 	} else
- 		fr_hint_status = VDEC_NEED_HINT;
- 
-@@ -1167,7 +1168,7 @@ static int amvdec_mpeg4_remove(struct platform_device *pdev)
- 	}
- 
- 	if (stat & STAT_VF_HOOK) {
--		if (fr_hint_status == VDEC_HINTED && !is_reset)
-+		if (fr_hint_status == VDEC_HINTED)
- 			vf_notify_receiver(PROVIDER_NAME,
- 				VFRAME_EVENT_PROVIDER_FR_END_HINT, NULL);
- 		fr_hint_status = VDEC_NO_NEED_HINT;
-diff --git a/drivers/frame_provider/decoder/utils/vdec.c b/drivers/frame_provider/decoder/utils/vdec.c
-index b7b0dd4..97ffdf2 100644
---- a/drivers/frame_provider/decoder/utils/vdec.c
-+++ b/drivers/frame_provider/decoder/utils/vdec.c
-@@ -1862,13 +1862,14 @@ s32 vdec_init(struct vdec_s *vdec, int is_4k)
- 
- 		if (vdec_core->hint_fr_vdec == vdec) {
- 			if (p->sys_info->rate != 0) {
--				if (!vdec->is_reset)
-+				if (!vdec->is_reset) {
- 					vf_notify_receiver(p->vf_provider_name,
- 						VFRAME_EVENT_PROVIDER_FR_HINT,
- 						(void *)
- 						((unsigned long)
- 						p->sys_info->rate));
--				vdec->fr_hint_state = VDEC_HINTED;
-+					vdec->fr_hint_state = VDEC_HINTED;
-+				}
- 			} else {
- 				vdec->fr_hint_state = VDEC_NEED_HINT;
- 			}
-@@ -1909,8 +1910,7 @@ void vdec_release(struct vdec_s *vdec)
- 	if (vdec->vframe_provider.name) {
- 		if (!vdec_single(vdec)) {
- 			if (vdec_core->hint_fr_vdec == vdec
--			&& vdec->fr_hint_state == VDEC_HINTED
--			&& !vdec->is_reset)
-+			&& vdec->fr_hint_state == VDEC_HINTED)
- 				vf_notify_receiver(
- 					vdec->vf_provider_name,
- 					VFRAME_EVENT_PROVIDER_FR_END_HINT,
+ #ifdef CONFIG_AMLOGIC_MEDIA_ENHANCEMENT_DOLBYVISION
+ module_param(dv_toggle_prov_name, uint, 0664);
