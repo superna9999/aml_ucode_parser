@@ -1,62 +1,51 @@
-commit cd4249774427c80c1fb3e87299138c5efd4ee206
+commit 7420081f31aa40ef3892cdf7c3b8b880ab18d7f8
 Author: apollo.ling <apollo.ling@amlogic.com>
-Date:   Tue Oct 29 17:33:17 2019 +0800
+Date:   Thu Oct 31 15:14:26 2019 +0800
 
-    vdec: improve timeout handling for vmmpeg12/vmmh264/vmmh265 [1/1]
-    supplementary commit.
+    vdec: remove some printings [1/1]
     
-    PD#SWPL-14196
+    PD#SWPL-15106
     
     Problem:
-    {stress test} trunk crash and watchdog reboot happen when
-    do DTV h264 2s channel switch and 15s suspend.(1/5,none)
+    h264 keep print "ref_pic_list_reordering error"
     
     Solution:
-    improve the timout handling mechanism
+    remove some printings
     
     Verify:
     X301
     
-    Change-Id: I7989ad2b015855d6cacec1c54e8e05d585c8934e
+    Change-Id: Ic8f9bc0c1c536abd209775d4d1b501303fc4ef67
     Signed-off-by: apollo.ling <apollo.ling@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/h264_multi/h264_dpb.c b/drivers/frame_provider/decoder/h264_multi/h264_dpb.c
-index 2b9a920..2258f75 100644
---- a/drivers/frame_provider/decoder/h264_multi/h264_dpb.c
-+++ b/drivers/frame_provider/decoder/h264_multi/h264_dpb.c
-@@ -202,7 +202,7 @@ void ref_pic_list_reordering(struct h264_dpb_stru *p_H264_Dpb,
-  */
- 					i >= REORDERING_COMMAND_MAX_SIZE) {
- 					dpb_print(p_H264_Dpb->decoder_index,
--						PRINT_FLAG_ERROR,
-+						PRINT_FLAG_DPB_DETAIL,
- 						"%s error %d %d\n",
- 						__func__, i,
- 						currSlice->
-@@ -300,7 +300,7 @@ void ref_pic_list_reordering(struct h264_dpb_stru *p_H264_Dpb,
- 				/*i>currSlice->num_ref_idx_active[LIST_1] || */
- 					i >= REORDERING_COMMAND_MAX_SIZE) {
- 					dpb_print(p_H264_Dpb->decoder_index,
--						PRINT_FLAG_ERROR,
-+						PRINT_FLAG_DPB_DETAIL,
- 						"%s error %d %d\n",
- 						__func__, i,
- 						currSlice->
 diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-index 5c90898..f34097c 100644
+index f34097c..3d26c59 100644
 --- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
 +++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-@@ -5355,11 +5355,8 @@ static irqreturn_t vh264_isr_thread_fn(struct vdec_s *vdec, int irq)
- 		debug_tag = tenth_ns - hw->tfn_ns;
- 		hw->tfn_cnt = 1;
- 		hw->tfn_cnt = tenth_ns;
--		if (debug_tag <= 10000000) {
--			pr_err("Within 10ms 10 vh264_isr_thread_fn. Abnormal!\n");
--			timeout_process(hw);
--			return IRQ_HANDLED;
--		}
-+		if (debug_tag <= 10000000)
-+			pr_err("Within 10ms 10 vh264_isr_thread_fn!\n");
- 	}
+@@ -845,8 +845,6 @@ struct vdec_h264_hw_s {
+ 	bool new_iframe_flag;
+ 	bool ref_err_flush_dpb_flag;
+ 	unsigned int first_i_policy;
+-	u32 tfn_cnt;
+-	u64 tfn_ns;
+ };
+ 
+ static u32 again_threshold;
+@@ -5347,17 +5345,6 @@ static irqreturn_t vh264_isr_thread_fn(struct vdec_s *vdec, int irq)
+ 	unsigned int dec_dpb_status = p_H264_Dpb->dec_dpb_status;
+ 	u32 debug_tag;
+ 	int ret;
+-	if (++hw->tfn_cnt == 1) {
+-		hw->tfn_ns = local_clock();
+-	} else if (hw->tfn_cnt >= 10) {
+-		u64 tenth_ns = local_clock();
+-		/* Here borrow the varible debug_tag for use */
+-		debug_tag = tenth_ns - hw->tfn_ns;
+-		hw->tfn_cnt = 1;
+-		hw->tfn_cnt = tenth_ns;
+-		if (debug_tag <= 10000000)
+-			pr_err("Within 10ms 10 vh264_isr_thread_fn!\n");
+-	}
  
  	if (dec_dpb_status == H264_CONFIG_REQUEST) {
+ #if 1
