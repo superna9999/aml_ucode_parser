@@ -1,96 +1,83 @@
-commit 368fc76d03c66ba7e0c4829509369f0c8876cf8e
-Author: shihong.zheng <shihong.zheng@amlogic.com>
-Date:   Wed Sep 25 19:53:58 2019 +0800
+commit 70a21cde7d5f0214330ab203f1b533e3d3dc9bdd
+Author: Peng Yixin <yixin.peng@amlogic.com>
+Date:   Wed Sep 18 20:09:10 2019 +0800
 
-    decoder: fix mpeg4 multi frames in packet consume data abnormal. [1/1]
+    media_module: the screen freeze when stream mode playback [1/1]
     
-    PD#TV-10609
+    PD#SWPL-13053
     
     Problem:
-    1. mpeg4 video black screen 20s at start. bug when deal with
-    frames size less than 8 bytes in one packets.
-    2. mpeg2 1088 height error.
+    Keeps entering the logic that waits for more data
+    to decode, but never gets more data, it cause the
+    screen freeze.
     
     Solution:
-    1. no need set back align bytes when consume byte less then 8.
-    2. mpeg2 1080 height limit modify to 1088.
+    Modify wait more data's logic to solve this problem.
     
     Verify:
-    x301
+    u212
     
-    Change-Id: Ia05018c04fc0224ee66071add819759243477bbd
-    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
+    Change-Id: I51091939dcdc0ff9bbf4ea00295b9bc87b5ff213
+    Signed-off-by: Peng Yixin <yixin.peng@amlogic.com>
 
+diff --git a/drivers/frame_provider/decoder/avs2/vavs2.c b/drivers/frame_provider/decoder/avs2/vavs2.c
+index e958825..31f76e6 100644
+--- a/drivers/frame_provider/decoder/avs2/vavs2.c
++++ b/drivers/frame_provider/decoder/avs2/vavs2.c
+@@ -250,7 +250,7 @@ static u32 work_buf_size = 32 * 1024 * 1024;
+ 
+ static u32 mv_buf_margin;
+ static int pre_decode_buf_level = 0x1000;
+-static u32 again_threshold = 0x40;
++static u32 again_threshold;
+ 
+ 
+ /* DOUBLE_WRITE_MODE is enabled only when NV21 8 bit output is needed */
+diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+index 075ce66..65105a0 100644
+--- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
++++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+@@ -847,7 +847,7 @@ struct vdec_h264_hw_s {
+ 	unsigned int first_i_policy;
+ };
+ 
+-static u32 again_threshold = 0x40;
++static u32 again_threshold;
+ 
+ static void dump_bufspec(struct vdec_h264_hw_s *hw,
+ 	const char *caller);
+diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
+index 79e0c9a..d9e06fd 100644
+--- a/drivers/frame_provider/decoder/h265/vh265.c
++++ b/drivers/frame_provider/decoder/h265/vh265.c
+@@ -1730,7 +1730,7 @@ static int v4l_get_fb(struct aml_vcodec_ctx *ctx, struct vdec_fb **out)
+ }
+ 
+ #ifdef AGAIN_HAS_THRESHOLD
+-u32 again_threshold = 0x40;
++u32 again_threshold;
+ #endif
+ #ifdef SEND_LMEM_WITH_RPM
+ #define get_lmem_params(hevc, ladr) \
+@@ -11718,7 +11718,7 @@ static unsigned long run_ready(struct vdec_s *vdec, unsigned long mask)
+ 			again_threshold) {
+ 			int r = vdec_sync_input(vdec);
+ 			hevc_print(hevc,
+-			PRINT_FLAG_VDEC_DETAIL, "%s buf lelvel:%x\n",  __func__, r);
++				PRINT_FLAG_VDEC_DETAIL, "%s buf lelvel:%x\n",  __func__, r);
+ 			return 0;
+ 		}
+ 	}
 diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-index 8898743..e9f1e20 100644
+index e9f1e20..6d37a0e 100644
 --- a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
 +++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-@@ -1482,9 +1482,9 @@ static irqreturn_t vmpeg12_isr_thread_fn(struct vdec_s *vdec, int irq)
- 		}
+@@ -135,7 +135,7 @@ static unsigned int decode_timeout_val = 100;
+ #define AGAIN_HAS_THRESHOLD
  
- 		tmp = READ_VREG(MREG_PIC_HEIGHT);
--		if ((tmp > 1080) || (tmp == 0)) {
--			new_pic->height = 1080;
--			hw->frame_height = 1080;
-+		if ((tmp > 1088) || (tmp == 0)) {
-+			new_pic->height = 1088;
-+			hw->frame_height = 1088;
- 		} else {
- 			new_pic->height = tmp;
- 			hw->frame_height = tmp;
-diff --git a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
-index e8d62c2..4e870ba 100644
---- a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
-+++ b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
-@@ -139,6 +139,7 @@ static int pre_decode_buf_level = 0x800;
- static int debug_enable;
- static unsigned int radr;
- static unsigned int rval;
-+/* 0x40bit = 8byte */
- static unsigned int frmbase_cont_bitlevel = 0x40;
+ #ifdef AGAIN_HAS_THRESHOLD
+-u32 again_threshold = 0x40;
++u32 again_threshold;
+ #endif
  
- #define VMPEG4_DEV_NUM        9
-@@ -1031,15 +1032,35 @@ static irqreturn_t vmpeg4_isr_thread_fn(struct vdec_s *vdec, int irq)
- 		if (vdec_frame_based(vdec) &&
- 			(frmbase_cont_bitlevel != 0) &&
- 			(hw->first_i_frame_ready)) {
--			u32 bitcnt = READ_VREG(VIFF_BIT_CNT);
--			if (bitcnt > frmbase_cont_bitlevel) {
--				hw->dec_result = DEC_RESULT_UNFINISH;
--				hw->chunk_offset +=
--					(hw->chunk_size - (bitcnt >> 3) - VDEC_FIFO_ALIGN);
--				hw->chunk_size = (bitcnt >> 3);
--				hw->chunk_frame_count++;
--				hw->unstable_pts = 1;
-+			u32 consume_byte, res_byte, bitcnt;
-+
-+			bitcnt = READ_VREG(VIFF_BIT_CNT);
-+			res_byte = bitcnt >> 3;
-+
-+			if (hw->chunk_size > res_byte) {
-+				if (bitcnt > frmbase_cont_bitlevel) {
-+					consume_byte = hw->chunk_size - res_byte;
-+
-+					mmpeg4_debug_print(DECODE_ID(hw), PRINT_FLAG_RUN_FLOW,
-+						"%s, size %d, consume %d, res %d\n", __func__,
-+						hw->chunk_size, consume_byte, res_byte);
-+
-+					if (consume_byte > VDEC_FIFO_ALIGN) {
-+						consume_byte -= VDEC_FIFO_ALIGN;
-+						res_byte += VDEC_FIFO_ALIGN;
-+					}
-+					hw->chunk_offset += consume_byte;
-+					hw->chunk_size = res_byte;
-+					hw->dec_result = DEC_RESULT_UNFINISH;
-+					hw->chunk_frame_count++;
-+					hw->unstable_pts = 1;
-+				} else {
-+					hw->chunk_size = 0;
-+					hw->chunk_offset = 0;
-+				}
- 			} else {
-+				mmpeg4_debug_print(DECODE_ID(hw), PRINT_FLAG_ERROR,
-+					"error: bitbyte %d  hw->chunk_size %d\n", res_byte, hw->chunk_size);
- 				hw->chunk_size = 0;
- 				hw->chunk_offset = 0;
- 			}
+ /*
