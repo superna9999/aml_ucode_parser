@@ -1,716 +1,581 @@
-commit d5c1c0ffc336c752a471e300938bf0fb617458ad
-Author: shihong.zheng <shihong.zheng@amlogic.com>
-Date:   Fri Jan 18 20:52:09 2019 +0800
+commit a093654a9ce76c5570bbc8d811da79e2a82d4f5b
+Author: Tao Guo <tao.guo@amlogic.com>
+Date:   Thu Jan 17 14:03:37 2019 +0800
 
-    media_module: optimize frame check [1/1]
+    media_module: add atrace print [1/1]
     
-    PD#SWPL-4342
+    PD#SWPL-4956
     
     Problem:
-    crc32 code optimize.
+    Need atrace to debug multimedia issue
     
     Solution:
-    1. crash when check crc32 in single mode.
-    2. no clear frame_check when repeat play for debug mode;
-    3. block run ready when crc32 error for debug mode;
-    4. fix some bugs and optimize code.
+    Add atrace prints
     
     Verify:
-    x301
+    P212
     
-    Change-Id: Ie01860f70c74385540fa6022e99d2affcabfa19a
-    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
+    Change-Id: Idd414734dd88223c3640878be26a82991f44a880
+    Signed-off-by: Tao Guo <tao.guo@amlogic.com>
 
 diff --git a/drivers/frame_provider/decoder/avs/avs.c b/drivers/frame_provider/decoder/avs/avs.c
-index b8bf8e4..b2b7d1a 100644
+index b8bf8e4..7e15114 100644
 --- a/drivers/frame_provider/decoder/avs/avs.c
 +++ b/drivers/frame_provider/decoder/avs/avs.c
-@@ -582,7 +582,7 @@ static void vavs_isr(void)
- 				decoder_bmmu_box_get_mem_handle(
- 					mm_blk_handle,
- 					buffer_index);
--
-+			decoder_do_frame_check(NULL, vf);
- 			kfifo_put(&display_q,
- 					  (const struct vframe_s *)vf);
- 			vf_notify_receiver(PROVIDER_NAME,
-@@ -718,6 +718,7 @@ static void vavs_isr(void)
- 				decoder_bmmu_box_get_mem_handle(
- 					mm_blk_handle,
- 					buffer_index);
-+			decoder_do_frame_check(NULL, vf);
- 			kfifo_put(&display_q,
- 					  (const struct vframe_s *)vf);
- 			vf_notify_receiver(PROVIDER_NAME,
-@@ -850,6 +851,7 @@ static int vavs_canvas_init(void)
- 	u32 decbuf_size, decbuf_y_size, decbuf_uv_size;
- 	unsigned long buf_start;
- 	int need_alloc_buf_num;
-+	u32 endian;
+@@ -45,6 +45,9 @@
+ #include "../../../common/chips/decoder_cpu_ver_info.h"
+ #include <linux/amlogic/tee.h>
  
- 	vf_buf_num_used = vf_buf_num;
- 	if (buf_size <= 0x00400000) {
-@@ -900,37 +902,40 @@ static int vavs_canvas_init(void)
- 			continue;
++
++#include <trace/events/meson_atrace.h>
++
+ #define DRIVER_NAME "amvdec_avs"
+ #define MODULE_NAME "amvdec_avs"
+ 
+@@ -585,6 +588,7 @@ static void vavs_isr(void)
+ 
+ 			kfifo_put(&display_q,
+ 					  (const struct vframe_s *)vf);
++			ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 			vf_notify_receiver(PROVIDER_NAME,
+ 					VFRAME_EVENT_PROVIDER_VFRAME_READY,
+ 					NULL);
+@@ -643,6 +647,7 @@ static void vavs_isr(void)
+ 
+ 			kfifo_put(&display_q,
+ 					  (const struct vframe_s *)vf);
++			ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 			vf_notify_receiver(PROVIDER_NAME,
+ 					VFRAME_EVENT_PROVIDER_VFRAME_READY,
+ 					NULL);
+@@ -720,6 +725,7 @@ static void vavs_isr(void)
+ 					buffer_index);
+ 			kfifo_put(&display_q,
+ 					  (const struct vframe_s *)vf);
++			ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 			vf_notify_receiver(PROVIDER_NAME,
+ 					VFRAME_EVENT_PROVIDER_VFRAME_READY,
+ 					NULL);
+diff --git a/drivers/frame_provider/decoder/avs2/vavs2.c b/drivers/frame_provider/decoder/avs2/vavs2.c
+index faf0cbb..9575ece 100644
+--- a/drivers/frame_provider/decoder/avs2/vavs2.c
++++ b/drivers/frame_provider/decoder/avs2/vavs2.c
+@@ -56,6 +56,7 @@
+ #include "../utils/firmware.h"
+ #include "../../../common/chips/decoder_cpu_ver_info.h"
+ #include <linux/amlogic/tee.h>
++#include <trace/events/meson_atrace.h>
+ 
+ #define I_ONLY_SUPPORT
+ #define MIX_STREAM_SUPPORT
+@@ -4433,6 +4434,7 @@ static int avs2_prepare_display_buf(struct AVS2Decoder_s *dec)
+ 			set_vframe(dec, vf, pic, 0);
+ 			decoder_do_frame_check(hw_to_vdec(dec), vf);
+ 			kfifo_put(&dec->display_q, (const struct vframe_s *)vf);
++			ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 
+ 	#ifndef CONFIG_AMLOGIC_MEDIA_MULTI_DEC
+ 			/*count info*/
+diff --git a/drivers/frame_provider/decoder/h264/vh264.c b/drivers/frame_provider/decoder/h264/vh264.c
+index db7f4af..99be440 100644
+--- a/drivers/frame_provider/decoder/h264/vh264.c
++++ b/drivers/frame_provider/decoder/h264/vh264.c
+@@ -56,6 +56,9 @@
+ #include <linux/amlogic/tee.h>
+ #include "../../../common/chips/decoder_cpu_ver_info.h"
+ 
++#include <trace/events/meson_atrace.h>
++
++
+ #define DRIVER_NAME "amvdec_h264"
+ #define MODULE_NAME "amvdec_h264"
+ #define MEM_NAME "codec_264"
+@@ -485,6 +488,7 @@ static void prepare_display_q(void)
+ 		if (kfifo_get(&delay_display_q, &vf)) {
+ 			kfifo_put(&display_q,
+ 				(const struct vframe_s *)vf);
++			ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 			vf_notify_receiver(PROVIDER_NAME,
+ 				VFRAME_EVENT_PROVIDER_VFRAME_READY, NULL);
  		}
- #endif
+@@ -2930,6 +2934,7 @@ static void stream_switching_do(struct work_struct *work)
+ 		if (kfifo_get(&delay_display_q, &vf)) {
+ 			kfifo_put(&display_q,
+ 				(const struct vframe_s *)vf);
++			ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 			vf_notify_receiver(PROVIDER_NAME,
+ 				VFRAME_EVENT_PROVIDER_VFRAME_READY, NULL);
+ 		} else
+@@ -3011,7 +3016,7 @@ static void stream_switching_do(struct work_struct *work)
+ 		/* send clone to receiver */
+ 		kfifo_put(&display_q,
+ 			(const struct vframe_s *)&fense_vf[i]);
 -
-+		if (vdec->canvas_mode == CANVAS_BLKMODE_LINEAR)
-+			endian = 7;
-+		else
-+			endian = 0;
- #ifdef NV21
--			canvas_config(canvas_base + canvas_num * i + 0,
-+			canvas_config_ex(canvas_base + canvas_num * i + 0,
- 					buf_start,
- 					canvas_width, canvas_height,
- 					CANVAS_ADDR_NOWRAP,
--					CANVAS_BLKMODE_32X32);
--			canvas_config(canvas_base + canvas_num * i + 1,
-+					vdec->canvas_mode, endian);
-+			canvas_config_ex(canvas_base + canvas_num * i + 1,
- 					buf_start +
- 					decbuf_y_size, canvas_width,
- 					canvas_height / 2,
- 					CANVAS_ADDR_NOWRAP,
--					CANVAS_BLKMODE_32X32);
-+					vdec->canvas_mode, endian);
++		ATRACE_COUNTER(MODULE_NAME, fense_vf[i].pts);
+ 		/* early recycle frames for last session */
+ 		if (delay)
+ 			vh264_vf_put(vf, NULL);
+diff --git a/drivers/frame_provider/decoder/h264/vh264_4k2k.c b/drivers/frame_provider/decoder/h264/vh264_4k2k.c
+index cbbe36f..897147f 100644
+--- a/drivers/frame_provider/decoder/h264/vh264_4k2k.c
++++ b/drivers/frame_provider/decoder/h264/vh264_4k2k.c
+@@ -59,6 +59,9 @@
+ #include <linux/amlogic/media/codec_mm/codec_mm.h>
+ #include <linux/amlogic/media/codec_mm/configs.h>
+ 
++#include <trace/events/meson_atrace.h>
++
++
+ #if  0 /* MESON_CPU_TYPE == MESON_CPU_TYPE_MESON6TVD */
+ #define DOUBLE_WRITE
+ #endif
+@@ -74,7 +77,6 @@
+ #define VF_BUFFER_IDX(n) (2  + n)
+ #define DECODER_WORK_SPACE_SIZE 0x800000
+ 
+-
+ #if  1 /* MESON_CPU_TYPE == MESON_CPU_TYPE_MESONG9TV */
+ #define H264_4K2K_SINGLE_CORE 1
  #else
--			canvas_config(canvas_num * i + 0,
-+			canvas_config_ex(canvas_num * i + 0,
- 					buf_start,
- 					canvas_width, canvas_height,
- 					CANVAS_ADDR_NOWRAP,
--					CANVAS_BLKMODE_32X32);
--			canvas_config(canvas_num * i + 1,
-+					vdec->canvas_mode, endian);
-+			canvas_config_ex(canvas_num * i + 1,
- 					buf_start +
- 					decbuf_y_size, canvas_width / 2,
- 					canvas_height / 2,
- 					CANVAS_ADDR_NOWRAP,
--					CANVAS_BLKMODE_32X32);
--			canvas_config(canvas_num * i + 2,
-+					vdec->canvas_mode, endian);
-+			canvas_config_ex(canvas_num * i + 2,
- 					buf_start +
- 					decbuf_y_size + decbuf_uv_size,
- 					canvas_width / 2, canvas_height / 2,
- 					CANVAS_ADDR_NOWRAP,
--					CANVAS_BLKMODE_32X32);
-+					vdec->canvas_mode, endian);
- #endif
- 			if (debug_flag & AVS_DEBUG_PRINT) {
- 				pr_info("canvas config %d, addr %p\n", i,
-@@ -1682,6 +1687,7 @@ static int amvdec_avs_probe(struct platform_device *pdev)
- 	}
- #endif
- 	INIT_WORK(&set_clk_work, avs_set_clk);
-+	vdec = pdata;
- 	if (vavs_init() < 0) {
- 		pr_info("amvdec_avs init failed.\n");
- 		kfree(gvs);
-@@ -1689,7 +1695,6 @@ static int amvdec_avs_probe(struct platform_device *pdev)
- 		pdata->dec_status = NULL;
- 		return -ENODEV;
- 	}
--	vdec = pdata;
+@@ -764,6 +766,7 @@ static irqreturn_t vh264_4k2k_isr(int irq, void *dev_id)
+ 					VF_BUFFER_IDX(display_buff_id));
+ 				kfifo_put(&display_q,
+ 						  (const struct vframe_s *)vf);
++				ATRACE_COUNTER(MODULE_NAME, vf->pts);
  
- 	INIT_WORK(&fatal_error_wd_work, vavs_fatal_error_handler);
- 	atomic_set(&error_handler_run, 0);
-diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-index b6f4a9f..cd9183b 100644
---- a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-+++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-@@ -225,6 +225,7 @@ struct vdec_mpeg12_hw_s {
- 	u32 buffer_not_ready;
- 	int frameinfo_enable;
- 	struct firmware_s *fw;
-+	u32 canvas_mode;
- };
- static void vmpeg12_local_init(struct vdec_mpeg12_hw_s *hw);
- static int vmpeg12_hw_ctx_restore(struct vdec_mpeg12_hw_s *hw);
-@@ -701,6 +702,7 @@ static irqreturn_t vmpeg12_isr_thread_fn(struct vdec_s *vdec, int irq)
- 				debug_print(DECODE_ID(hw), PRINT_FLAG_TIMEINFO,
- 							"cpts=%d,pts64=%lld\n",
- 				vf->pts, vf->pts_us64);
-+				decoder_do_frame_check(hw_to_vdec(hw), vf);
- 				kfifo_put(&hw->display_q,
- 				(const struct vframe_s *)vf);
- 				hw->frame_num++;
-@@ -766,6 +768,7 @@ static irqreturn_t vmpeg12_isr_thread_fn(struct vdec_s *vdec, int irq)
- 			"cpts0=%d,pts64=%lld,dur=%d, index %d , use %d\n",
- 				vf->pts, vf->pts_us64, vf->duration,
- 				vf->index, hw->vfbuf_use[index]);
-+				decoder_do_frame_check(hw_to_vdec(hw), vf);
- 				kfifo_put(&hw->display_q,
- 				(const struct vframe_s *)vf);
- 				hw->frame_num++;
-@@ -1190,7 +1193,9 @@ static void vmpeg12_canvas_init(struct vdec_mpeg12_hw_s *hw)
- 			hw->canvas_config[i][0].height =
- 			canvas_height;
- 			hw->canvas_config[i][0].block_mode =
--			CANVAS_BLKMODE_32X32;
-+				hw->canvas_mode;
-+			hw->canvas_config[i][0].endian =
-+				(hw->canvas_mode == CANVAS_BLKMODE_LINEAR)?7:0;
+ 				vf_notify_receiver(PROVIDER_NAME,
+ 					VFRAME_EVENT_PROVIDER_VFRAME_READY,
+diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+index 15b5010..6ed22ae 100644
+--- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
++++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+@@ -61,6 +61,9 @@
+ #include "../../../common/chips/decoder_cpu_ver_info.h"
+ #include <linux/crc32.h>
  
- 			canvas_config_config(canvas_y(canvas),
- 			&hw->canvas_config[i][0]);
-@@ -1202,7 +1207,9 @@ static void vmpeg12_canvas_init(struct vdec_mpeg12_hw_s *hw)
- 			hw->canvas_config[i][1].height =
- 			canvas_height / 2;
- 			hw->canvas_config[i][1].block_mode =
--			CANVAS_BLKMODE_32X32;
-+				hw->canvas_mode;
-+			hw->canvas_config[i][0].endian =
-+				(hw->canvas_mode == CANVAS_BLKMODE_LINEAR)?7:0;
++#include <trace/events/meson_atrace.h>
++
++
+ #undef pr_info
+ #define pr_info printk
+ #define VDEC_DW
+@@ -2579,7 +2582,7 @@ int prepare_display_buf(struct vdec_s *vdec, struct FrameStore *frame)
+ 		}
  
- 			canvas_config_config(canvas_u(canvas),
- 			&hw->canvas_config[i][1]);
-@@ -1805,7 +1812,7 @@ static int ammvdec_mpeg12_probe(struct platform_device *pdev)
- 		&vf_provider_ops, pdata);
- 
- 	platform_set_drvdata(pdev, pdata);
+ 		kfifo_put(&hw->display_q, (const struct vframe_s *)vf);
 -
-+	hw->canvas_mode = pdata->canvas_mode;
- 	hw->platform_dev = pdev;
++		ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 		hw->vf_pre_count++;
+ 		vf_notify_receiver(vdec->vf_provider_name,
+ 			VFRAME_EVENT_PROVIDER_VFRAME_READY, NULL);
+@@ -2616,6 +2619,8 @@ int notify_v4l_eos(struct vdec_s *vdec)
+ 		vf->flag = VFRAME_FLAG_EMPTY_FRAME_V4L;
  
- 	if (pdata->sys_info)
-diff --git a/drivers/frame_provider/decoder/utils/frame_check.c b/drivers/frame_provider/decoder/utils/frame_check.c
-index 20a7c38..e783dbc 100644
---- a/drivers/frame_provider/decoder/utils/frame_check.c
-+++ b/drivers/frame_provider/decoder/utils/frame_check.c
-@@ -39,6 +39,9 @@
+ 		kfifo_put(&hw->display_q, (const struct vframe_s *)vf);
++
++		ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 		vf_notify_receiver(vdec->vf_provider_name,
+ 			VFRAME_EVENT_PROVIDER_VFRAME_READY, NULL);
+ 
+diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
+index 6845e1b..019527d 100644
+--- a/drivers/frame_provider/decoder/h265/vh265.c
++++ b/drivers/frame_provider/decoder/h265/vh265.c
+@@ -46,6 +46,7 @@
+ #include "../utils/config_parser.h"
+ #include "../utils/firmware.h"
+ #include "../../../common/chips/decoder_cpu_ver_info.h"
++#include <trace/events/meson_atrace.h>
+ 
+ #define SWAP_HEVC_UCODE
+ #define DETREFILL_ENABLE
+@@ -7393,6 +7394,7 @@ static int process_pending_vframe(struct hevc_state_s *hevc,
+ 				__func__, vf->index);
+ 		hevc->vf_pre_count++;
+ 		kfifo_put(&hevc->display_q, (const struct vframe_s *)vf);
++		ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 	}
+ 
+ 	if (kfifo_peek(&hevc->pending_q, &vf)) {
+@@ -7414,6 +7416,7 @@ static int process_pending_vframe(struct hevc_state_s *hevc,
+ 				hevc->vf_pre_count++;
+ 				kfifo_put(&hevc->display_q,
+ 				(const struct vframe_s *)vf);
++				ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 			}
+ 		} else if ((!pair_frame_top_flag) &&
+ 			(((vf->index >> 8) & 0xff) == 0xff)) {
+@@ -7431,6 +7434,7 @@ static int process_pending_vframe(struct hevc_state_s *hevc,
+ 				pair_pic->vf_ref++;
+ 				kfifo_put(&hevc->display_q,
+ 				(const struct vframe_s *)vf);
++				ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 				hevc->vf_pre_count++;
+ 				if (get_dbg_flag(hevc) & H265_DEBUG_PIC_STRUCT)
+ 					hevc_print(hevc, 0,
+@@ -7453,6 +7457,7 @@ static int process_pending_vframe(struct hevc_state_s *hevc,
+ 				pair_pic->vf_ref++;
+ 				kfifo_put(&hevc->display_q,
+ 				(const struct vframe_s *)vf);
++				ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 				hevc->vf_pre_count++;
+ 				if (get_dbg_flag(hevc) & H265_DEBUG_PIC_STRUCT)
+ 					hevc_print(hevc, 0,
+@@ -7817,9 +7822,11 @@ static int prepare_display_buf(struct hevc_state_s *hevc, struct PIC_s *pic)
+ 			hevc->vf_pre_count++;
+ 			kfifo_put(&hevc->display_q,
+ 			(const struct vframe_s *)vf);
++			ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 			hevc->vf_pre_count++;
+ 			kfifo_put(&hevc->display_q,
+ 			(const struct vframe_s *)vf2);
++			ATRACE_COUNTER(MODULE_NAME, vf2->pts);
+ 		} else if (pic->pic_struct == 5
+ 			|| pic->pic_struct == 6) {
+ 			struct vframe_s *vf2, *vf3;
+@@ -7863,12 +7870,15 @@ static int prepare_display_buf(struct hevc_state_s *hevc, struct PIC_s *pic)
+ 			hevc->vf_pre_count++;
+ 			kfifo_put(&hevc->display_q,
+ 			(const struct vframe_s *)vf);
++			ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 			hevc->vf_pre_count++;
+ 			kfifo_put(&hevc->display_q,
+ 			(const struct vframe_s *)vf2);
++			ATRACE_COUNTER(MODULE_NAME, vf2->pts);
+ 			hevc->vf_pre_count++;
+ 			kfifo_put(&hevc->display_q,
+ 			(const struct vframe_s *)vf3);
++			ATRACE_COUNTER(MODULE_NAME, vf3->pts);
+ 
+ 		} else if (pic->pic_struct == 9
+ 			|| pic->pic_struct == 10) {
+@@ -7972,6 +7982,7 @@ static int prepare_display_buf(struct hevc_state_s *hevc, struct PIC_s *pic)
+ 			hevc->vf_pre_count++;
+ 			kfifo_put(&hevc->display_q,
+ 			(const struct vframe_s *)vf);
++			ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 		}
+ #else
+ 		vf->type_original = vf->type;
+@@ -7979,6 +7990,7 @@ static int prepare_display_buf(struct hevc_state_s *hevc, struct PIC_s *pic)
+ 		hevc->vf_pre_count++;
+ 		decoder_do_frame_check(hw_to_vdec(hevc), vf);
+ 		kfifo_put(&hevc->display_q, (const struct vframe_s *)vf);
++		ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 
+ 		if (get_dbg_flag(hevc) & H265_DEBUG_PIC_STRUCT)
+ 			hevc_print(hevc, 0,
+diff --git a/drivers/frame_provider/decoder/mjpeg/vmjpeg.c b/drivers/frame_provider/decoder/mjpeg/vmjpeg.c
+index 95bb222..4614789 100644
+--- a/drivers/frame_provider/decoder/mjpeg/vmjpeg.c
++++ b/drivers/frame_provider/decoder/mjpeg/vmjpeg.c
+@@ -38,6 +38,9 @@
+ #include <linux/amlogic/media/codec_mm/configs.h>
+ #include <linux/amlogic/tee.h>
+ 
++#include <trace/events/meson_atrace.h>
++
++
+ #ifdef CONFIG_AM_VDEC_MJPEG_LOG
+ #define AMLOG
+ #define LOG_LEVEL_VAR       amlog_level_vmjpeg
+@@ -219,6 +222,7 @@ static irqreturn_t vmjpeg_isr(int irq, void *dev_id)
+ 			vdec_count_info(gvs, 0, offset);
+ 
+ 			kfifo_put(&display_q, (const struct vframe_s *)vf);
++			ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 
+ 			vf_notify_receiver(PROVIDER_NAME,
+ 					VFRAME_EVENT_PROVIDER_VFRAME_READY,
+@@ -276,6 +280,7 @@ static irqreturn_t vmjpeg_isr(int irq, void *dev_id)
+ 			vfbuf_use[index]++;
+ 
+ 			kfifo_put(&display_q, (const struct vframe_s *)vf);
++			ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ #else
+ 			/* send whole frame by weaving top & bottom field */
+ #ifdef NV21
+@@ -304,6 +309,7 @@ static irqreturn_t vmjpeg_isr(int irq, void *dev_id)
+ 			vdec_count_info(gvs, 0, offset);
+ 
+ 			kfifo_put(&display_q, (const struct vframe_s *)vf);
++			ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 
+ 			vf_notify_receiver(PROVIDER_NAME,
+ 					VFRAME_EVENT_PROVIDER_VFRAME_READY,
+diff --git a/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c b/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c
+index f1de5b9..a3e2053 100644
+--- a/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c
++++ b/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c
+@@ -44,6 +44,9 @@
+ #include <linux/amlogic/media/codec_mm/configs.h>
+ #include "../utils/firmware.h"
+ 
++#include <trace/events/meson_atrace.h>
++
++
+ #define MEM_NAME "codec_mmjpeg"
+ 
+ #define DRIVER_NAME "ammvdec_mjpeg"
+@@ -300,7 +303,7 @@ static irqreturn_t vmjpeg_isr(struct vdec_s *vdec, int irq)
+ 	hw->vfbuf_use[index]++;
+ 
+ 	kfifo_put(&hw->display_q, (const struct vframe_s *)vf);
+-
++	ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 	hw->frame_num++;
+ 	mmjpeg_debug_print(DECODE_ID(hw), PRINT_FRAME_NUM,
+ 		"%s:frame num:%d,pts=%d,pts64=%lld. dur=%d\n",
+diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
+index f758076..003ffb3 100644
+--- a/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
++++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
+@@ -43,6 +43,9 @@
+ #include <linux/amlogic/media/codec_mm/configs.h>
+ #include <linux/amlogic/tee.h>
+ 
++#include <trace/events/meson_atrace.h>
++
++
+ #ifdef CONFIG_AM_VDEC_MPEG12_LOG
+ #define AMLOG
+ #define LOG_LEVEL_VAR       amlog_level_vmpeg
+@@ -995,6 +998,7 @@ static irqreturn_t vmpeg12_isr(int irq, void *dev_id)
+ 						index);
+ 				kfifo_put(&display_q,
+ 						  (const struct vframe_s *)vf);
++				ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 				vf_notify_receiver(PROVIDER_NAME,
+ 					VFRAME_EVENT_PROVIDER_VFRAME_READY,
+ 					NULL);
+@@ -1080,6 +1084,7 @@ static irqreturn_t vmpeg12_isr(int irq, void *dev_id)
+ 						index);
+ 				kfifo_put(&display_q,
+ 						  (const struct vframe_s *)vf);
++				ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 				vf_notify_receiver(PROVIDER_NAME,
+ 					VFRAME_EVENT_PROVIDER_VFRAME_READY,
+ 					NULL);
+@@ -1132,6 +1137,7 @@ static irqreturn_t vmpeg12_isr(int irq, void *dev_id)
+ 						index);
+ 				kfifo_put(&display_q,
+ 					(const struct vframe_s *)vf);
++				ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 				vf_notify_receiver(PROVIDER_NAME,
+ 					VFRAME_EVENT_PROVIDER_VFRAME_READY,
+ 					NULL);
+@@ -1172,6 +1178,7 @@ static irqreturn_t vmpeg12_isr(int irq, void *dev_id)
+ 				} else {
+ 					kfifo_put(&display_q,
+ 						(const struct vframe_s *)vf);
++					ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 					vf_notify_receiver(PROVIDER_NAME,
+ 					VFRAME_EVENT_PROVIDER_VFRAME_READY,
+ 						NULL);
+diff --git a/drivers/frame_provider/decoder/mpeg4/vmpeg4.c b/drivers/frame_provider/decoder/mpeg4/vmpeg4.c
+index 56351f7..149a3d2 100644
+--- a/drivers/frame_provider/decoder/mpeg4/vmpeg4.c
++++ b/drivers/frame_provider/decoder/mpeg4/vmpeg4.c
+@@ -42,6 +42,9 @@
+ #include <linux/amlogic/media/codec_mm/configs.h>
+ #include <linux/amlogic/tee.h>
+ 
++#include <trace/events/meson_atrace.h>
++
++
+ /* #define CONFIG_AM_VDEC_MPEG4_LOG */
+ #ifdef CONFIG_AM_VDEC_MPEG4_LOG
+ #define AMLOG
+@@ -490,6 +493,7 @@ static irqreturn_t vmpeg4_isr(int irq, void *dev_id)
+ 					buffer_index);
+ 
+ 			kfifo_put(&display_q, (const struct vframe_s *)vf);
++			ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 
+ 			vf_notify_receiver(PROVIDER_NAME,
+ 					VFRAME_EVENT_PROVIDER_VFRAME_READY,
+@@ -536,6 +540,7 @@ static irqreturn_t vmpeg4_isr(int irq, void *dev_id)
+ 				vmpeg4_amstream_dec_info.rate, picture_type);
+ 
+ 			kfifo_put(&display_q, (const struct vframe_s *)vf);
++			ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 
+ 			vf_notify_receiver(PROVIDER_NAME,
+ 				VFRAME_EVENT_PROVIDER_VFRAME_READY,
+@@ -583,6 +588,7 @@ static irqreturn_t vmpeg4_isr(int irq, void *dev_id)
+ 					buffer_index);
+ 
+ 			kfifo_put(&display_q, (const struct vframe_s *)vf);
++			ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 
+ 			vf_notify_receiver(PROVIDER_NAME,
+ 				VFRAME_EVENT_PROVIDER_VFRAME_READY,
+diff --git a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
+index 705b0ac..406ae8b 100644
+--- a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
++++ b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
+@@ -46,6 +46,9 @@
+ #include <linux/amlogic/media/codec_mm/configs.h>
+ #include "../utils/firmware.h"
+ 
++#include <trace/events/meson_atrace.h>
++
++
+ #define DRIVER_NAME "ammvdec_mpeg4"
+ #define MODULE_NAME "ammvdec_mpeg4"
+ 
+@@ -752,6 +755,7 @@ static irqreturn_t vmpeg4_isr_thread_fn(struct vdec_s *vdec, int irq)
+ 			} else {
+ 				kfifo_put(&hw->display_q,
+ 				(const struct vframe_s *)vf);
++				ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 				hw->frame_num++;
+ 			vf_notify_receiver(vdec->vf_provider_name,
+ 					VFRAME_EVENT_PROVIDER_VFRAME_READY,
+@@ -800,6 +804,7 @@ static irqreturn_t vmpeg4_isr_thread_fn(struct vdec_s *vdec, int irq)
+ 			} else {
+ 				kfifo_put(&hw->display_q,
+ 				(const struct vframe_s *)vf);
++				ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 				hw->frame_num++;
+ 			vf_notify_receiver(vdec->vf_provider_name,
+ 				VFRAME_EVENT_PROVIDER_VFRAME_READY,
+@@ -854,6 +859,7 @@ static irqreturn_t vmpeg4_isr_thread_fn(struct vdec_s *vdec, int irq)
+ 					vf->duration = duration * (hw->timeout_flag + 1);
+ 				kfifo_put(&hw->display_q,
+ 					(const struct vframe_s *)vf);
++				ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 				hw->frame_num++;
+ 				hw->timeout_flag = 0;
+ 				vf_notify_receiver(vdec->vf_provider_name,
+diff --git a/drivers/frame_provider/decoder/real/vreal.c b/drivers/frame_provider/decoder/real/vreal.c
+index 88911ec..afce94e 100644
+--- a/drivers/frame_provider/decoder/real/vreal.c
++++ b/drivers/frame_provider/decoder/real/vreal.c
+@@ -54,6 +54,9 @@
+ #include "../utils/firmware.h"
+ #include <linux/amlogic/tee.h>
+ 
++#include <trace/events/meson_atrace.h>
++
++
+ #define DRIVER_NAME "amvdec_real"
+ #define MODULE_NAME "amvdec_real"
+ 
+@@ -355,6 +358,7 @@ static irqreturn_t vreal_isr(int irq, void *dev_id)
+ 				buffer_index);
+ 
+ 		kfifo_put(&display_q, (const struct vframe_s *)vf);
++		ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 
+ 		frame_count++;
+ 		vf_notify_receiver(PROVIDER_NAME,
+diff --git a/drivers/frame_provider/decoder/utils/vdec_input.c b/drivers/frame_provider/decoder/utils/vdec_input.c
+index 9b4f01e..af95293 100644
+--- a/drivers/frame_provider/decoder/utils/vdec_input.c
++++ b/drivers/frame_provider/decoder/utils/vdec_input.c
+@@ -28,6 +28,8 @@
+ #include <asm/cacheflush.h>
+ #include <linux/crc32.h>
+ 
++#include <trace/events/meson_atrace.h>
++
+ #define VFRAME_BLOCK_SIZE (512 * SZ_1K)/*512 for 1080p default init.*/
+ #define VFRAME_BLOCK_SIZE_4K (2 * SZ_1M) /*2M for 4K default.*/
+ #define VFRAME_BLOCK_SIZE_MAX (4 * SZ_1M)
+@@ -897,6 +899,7 @@ int vdec_input_add_chunk(struct vdec_input_s *input, const char *buf,
+ 	list_add_tail(&chunk->list, &input->vframe_chunk_list);
+ 	input->data_size += chunk->size;
+ 	input->have_frame_num++;
++	ATRACE_COUNTER(MEM_NAME, input->have_frame_num);
+ 	if (chunk->pts_valid) {
+ 		input->last_inpts_u64 = chunk->pts64;
+ 		input->last_in_nopts_cnt = 0;
+@@ -995,6 +998,7 @@ void vdec_input_release_chunk(struct vdec_input_s *input,
+ 
+ 	list_del(&chunk->list);
+ 	input->have_frame_num--;
++	ATRACE_COUNTER(MEM_NAME, input->have_frame_num);
+ 	if (chunk->pts_valid) {
+ 		input->last_comsumed_no_pts_cnt = 0;
+ 		input->last_comsumed_pts_u64 = chunk->pts64;
+diff --git a/drivers/frame_provider/decoder/utils/vdec_profile.c b/drivers/frame_provider/decoder/utils/vdec_profile.c
+index a61f2bd..d03335a 100644
+--- a/drivers/frame_provider/decoder/utils/vdec_profile.c
++++ b/drivers/frame_provider/decoder/utils/vdec_profile.c
+@@ -23,6 +23,7 @@
+ 
+ 
+ #include <linux/amlogic/media/utils/vdec_reg.h>
++#include <trace/events/meson_atrace.h>
+ #include "vdec_profile.h"
  #include "vdec.h"
- #include "frame_check.h"
- #include "amlogic_fbc_hook.h"
-+#include <linux/highmem.h>
-+#include <linux/page-flags.h>
-+#include "../../../common/chips/decoder_cpu_ver_info.h"
  
+@@ -223,6 +224,7 @@ EXPORT_SYMBOL(vdec_profile_more);
  
- #define FC_ERROR	0x0
-@@ -46,6 +49,8 @@
- #define FC_YUV_DEBUG	0x01
- #define FC_CRC_DEBUG	0x02
- #define FC_TST_DEBUG	0x80
-+#define FC_ERR_CRC_BLOCK_MODE	0x10
-+#define FC_CHECK_CRC_LOOP_MODE	0x20
- 
- #define YUV_MASK	0x01
- #define CRC_MASK	0x02
-@@ -71,26 +76,29 @@ static unsigned int size_yuv_buf = (YUV_DEF_SIZE * YUV_DEF_NUM);
- #define YUV_PATH  "/data/tmp/"
- static char comp_crc[128] = "name";
- 
-+static struct vdec_s *single_mode_vdec = NULL;
- 
--module_param_string(comp_crc, comp_crc, 128, 0664);
--MODULE_PARM_DESC(comp_crc, "\n crc_filename\n");
--
--module_param(fc_debug, uint, 0664);
--MODULE_PARM_DESC(fc_debug, "\n frame check debug\n");
-+static unsigned int yuv_enable, check_enable;
-+static unsigned int yuv_start[MAX_INSTANCE_MUN];
-+static unsigned int yuv_num[MAX_INSTANCE_MUN];
- 
--module_param(size_yuv_buf, uint, 0664);
--MODULE_PARM_DESC(size_yuv_buf, "\n size_yuv_buf\n");
- 
--static __inline void set_enable(struct pic_check_mgr_t *p, int mask)
-+static inline void set_enable(struct pic_check_mgr_t *p, int mask)
+ void vdec_profile(struct vdec_s *vdec, int event)
  {
- 	p->enable |= mask;
- }
++	ATRACE_COUNTER(vdec_device_name_str(vdec), event);
+ 	vdec_profile_more(vdec, event, 0 , 0);
+ 	if (dec_time_stat_flag == 1)
+ 		vdec_profile_statistics(vdec, event);
+diff --git a/drivers/frame_provider/decoder/vc1/vvc1.c b/drivers/frame_provider/decoder/vc1/vvc1.c
+index 4de5c3c..86f171a 100644
+--- a/drivers/frame_provider/decoder/vc1/vvc1.c
++++ b/drivers/frame_provider/decoder/vc1/vvc1.c
+@@ -43,6 +43,9 @@
+ #include "../utils/firmware.h"
+ #include <linux/amlogic/tee.h>
  
--static __inline void set_disable(struct pic_check_mgr_t *p, int mask)
-+static inline void set_disable(struct pic_check_mgr_t *p, int mask)
- {
- 	p->enable &= (~mask);
- }
- 
-+static inline void check_schedule(struct pic_check_mgr_t *mgr)
-+{
-+	if (atomic_read(&mgr->work_inited))
-+		vdec_schedule_work(&mgr->frame_check_work);
-+}
++#include <trace/events/meson_atrace.h>
 +
- static int get_frame_size(struct pic_check_mgr_t *pic,
- 	struct vframe_s *vf)
- {
-@@ -199,8 +207,10 @@ static char *fget_crc_str(char *buf,
- 				break;
- 		}
- 		*cs = '\0';
--		if ((c == 0) && (cs == buf))
-+		if ((c == 0) && (cs == buf)) {
-+			set_fs(old_fs);
- 			return NULL;
-+		}
- 		ret = sscanf(buf, "%08u: %8x %8x", &index, &crc1, &crc2);
- 		dbg_print(FC_CRC_DEBUG, "%s, index = %d, cmp = %d\n",
- 			__func__, index, fc->cmp_crc_cnt);
-@@ -221,7 +231,7 @@ static struct file* file_open(int mode, const char *str, ...)
- 	va_start(args, str);
- 	vsnprintf(file, sizeof(file), str, args);
- 
--	fp = filp_open(file, mode, 0);
-+	fp = filp_open(file, mode, (mode&O_CREAT)?0666:0);
- 	if (IS_ERR(fp)) {
- 		fp = NULL;
- 		dbg_print(FC_ERROR, "open %s failed\n", file);
-@@ -327,38 +337,65 @@ static void do_check_work(struct work_struct *work)
- 	write_crc_work(mgr);
- }
- 
--static void check_schedule(struct pic_check_mgr_t *mgr)
--{
--	if (atomic_read(&mgr->work_inited))
--		vdec_schedule_work(&mgr->frame_check_work);
--}
--
- static int memcpy_phy_to_virt(char *to_virt,
- 	ulong phy_from, unsigned int size)
- {
- 	void *vaddr = NULL;
- 	unsigned int tmp_size = 0;
- 
--	while (size > 0) {
--		if (size >= VMAP_STRIDE_SIZE) {
--			vaddr = (void *)codec_mm_vmap(phy_from, VMAP_STRIDE_SIZE);
--			tmp_size = VMAP_STRIDE_SIZE;
--			phy_from += VMAP_STRIDE_SIZE;
--			size -= VMAP_STRIDE_SIZE;
--		} else {
--			vaddr = (void *)codec_mm_vmap(phy_from, size);
--			tmp_size = size;
--			size = 0;
--		}
--		if (vaddr == NULL) {
--			dbg_print(FC_YUV_DEBUG, "%s: codec_mm_vmap failed phy: 0x%x\n",
--				__func__, (unsigned int)phy_from);
--			return -1;
-+	if (single_mode_vdec != NULL) {
-+		unsigned int offset = phy_from & (~PAGE_MASK);
-+		while (size > 0) {
-+			if (offset + size >= PAGE_SIZE) {
-+				vaddr = kmap_atomic(phys_to_page(phy_from));
-+				tmp_size = (PAGE_SIZE - offset);
-+				phy_from += tmp_size;
-+				size -= tmp_size;
-+				vaddr += offset;
-+			} else {
-+				vaddr = kmap_atomic(phys_to_page(phy_from));
-+				vaddr += offset;
-+				tmp_size = size;
-+				size = 0;
-+			}
-+			if (vaddr == NULL) {
-+				dbg_print(FC_CRC_DEBUG, "%s: kmap_atomic failed phy: 0x%x\n",
-+					__func__, (unsigned int)phy_from);
-+				return -1;
-+			}
-+			/*
-+			codec_mm_dma_flush(vaddr,
-+				tmp_size, DMA_FROM_DEVICE);
-+			*/
-+			memcpy(to_virt, vaddr, tmp_size);
 +
-+			kunmap_atomic(vaddr - offset);
-+			offset = 0;
- 		}
--		memcpy(to_virt, vaddr, tmp_size);
--		to_virt += tmp_size;
-+	} else {
-+		while (size > 0) {
-+			if (size >= VMAP_STRIDE_SIZE) {
-+				vaddr = codec_mm_vmap(phy_from, VMAP_STRIDE_SIZE);
-+				tmp_size = VMAP_STRIDE_SIZE;
-+				phy_from += VMAP_STRIDE_SIZE;
-+				size -= VMAP_STRIDE_SIZE;
-+			} else {
-+				vaddr = codec_mm_vmap(phy_from, size);
-+				tmp_size = size;
-+				size = 0;
-+			}
-+			if (vaddr == NULL) {
-+				dbg_print(FC_YUV_DEBUG, "%s: codec_mm_vmap failed phy: 0x%x\n",
-+					__func__, (unsigned int)phy_from);
-+				return -1;
-+			}
-+			codec_mm_dma_flush(vaddr,
-+				tmp_size, DMA_FROM_DEVICE);
-+			memcpy(to_virt, vaddr, tmp_size);
-+			to_virt += tmp_size;
+ #define DRIVER_NAME "amvdec_vc1"
+ #define MODULE_NAME "amvdec_vc1"
  
--		codec_mm_unmap_phyaddr(vaddr);
-+			codec_mm_unmap_phyaddr(vaddr);
-+		}
- 	}
- 	return 0;
- }
-@@ -439,8 +476,7 @@ static int do_yuv_dump(struct pic_check_mgr_t *mgr, struct vframe_s *vf)
- 		}
- 	}
- 	dump->dump_cnt++;
--	dbg_print(0,
--		"----->>dump frame num: %d, dump %dst, size %x\n",
-+	dbg_print(0, "----->dump frame num: %d, dump %dst, size %x\n",
- 		mgr->frame_cnt, dump->dump_cnt, mgr->size_pic);
+@@ -490,6 +493,7 @@ static irqreturn_t vvc1_isr(int irq, void *dev_id)
+ 					buffer_index);
  
- 	if (dump->dump_cnt >= dump->num)
-@@ -453,13 +489,18 @@ static int crc_store(struct pic_check_mgr_t *mgr, struct vframe_s *vf,
- 	int crc_y, int crc_uv)
- {
- 	int ret = 0;
--	char *crc_addr;
-+	char *crc_addr = NULL;
- 	int comp_frame = 0, comp_crc_y, comp_crc_uv;
- 	struct pic_check_t *check = &mgr->pic_check;
+ 			kfifo_put(&display_q, (const struct vframe_s *)vf);
++			ATRACE_COUNTER(MODULE_NAME, vf->pts);
  
- 	if (kfifo_get(&check->new_chk_q, &crc_addr) == 0) {
- 		dbg_print(0, "%08d: %08x %08x\n",
- 			mgr->frame_cnt, crc_y, crc_uv);
-+		if (check->check_fp) {
-+			dbg_print(0, "crc32 dropped\n");
-+		} else {
-+			dbg_print(0, "no opened file to write crc32\n");
-+		}
- 		return -1;
- 	}
- 	if (check->cmp_crc_cnt > mgr->frame_cnt) {
-@@ -469,22 +510,26 @@ static int crc_store(struct pic_check_mgr_t *mgr, struct vframe_s *vf,
- 		dbg_print(0, "%08d: %08x %08x <--> %08d: %08x %08x\n",
- 			mgr->frame_cnt, crc_y, crc_uv,
- 			comp_frame, comp_crc_y, comp_crc_uv);
--		/*
--		if ((mgr->frame_cnt % 100) == 0)
--			comp_crc_uv = mgr->frame_cnt;
--		*/
+ 			vf_notify_receiver(
+ 				PROVIDER_NAME,
+@@ -549,6 +553,7 @@ static irqreturn_t vvc1_isr(int irq, void *dev_id)
+ 					buffer_index);
+ 
+ 			kfifo_put(&display_q, (const struct vframe_s *)vf);
++			ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 
+ 			vf_notify_receiver(
+ 					PROVIDER_NAME,
+@@ -633,6 +638,7 @@ static irqreturn_t vvc1_isr(int irq, void *dev_id)
+ 					mm_blk_handle,
+ 					buffer_index);
+ 			kfifo_put(&display_q, (const struct vframe_s *)vf);
++			ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 
+ 			vf_notify_receiver(PROVIDER_NAME,
+ 					VFRAME_EVENT_PROVIDER_VFRAME_READY,
+diff --git a/drivers/frame_provider/decoder/vp9/vvp9.c b/drivers/frame_provider/decoder/vp9/vvp9.c
+index b7461d9..b4d5d48 100644
+--- a/drivers/frame_provider/decoder/vp9/vvp9.c
++++ b/drivers/frame_provider/decoder/vp9/vvp9.c
+@@ -55,6 +55,9 @@
+ #include "../utils/firmware.h"
+ #include "../../../common/chips/decoder_cpu_ver_info.h"
+ 
++#include <trace/events/meson_atrace.h>
 +
- 		if (comp_frame == mgr->frame_cnt) {
- 			if ((comp_crc_y != crc_y) || (crc_uv != comp_crc_uv)) {
- 					mgr->pic_dump.start = 0;
- 					mgr->pic_dump.num++;
--					dbg_print(0, "\n\nError: %08d, %08x %08x != %08x %08x\n\n",
-+					dbg_print(0, "\n\nError: %08d: %08x %08x != %08x %08x\n\n",
- 						mgr->frame_cnt, crc_y, crc_uv, comp_crc_y, comp_crc_uv);
- 					do_yuv_dump(mgr, vf);
-+					if (fc_debug & FC_ERR_CRC_BLOCK_MODE)
-+						mgr->err_crc_block = 1;
- 			}
-+		} else {
-+			dbg_print(0, "frame num error: frame_cnt(%d) frame_comp(%d)\n",
-+				mgr->frame_cnt, comp_frame);
- 		}
--    }
-+	} else {
-+		dbg_print(0, "%08d: %08x %08x\n", mgr->frame_cnt, crc_y, crc_uv);
-+	}
- 
--	if (check->check_fp) {
-+	if ((check->check_fp) && (crc_addr != NULL)) {
- 		ret = snprintf(crc_addr, SIZE_CRC,
- 			"%08d: %08x %08x\n", mgr->frame_cnt, crc_y, crc_uv);
- 
-@@ -495,6 +540,7 @@ static int crc_store(struct pic_check_mgr_t *mgr, struct vframe_s *vf,
- 	return ret;
- }
- 
 +
- static int crc32_vmap_le(unsigned int *crc32,
- 	ulong phyaddr, unsigned int size)
- {
-@@ -502,25 +548,60 @@ static int crc32_vmap_le(unsigned int *crc32,
- 	unsigned int crc = 0;
- 	unsigned int tmp_size = 0;
+ #define MIX_STREAM_SUPPORT
  
--	while (size > 0) {
--		if (size >= VMAP_STRIDE_SIZE) {
--			vaddr = (void *)codec_mm_vmap(phyaddr, VMAP_STRIDE_SIZE);
--			tmp_size = VMAP_STRIDE_SIZE;
--			phyaddr += VMAP_STRIDE_SIZE;
--			size -= VMAP_STRIDE_SIZE;
--		} else {
--			vaddr = (void *)codec_mm_vmap(phyaddr, size);
--			tmp_size = size;
--			size = 0;
--		}
--		if (vaddr == NULL) {
--			dbg_print(FC_CRC_DEBUG, "%s: codec_mm_vmap failed phy: 0x%x\n",
--				__func__, (unsigned int)phyaddr);
--			return -1;
-+	/*single mode cannot use codec_mm_vmap*/
-+	if (single_mode_vdec != NULL) {
-+		unsigned int offset = phyaddr & (~PAGE_MASK);
-+		while (size > 0) {
-+			if (offset + size >= PAGE_SIZE) {
-+				vaddr = kmap_atomic(phys_to_page(phyaddr));
-+				tmp_size = (PAGE_SIZE - offset);
-+				phyaddr += tmp_size;
-+				size -= tmp_size;
-+				vaddr += offset;
-+			} else {
-+				vaddr = kmap_atomic(phys_to_page(phyaddr));
-+				tmp_size = size;
-+				vaddr += offset;
-+				size = 0;
-+			}
-+			if (vaddr == NULL) {
-+				dbg_print(FC_CRC_DEBUG, "%s: kmap_atomic failed phy: 0x%x\n",
-+					__func__, (unsigned int)phyaddr);
-+				return -1;
-+			}
-+			/*
-+			codec_mm_dma_flush(vaddr,
-+				tmp_size, DMA_FROM_DEVICE);
-+			*/
-+			crc = crc32_le(crc, vaddr, tmp_size);
-+
-+			kunmap_atomic(vaddr - offset);
-+			offset = 0;
- 		}
--		crc = crc32_le(crc, vaddr, tmp_size);
-+	} else {
-+		while (size > 0) {
-+			if (size >= VMAP_STRIDE_SIZE) {
-+				vaddr = codec_mm_vmap(phyaddr, VMAP_STRIDE_SIZE);
-+				tmp_size = VMAP_STRIDE_SIZE;
-+				phyaddr += VMAP_STRIDE_SIZE;
-+				size -= VMAP_STRIDE_SIZE;
-+			} else {
-+				vaddr = codec_mm_vmap(phyaddr, size);
-+				tmp_size = size;
-+				size = 0;
-+			}
-+			if (vaddr == NULL) {
-+				dbg_print(FC_CRC_DEBUG, "%s: codec_mm_vmap failed phy: 0x%x\n",
-+					__func__, (unsigned int)phyaddr);
-+				return -1;
-+			}
-+			codec_mm_dma_flush(vaddr,
-+				tmp_size, DMA_FROM_DEVICE);
- 
--		codec_mm_unmap_phyaddr(vaddr);
-+			crc = crc32_le(crc, vaddr, tmp_size);
-+
-+			codec_mm_unmap_phyaddr(vaddr);
-+		}
- 	}
- 	*crc32 = crc;
- 
-@@ -669,22 +750,24 @@ static int fbc_check_prepare(struct pic_check_t *check,
- 	return 0;
- }
- 
--static struct vdec_s *single_mode_vdec = NULL;
-+
- 
- int decoder_do_frame_check(struct vdec_s *vdec, struct vframe_s *vf)
- {
--	int ret = 0;
- 	int resize = 0;
- 	void *planes[4];
- 	struct pic_check_t *check = NULL;
- 	struct pic_check_mgr_t *mgr = NULL;
-+	int ret = 0;
- 
- 	if (vdec == NULL) {
- 		if (single_mode_vdec == NULL)
- 			return 0;
- 		mgr = &single_mode_vdec->vfc;
--	} else
-+	} else {
- 		mgr = &vdec->vfc;
-+		single_mode_vdec = NULL;
-+	}
- 
- 	if ((mgr == NULL) ||
- 		(vf == NULL) ||
-@@ -705,7 +788,12 @@ int decoder_do_frame_check(struct vdec_s *vdec, struct vframe_s *vf)
- 	if (vf->type & VIDTYPE_VIU_NV21) {
- 		if (canvas_get_virt_addr(mgr, vf) < 0)
- 			return -2;
--
-+		if ((mgr->y_vaddr) && (mgr->uv_vaddr)) {
-+			codec_mm_dma_flush(mgr->y_vaddr,
-+				mgr->size_y, DMA_FROM_DEVICE);
-+			codec_mm_dma_flush(mgr->uv_vaddr,
-+				mgr->size_uv, DMA_FROM_DEVICE);
-+		}
- 		if (mgr->enable & CRC_MASK)
- 			ret = do_check_nv21(mgr, vf);
- 		if (mgr->enable & YUV_MASK)
-@@ -726,10 +814,14 @@ int decoder_do_frame_check(struct vdec_s *vdec, struct vframe_s *vf)
- 		planes[1] = check->fbc_planes[1];
- 		planes[2] = check->fbc_planes[2];
- 		planes[3] = check->fbc_planes[3];
--		AMLOGIC_FBC_vframe_decoder(planes, vf, 0, 0);
--		do_check_yuv16(mgr, vf,
--			(void *)planes[0], (void *)planes[3],//uv
--			(void *)planes[1], (void *)planes[2]);
-+		ret = AMLOGIC_FBC_vframe_decoder(planes, vf, 0, 0);
-+		if (ret < 0) {
-+			dbg_print(0, "amlogic_fbc_lib.ko error %d\n", ret);
-+		} else {
-+			do_check_yuv16(mgr, vf,
-+				(void *)planes[0], (void *)planes[3],//uv
-+				(void *)planes[1], (void *)planes[2]);
-+		}
- 	}
- 	mgr->frame_cnt++;
- 
-@@ -815,7 +907,7 @@ int frame_check_init(struct pic_check_mgr_t *mgr, int id)
- 		"%s%s", CRC_PATH, comp_crc);
- 
- 	/* create crc32 log file */
--	check->check_fp = file_open(O_WRONLY | O_CREAT,
-+	check->check_fp = file_open(O_CREAT| O_WRONLY | O_TRUNC,
- 		"%s%s-%d-%d.crc", CRC_PATH, comp_crc, id, mgr->file_cnt);
- 
- 	INIT_KFIFO(check->new_chk_q);
-@@ -826,15 +918,17 @@ int frame_check_init(struct pic_check_mgr_t *mgr, int id)
- 	} else {
- 		void *qaddr = NULL, *rdret = NULL;
- 		check->cmp_crc_cnt = 0;
--		for (i = 0; i < SIZE_CHECK_Q &&
--			(check->compare_fp != NULL); i++) {
-+		for (i = 0; i < SIZE_CHECK_Q; i++) {
- 			qaddr = check->check_addr + i * SIZE_CRC;
- 			rdret = fget_crc_str(qaddr,
- 				SIZE_CRC, check);
- 			if (rdret == NULL) {
--				dbg_print(0, "can't get compare crc string\n");
--				filp_close(check->compare_fp, current->files);
--				check->compare_fp = NULL;
-+				if (i < 3)
-+					dbg_print(0, "can't get compare crc string\n");
-+				if (check->compare_fp) {
-+					filp_close(check->compare_fp, current->files);
-+					check->compare_fp = NULL;
-+				}
- 			}
- 
- 			kfifo_put(&check->new_chk_q, qaddr);
-@@ -899,20 +993,18 @@ void frame_check_exit(struct pic_check_mgr_t *mgr)
- }
- 
- 
--
--static unsigned int yuv_enable, check_enable;
--static unsigned int yuv_start[MAX_INSTANCE_MUN];
--static unsigned int yuv_num[MAX_INSTANCE_MUN];
--
--
- int vdec_frame_check_init(struct vdec_s *vdec)
- {
- 	int ret = 0, id = 0;
- 
--	if ((vdec == NULL) ||
--		(vdec->is_reset))
-+	if (vdec == NULL)
-+		return 0;
-+
-+	if ((vdec->is_reset) &&
-+		(get_cpu_major_id() != AM_MESON_CPU_MAJOR_ID_GXL))
- 		return 0;
- 
-+	vdec->vfc.err_crc_block = 0;
- 	if (!check_enable && !yuv_enable)
- 		return 0;
- 
-@@ -924,7 +1016,9 @@ int vdec_frame_check_init(struct vdec_s *vdec)
- 
- 	if (check_enable & (0x01 << id)) {
- 		frame_check_init(&vdec->vfc, id);
--		check_enable &= ~(0x01 << id);
-+		/*repeat check one video crc32, not clear enable*/
-+		if ((fc_debug & FC_CHECK_CRC_LOOP_MODE) == 0)
-+			check_enable &= ~(0x01 << id);
- 	}
- 
- 	if (yuv_enable & (0x01 << id)) {
-@@ -1044,9 +1138,24 @@ ssize_t frame_check_show(struct class *class,
- 	pbuf += sprintf(pbuf,
- 		"\nUsage:\techo [id]  [1:on/0:off] > frame_check\n\n");
- 
-+	if (fc_debug & FC_ERR_CRC_BLOCK_MODE) {
-+		/* cat frame_check to next frame when block */
-+		struct vdec_s *vdec = NULL;
-+		vdec = vdec_get_with_id(__ffs(check_enable));
-+		if (vdec)
-+			vdec->vfc.err_crc_block = 0;
-+	}
-+
- 	return pbuf - buf;
- }
- 
- 
-+module_param_string(comp_crc, comp_crc, 128, 0664);
-+MODULE_PARM_DESC(comp_crc, "\n crc_filename\n");
-+
-+module_param(fc_debug, uint, 0664);
-+MODULE_PARM_DESC(fc_debug, "\n frame check debug\n");
- 
-+module_param(size_yuv_buf, uint, 0664);
-+MODULE_PARM_DESC(size_yuv_buf, "\n size_yuv_buf\n");
- 
-diff --git a/drivers/frame_provider/decoder/utils/frame_check.h b/drivers/frame_provider/decoder/utils/frame_check.h
-index fed21f5..f1ba677 100644
---- a/drivers/frame_provider/decoder/utils/frame_check.h
-+++ b/drivers/frame_provider/decoder/utils/frame_check.h
-@@ -71,6 +71,7 @@ struct pic_check_mgr_t{
- 	void *uv_vaddr;
- 	ulong y_phyaddr;
- 	ulong uv_phyaddr;
-+	int err_crc_block;
- 
- 	int file_cnt;
- 	atomic_t work_inited;
-diff --git a/drivers/frame_provider/decoder/utils/vdec.c b/drivers/frame_provider/decoder/utils/vdec.c
-index f1f6184..b7b0dd4 100644
---- a/drivers/frame_provider/decoder/utils/vdec.c
-+++ b/drivers/frame_provider/decoder/utils/vdec.c
-@@ -1614,7 +1614,7 @@ static const char *get_dev_name(bool use_legacy_vdec, int format)
- #endif
- }
- 
--struct vdec_s *vdec_get_with_id(unsigned id)
-+struct vdec_s *vdec_get_with_id(unsigned int id)
- {
- 	struct vdec_s *vdec, *ret_vdec = NULL;
- 	struct vdec_core_s *core = vdec_core;
-@@ -2205,6 +2205,10 @@ unsigned long vdec_ready_to_run(struct vdec_s *vdec, unsigned long mask)
- 	if (!vdec->run_ready)
- 		return false;
- 
-+	/* when crc32 error, block at error frame */
-+	if (vdec->vfc.err_crc_block)
-+		return false;
-+
- 	if ((vdec->slave || vdec->master) &&
- 		(vdec->sched == 0))
- 		return false;
-diff --git a/drivers/frame_provider/decoder/utils/vdec.h b/drivers/frame_provider/decoder/utils/vdec.h
-index 523067a..5a1c830 100644
---- a/drivers/frame_provider/decoder/utils/vdec.h
-+++ b/drivers/frame_provider/decoder/utils/vdec.h
-@@ -201,6 +201,7 @@ struct vdec_s {
- 	/* input */
- 	struct vdec_input_s input;
- 
-+	/*frame check*/
- 	struct pic_check_mgr_t vfc;
- 
- 	/* mc cache */
-@@ -437,8 +438,6 @@ int vdec_get_status(struct vdec_s *vdec);
- 
- void vdec_set_timestamp(struct vdec_s *vdec, u64 timestamp);
- 
--struct vdec_s *vdec_get_with_id(unsigned id);
--
--void *vdec_get_active_vfc(int core_mask);
-+struct vdec_s *vdec_get_with_id(unsigned int id);
- 
- #endif				/* VDEC_H */
+ #include "vvp9.h"
+@@ -6880,6 +6883,7 @@ static int prepare_display_buf(struct VP9Decoder_s *pbi,
+ 		inc_vf_ref(pbi, pic_config->index);
+ 		decoder_do_frame_check(hw_to_vdec(pbi), vf);
+ 		kfifo_put(&pbi->display_q, (const struct vframe_s *)vf);
++		ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 		pbi->vf_pre_count++;
+ #ifndef CONFIG_AMLOGIC_MEDIA_MULTI_DEC
+ 		/*count info*/
