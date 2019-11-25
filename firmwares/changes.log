@@ -1,40 +1,42 @@
-commit b455a12f601f986f5ade610376b69708978b417f
-Author: Peng Yixin <yixin.peng@amlogic.com>
-Date:   Thu Jun 27 11:11:41 2019 +0800
+commit f783d24ea43c69d457a41cb6fc21fa8fe57d7ab5
+Author: Hui Zhang <hui.zhang@amlogic.com>
+Date:   Sat Aug 31 11:01:57 2019 +0800
 
-    media_module: fixed screen static when play PIP local content [1/1]
+    vh265: fix h265 playback stutter issue  [1/1]
     
-    PD#OTT-4677
+    PD#SWPL-12773
     
     Problem:
-    Multi-channel local playback of different format,
-    one channel will stuck when seek another channel. The
-    uncorrect ucode was loaded due to a logic problem, which
-    caused playback stuck.
+    when play back to start in dvb, there is error in stream.
+    it caused poc issue and output is not in correct order
     
     Solution:
-    The loading ucode logic was modified to
-    solve this problem.
-    When core->last_vdec=null, set vdec->mc_loaded = 0,
-    the ucode will be loaded correctly.
+    add check for poc. once there is some errors. for ex:
+    new poc more less than pre poc. and it is idr pic.
+    decoder need to do a flush first. and start decoding
+    from new poc
     
     Verify:
-    u212
+    x301
     
-    Change-Id: Ib9ec52329138b58410079ab0a801e03a6f471e5d
-    Signed-off-by: Peng Yixin <yixin.peng@amlogic.com>
+    Change-Id: I04b4086a9a08d195e5453fe8cc765c3303e2a369
+    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/utils/vdec.c b/drivers/frame_provider/decoder/utils/vdec.c
-index feb753e..44f0934 100644
---- a/drivers/frame_provider/decoder/utils/vdec.c
-+++ b/drivers/frame_provider/decoder/utils/vdec.c
-@@ -2945,7 +2945,8 @@ static int vdec_core_thread(void *data)
- 				if ((core->last_vdec != vdec) &&
- 					(core->last_vdec->mc_type != vdec->mc_type))
- 					vdec->mc_loaded = 0;/*clear for reload firmware*/
--			}
-+			} else
-+				vdec->mc_loaded = 0;
- 			core->last_vdec = vdec;
- 			if (debug & 2)
- 				vdec->mc_loaded = 0;/*alway reload firmware*/
+diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
+index b6108ec..02944e6 100644
+--- a/drivers/frame_provider/decoder/h265/vh265.c
++++ b/drivers/frame_provider/decoder/h265/vh265.c
+@@ -5876,6 +5876,13 @@ static void check_pic_decoded_error(struct hevc_state_s *hevc,
+ 				"cur lcu idx = %d, (total %d), set error_mark\n",
+ 				current_lcu_idx,
+ 				hevc->lcu_x_num*hevc->lcu_y_num);
++			if (((hevc->i_only & 0x4)  == 0) && hevc->cur_pic->POC && ( hevc->cur_pic->slice_type == 0)
++					&& ((hevc->cur_pic->POC + hevc->sps_num_reorder_pics_0) < hevc->iPrevPOC)) {
++					hevc_print(hevc, 0,
++					"Flush  .. num_reorder_pic %d  pic->POC %d  hevc->iPrevPOC %d\n",
++					hevc->sps_num_reorder_pics_0,hevc->cur_pic->POC ,hevc->iPrevPOC);
++					flush_output(hevc, get_pic_by_POC(hevc, hevc->cur_pic->POC ));
++			}
+ 			if (is_log_enable(hevc))
+ 				add_log(hevc,
+ 					"cur lcu idx = %d, (total %d), set error_mark",
