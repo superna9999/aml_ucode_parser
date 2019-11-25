@@ -1,60 +1,99 @@
-commit 2170702cfed7fa7a445d8db3e009addcebcbebf4
-Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Fri Jan 25 09:30:28 2019 +0800
+commit ff20d9db9dd6f5595b05dc7189879c0109d6f5d2
+Author: Rong Zhang <rong.zhang@amlogic.com>
+Date:   Wed Jan 23 13:48:05 2019 +0800
 
-    media_module: decrease timeout value in amvdec_disable [1/1]
+    media_module: h265 [1/1]
     
-    PD#TV-2118
+    PD#SWPL-3926
     
     Problem:
-    timeout threshold too big to effect decoder start/stop KPI
+            parse metadata error while playing some dovi files
     
     Solution:
-    decrease timeout value in amvdec_disable improve decoder start/stop kpi
+            Whether the aux data is avaible or not should be checked
+            before reading it.
     
     Verify:
-    x301
+            Verified U212
     
-    Change-Id: Ie16a07cb2b56d60927c2d0f0b463b29118526ed4
-    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
+    Change-Id: I4be646ea1506497f7951ae6c0be1bb55c99d7e60
+    Signed-off-by: Rong Zhang <rong.zhang@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/utils/amvdec.c b/drivers/frame_provider/decoder/utils/amvdec.c
-index e9c097e..1c90f46 100644
---- a/drivers/frame_provider/decoder/utils/amvdec.c
-+++ b/drivers/frame_provider/decoder/utils/amvdec.c
-@@ -81,7 +81,7 @@ static void amvdec_pg_enable(bool enable)
- 	} else {
+diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
+index ab8b9ef..05ae7f9 100644
+--- a/drivers/frame_provider/decoder/h265/vh265.c
++++ b/drivers/frame_provider/decoder/h265/vh265.c
+@@ -4104,13 +4104,24 @@ static void config_title_hw(struct hevc_state_s *hevc, int sao_vb_size,
+ 	WRITE_VREG(HEVC_SAO_VB, hevc->work_space_buf->sao_vb.buf_start);
+ }
  
- 		AMVDEC_CLK_GATE_OFF(AMRISC);
--		timeout = jiffies + HZ / 10;
-+		timeout = jiffies + HZ / 100;
++static u32 init_aux_size;
++static int aux_data_is_avaible(struct hevc_state_s *hevc)
++{
++	u32 reg_val;
++
++	reg_val = READ_VREG(HEVC_AUX_DATA_SIZE);
++	if (reg_val != 0 && reg_val != init_aux_size)
++		return 1;
++	else
++		return 0;
++}
++
+ static void config_aux_buf(struct hevc_state_s *hevc)
+ {
+ 	WRITE_VREG(HEVC_AUX_ADR, hevc->aux_phy_addr);
+-	WRITE_VREG(HEVC_AUX_DATA_SIZE,
+-		((hevc->prefix_aux_size >> 4) << 16) |
+-		(hevc->suffix_aux_size >> 4)
+-		);
++	init_aux_size = ((hevc->prefix_aux_size >> 4) << 16) |
++		(hevc->suffix_aux_size >> 4);
++	WRITE_VREG(HEVC_AUX_DATA_SIZE, init_aux_size);
+ }
  
- 		while (READ_VREG(MDEC_PIC_DC_STATUS) != 0) {
- 			if (time_after(jiffies, timeout)) {
-@@ -95,7 +95,7 @@ static void amvdec_pg_enable(bool enable)
- 		}
+ static void config_mpred_hw(struct hevc_state_s *hevc)
+@@ -4920,7 +4931,7 @@ static void set_aux_data(struct hevc_state_s *hevc,
+ 		READ_VREG(HEVC_AUX_DATA_SIZE);
+ 	unsigned int aux_count = 0;
+ 	int aux_size = 0;
+-	if (pic == NULL)
++	if (pic == NULL || 0 == aux_data_is_avaible(hevc))
+ 		return;
  
- 		AMVDEC_CLK_GATE_OFF(MDEC_CLK_PIC_DC);
--		timeout = jiffies + HZ / 10;
-+		timeout = jiffies + HZ / 100;
+ 	if (hevc->aux_data_dirty ||
+@@ -8240,7 +8251,7 @@ pic_done:
+ 			hevc->dec_result = DEC_RESULT_DONE;
+ 			amhevc_stop();
+ 			reset_process_time(hevc);
+-			if (READ_VREG(HEVC_AUX_DATA_SIZE) != 0)
++			if (aux_data_is_avaible(hevc))
+ 				dolby_get_meta(hevc);
  
- 		while (READ_VREG(DBLK_STATUS) & 1) {
- 			if (time_after(jiffies, timeout)) {
-@@ -108,7 +108,7 @@ static void amvdec_pg_enable(bool enable)
+ 			vdec_schedule_work(&hevc->work);
+@@ -8286,7 +8297,7 @@ pic_done:
+ 			hevc_print(hevc, 0, "get NAL_UNIT_EOS, flush output\n");
+ #ifdef CONFIG_AMLOGIC_MEDIA_ENHANCEMENT_DOLBYVISION
+ 			if ((vdec->master || vdec->slave) &&
+-				READ_VREG(HEVC_AUX_DATA_SIZE) != 0) {
++				aux_data_is_avaible(hevc)) {
+ 				if (hevc->decoding_pic)
+ 					dolby_get_meta(hevc);
  			}
- 		}
- 		AMVDEC_CLK_GATE_OFF(MDEC_CLK_DBLK);
--		timeout = jiffies + HZ / 10;
-+		timeout = jiffies + HZ / 100;
- 
- 		while (READ_VREG(MC_STATUS0) & 1) {
- 			if (time_after(jiffies, timeout)) {
-@@ -121,7 +121,7 @@ static void amvdec_pg_enable(bool enable)
- 			}
- 		}
- 		AMVDEC_CLK_GATE_OFF(MC_CLK);
--		timeout = jiffies + HZ / 10;
-+		timeout = jiffies + HZ / 100;
- 		while (READ_VREG(DCAC_DMA_CTRL) & 0x8000) {
- 			if (time_after(jiffies, timeout))
- 				break;
+@@ -8519,7 +8530,7 @@ pic_done:
+ 				vdec->master == NULL &&
+ 				vdec->slave == NULL &&
+ #endif
+-				READ_VREG(HEVC_AUX_DATA_SIZE) != 0
++				aux_data_is_avaible(hevc)
+ 				) {
+ 				dma_sync_single_for_cpu(
+ 				amports_get_dma_device(),
+@@ -10174,7 +10185,7 @@ static void vh265_work(struct work_struct *work)
+ 		hevc->eos = 1;
+ #ifdef CONFIG_AMLOGIC_MEDIA_ENHANCEMENT_DOLBYVISION
+ 		if ((vdec->master || vdec->slave) &&
+-			READ_VREG(HEVC_AUX_DATA_SIZE) != 0)
++			aux_data_is_avaible(hevc))
+ 			dolby_get_meta(hevc);
+ #endif
+ 		check_pic_decoded_error(hevc,
