@@ -1,46 +1,77 @@
-commit dbba62e26c2e9136ea5cad84b1be2ab988716553
-Author: jintao xu <jintao.xu@amlogic.com>
-Date:   Thu Jan 17 17:32:52 2019 +0800
+commit 8975d8721a4a46cf0b9cb7a3bfca4046dd8fd22d
+Author: Hui Zhang <hui.zhang@amlogic.com>
+Date:   Wed Jan 30 19:34:12 2019 +0800
 
-    vdec: support the second video layer display [4/6]
+    media_module: vmh264: skip crop handle in mmu mode [1/1]
     
-    PD#SWPL-85
+    PD#SWPL-4349
     
     Problem:
-    Need support two video layers feature
+    some stream with crop info. it cause decoding size is different
+    with display size. if using display size, timeout will be happened
+    in mmu hardware. it's root cause of cts fail
     
     Solution:
-    Add the second video path
+    use acurate decoding size to mmu hardware instead of display size
     
     Verify:
-    u212
+    X301
     
-    Change-Id: I19ea61678409d72ac272a4329dbe8a849ee5e002
-    Signed-off-by: jintao xu <jintao.xu@amlogic.com>
+    Change-Id: Ib93f061c50c7ccb941950c8eeb3591fe4e65e00c
+    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/utils/vdec.c b/drivers/frame_provider/decoder/utils/vdec.c
-index a58988b..f1f6184 100644
---- a/drivers/frame_provider/decoder/utils/vdec.c
-+++ b/drivers/frame_provider/decoder/utils/vdec.c
-@@ -1800,7 +1800,7 @@ s32 vdec_init(struct vdec_s *vdec, int is_4k)
- 				FRAME_BASE_PATH_AMLVIDEO1_AMVIDEO2) {
- 			snprintf(vdec->vfm_map_chain, VDEC_MAP_NAME_SIZE,
- 				"%s %s", vdec->vf_provider_name,
--				"ppmgr amlvideo.1 amvide2");
-+				"aml_video.1 videosync.0 videopip");
- 			snprintf(vdec->vfm_map_id, VDEC_MAP_NAME_SIZE,
- 				"vdec-map-%d", vdec->id);
- 		} else if (p->frame_base_video_path == FRAME_BASE_PATH_V4L_VIDEO) {
-diff --git a/drivers/frame_provider/decoder/utils/vdec.h b/drivers/frame_provider/decoder/utils/vdec.h
-index e3fa681..523067a 100644
---- a/drivers/frame_provider/decoder/utils/vdec.h
-+++ b/drivers/frame_provider/decoder/utils/vdec.h
-@@ -150,7 +150,7 @@ enum vformat_t;
+diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+index cb6e3d2..e6c8441 100644
+--- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
++++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+@@ -1447,7 +1447,7 @@ static void  hevc_sao_set_pic_buffer(struct vdec_h264_hw_s *hw,
+ #endif
  
- #define VDEC_PROVIDER_NAME_SIZE 16
- #define VDEC_RECEIVER_NAME_SIZE 16
--#define VDEC_MAP_NAME_SIZE      45
-+#define VDEC_MAP_NAME_SIZE      90
+ 	ret = hevc_alloc_mmu(hw, pic->buf_spec_num,
+-			hw->frame_width, hw->frame_height, 0x0,
++			(hw->mb_width << 4), (hw->mb_height << 4), 0x0,
+ 			hw->frame_mmu_map_addr);
+ 	if (ret != 0) {
+ 		dpb_print(DECODE_ID(hw),
+@@ -3965,13 +3965,17 @@ static int vh264_set_params(struct vdec_h264_hw_s *hw,
+ 		if (hw->frame_height == 1088)
+ 			hw->frame_height = 1080;
+ #endif
+-
+-		mb_width = (mb_width+3) & 0xfffffffc;
+-		mb_height = (mb_height+3) & 0xfffffffc;
++		if (!hw->mmu_enable) {
++			mb_width = (mb_width+3) & 0xfffffffc;
++			mb_height = (mb_height+3) & 0xfffffffc;
++		}
+ 		mb_total = mb_width * mb_height;
++		hw->mb_width = mb_width;
++		hw->mb_height = mb_height;
++		hw->mb_total = mb_total;
+ 		if (hw->mmu_enable)
+ 			hevc_mcr_sao_global_hw_init(hw,
+-				hw->frame_width, hw->frame_height);
++				(hw->mb_width << 4), (hw->mb_height << 4));
  
- #define VDEC_FLAG_OTHER_INPUT_CONTEXT 0x0
- #define VDEC_FLAG_SELF_INPUT_CONTEXT 0x01
+ 		reg_val = param4;
+ 		level_idc = reg_val & 0xff;
+@@ -3982,10 +3986,6 @@ static int vh264_set_params(struct vdec_h264_hw_s *hw,
+ 			level_idc, max_reference_size);
+ 
+ 		p_H264_Dpb->colocated_buf_size = mb_total * 96;
+-		hw->mb_total = mb_total;
+-		hw->mb_width = mb_width;
+-		hw->mb_height = mb_height;
+-
+ 		hw->dpb.reorder_pic_num =
+ 			get_max_dec_frame_buf_size(level_idc,
+ 			max_reference_size, mb_width, mb_height);
+@@ -7391,7 +7391,7 @@ static void run(struct vdec_s *vdec, unsigned long mask,
+ 		amhevc_start();
+ 		if (hw->config_bufmgr_done) {
+ 			hevc_mcr_sao_global_hw_init(hw,
+-					hw->frame_width, hw->frame_height);
++					(hw->mb_width << 4), (hw->mb_height << 4));
+ 			hevc_mcr_config_canv2axitbl(hw, 1);
+ 		}
+ 	}
