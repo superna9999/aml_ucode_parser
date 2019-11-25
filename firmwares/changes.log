@@ -1,108 +1,160 @@
-commit 6851bed001ef243bb854dc9099925366f2271e76
-Author: shihong.zheng <shihong.zheng@amlogic.com>
-Date:   Thu May 30 17:38:32 2019 +0800
+commit db9339b3da811e9671b659404137111505410071
+Author: Nanxin Qin <nanxin.qin@amlogic.com>
+Date:   Fri Jun 7 16:49:29 2019 +0800
 
-    media_modules: fix mpeg4 display abnormal when multi play. [1/1]
+    vdec: fixed the issue of crash when ff or re. [1/1]
     
-    PD#SWPL-9168
+    PD#OTT-4470
     
     Problem:
-    only config canvas but not alloc bmmu everytime.
+    fast forward and rewind a video, A card restarts.
     
     Solution:
-    alloc bmmu once and config canvas everytime.
+    the release orde of dmc must be before stop armrisc.
     
     Verify:
-    x301
+    w400
     
-    Change-Id: Ia446b4d5452c9bf51a6cfd9f85510345ccb832d6
-    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
+    Change-Id: I0195fb7467b71745d83e74a8d9f0167b65e5a16d
+    Signed-off-by: Nanxin Qin <nanxin.qin@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c b/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c
-index cf7dac4..1eaf641 100644
---- a/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c
-+++ b/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c
-@@ -424,8 +424,6 @@ static void vmjpeg_canvas_init(struct vdec_s *vdec)
- 	for (i = 0; i < DECODE_BUFFER_NUM_MAX; i++) {
- 		int canvas;
+diff --git a/drivers/frame_provider/decoder/utils/vdec.c b/drivers/frame_provider/decoder/utils/vdec.c
+index a6ccb61..158360c 100644
+--- a/drivers/frame_provider/decoder/utils/vdec.c
++++ b/drivers/frame_provider/decoder/utils/vdec.c
+@@ -503,6 +503,56 @@ static void free_canvas_ex(int index, int id)
  
--
--
- 		ret = decoder_bmmu_box_alloc_buf_phy(hw->mm_blk_handle, i,
- 				decbuf_size, DRIVER_NAME, &buf_start);
- 		if (ret < 0) {
-@@ -779,11 +777,25 @@ static void vmjpeg_hw_ctx_restore(struct vdec_s *vdec, int index)
- {
- 	struct vdec_mjpeg_hw_s *hw =
- 		(struct vdec_mjpeg_hw_s *)vdec->private;
-+	struct buffer_spec_s *buff_spec;
-+	u32 i;
+ }
  
- 	WRITE_VREG(DOS_SW_RESET0, (1 << 7) | (1 << 6));
- 	WRITE_VREG(DOS_SW_RESET0, 0);
- 
--	vmjpeg_canvas_init(vdec);
-+	if (!hw->init_flag) {
-+		vmjpeg_canvas_init(vdec);
-+	} else {
-+		for (i = 0; i < DECODE_BUFFER_NUM_MAX; i++) {
-+			buff_spec = &hw->buffer_spec[i];
-+			canvas_config_config(buff_spec->y_canvas_index,
-+						&buff_spec->canvas_config[0]);
-+			canvas_config_config(buff_spec->u_canvas_index,
-+						&buff_spec->canvas_config[1]);
-+			canvas_config_config(buff_spec->v_canvas_index,
-+						&buff_spec->canvas_config[2]);
++static void vdec_dmc_pipeline_reset(void)
++{
++	/*
++	 * bit15: vdec_piple
++	 * bit14: hevc_dmc_piple
++	 * bit13: hevcf_dmc_pipl
++	 * bit12: wave420_dmc_pipl
++	 * bit11: hcodec_dmc_pipl
++	 */
++
++	WRITE_RESET_REG(RESET7_REGISTER,
++		(1 << 15) | (1 << 14) | (1 << 13) |
++		(1 << 12) | (1 << 11));
++}
++
++static void vdec_stop_armrisc(int hw)
++{
++	ulong timeout = jiffies + HZ;
++
++	if (hw == VDEC_INPUT_TARGET_VLD) {
++		WRITE_VREG(MPSR, 0);
++		WRITE_VREG(CPSR, 0);
++
++		while (READ_VREG(IMEM_DMA_CTRL) & 0x8000) {
++			if (time_after(jiffies, timeout))
++				break;
++		}
++
++		timeout = jiffies + HZ;
++		while (READ_VREG(LMEM_DMA_CTRL) & 0x8000) {
++			if (time_after(jiffies, timeout))
++				break;
++		}
++	} else if (hw == VDEC_INPUT_TARGET_HEVC) {
++		WRITE_VREG(HEVC_MPSR, 0);
++		WRITE_VREG(HEVC_CPSR, 0);
++
++		while (READ_VREG(HEVC_IMEM_DMA_CTRL) & 0x8000) {
++			if (time_after(jiffies, timeout))
++				break;
++		}
++
++		timeout = jiffies + HZ/10;
++		while (READ_VREG(HEVC_LMEM_DMA_CTRL) & 0x8000) {
++			if (time_after(jiffies, timeout))
++				break;
 +		}
 +	}
- 
- 	/* find next decode buffer index */
- 	WRITE_VREG(AV_SCRATCH_4, spec2canvas(&hw->buffer_spec[index]));
-diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-index 1b772f6..668b134 100644
---- a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-+++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-@@ -1902,7 +1902,7 @@ static void vmpeg12_canvas_init(struct vdec_mpeg12_hw_s *hw)
- 			hw->canvas_config[i][1].width = canvas_width;
- 			hw->canvas_config[i][1].height = canvas_height / 2;
- 			hw->canvas_config[i][1].block_mode = hw->canvas_mode;
--			hw->canvas_config[i][0].endian =
-+			hw->canvas_config[i][1].endian =
- 				(hw->canvas_mode == CANVAS_BLKMODE_LINEAR)?7:0;
- 
- 			canvas_config_config(canvas_u(canvas),
-@@ -2101,6 +2101,7 @@ static int vmpeg12_hw_ctx_restore(struct vdec_mpeg12_hw_s *hw)
- 	if (!hw->init_flag)
- 		vmpeg12_canvas_init(hw);
- 	else {
-+		WRITE_VREG(MREG_CO_MV_START, hw->buf_start);
- 		for (i = 0; i < DECODE_BUFFER_NUM_MAX; i++) {
- 			canvas_config_config(canvas_y(hw->canvas_spec[i]),
- 				&hw->canvas_config[i][0]);
-diff --git a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
-index 44df052..ccaa67f 100644
---- a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
-+++ b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
-@@ -1404,7 +1404,7 @@ static void check_timer_func(unsigned long arg)
- 
- static int vmpeg4_hw_ctx_restore(struct vdec_mpeg4_hw_s *hw)
++}
++
+ static void vdec_disable_DMC(struct vdec_s *vdec)
  {
--	int index;
-+	int index, i;
- 
- 	index = find_buffer(hw);
- 	if (index < 0)
-@@ -1413,6 +1413,13 @@ static int vmpeg4_hw_ctx_restore(struct vdec_mpeg4_hw_s *hw)
- 	if (!hw->init_flag) {
- 		if (vmpeg4_canvas_init(hw) < 0)
- 			return -1;
-+	} else {
-+		for (i = 0; i < DECODE_BUFFER_NUM_MAX; i++) {
-+			canvas_config_config(canvas_y(hw->canvas_spec[i]),
-+						&hw->canvas_config[i][0]);
-+			canvas_config_config(canvas_u(hw->canvas_spec[i]),
-+						&hw->canvas_config[i][1]);
-+		}
+ 	/*close first,then wait pedding end,timing suggestion from vlsi*/
+@@ -519,9 +569,14 @@ static void vdec_disable_DMC(struct vdec_s *vdec)
+ 		if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_G12A)
+ 			mask |= (1 << 8); /*hevcb */
  	}
- 	/* prepare REF0 & REF1
- 	 * points to the past two IP buffers
++
++	/* need to stop armrisc. */
++	if (!IS_ERR_OR_NULL(vdec->dev))
++		vdec_stop_armrisc(input->target);
++
+ 	spin_lock_irqsave(&vdec_spin_lock, flags);
+ 	codec_dmcbus_write(DMC_REQ_CTRL,
+-	codec_dmcbus_read(DMC_REQ_CTRL) & ~mask);
++		codec_dmcbus_read(DMC_REQ_CTRL) & ~mask);
+ 	spin_unlock_irqrestore(&vdec_spin_lock, flags);
+ 
+ 	while (!(codec_dmcbus_read(DMC_CHAN_STS)
+@@ -546,9 +601,14 @@ static void vdec_enable_DMC(struct vdec_s *vdec)
+ 		if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_G12A)
+ 			mask |= (1 << 8); /*hevcb */
+ 	}
++
++	/*must to be reset the dmc pipeline if it's g12b.*/
++	if (get_cpu_type() == AM_MESON_CPU_MAJOR_ID_G12B)
++		vdec_dmc_pipeline_reset();
++
+ 	spin_lock_irqsave(&vdec_spin_lock, flags);
+ 	codec_dmcbus_write(DMC_REQ_CTRL,
+-	codec_dmcbus_read(DMC_REQ_CTRL) | mask);
++		codec_dmcbus_read(DMC_REQ_CTRL) | mask);
+ 	spin_unlock_irqrestore(&vdec_spin_lock, flags);
+ 	pr_debug("%s input->target= 0x%x\n", __func__,  input->target);
+ }
+@@ -3158,23 +3218,6 @@ void vdec_poweron(enum vdec_type_e core)
+ #endif
+ 		/* reset DOS top registers */
+ 		WRITE_VREG(DOS_VDEC_MCRCC_STALL_CTRL, 0);
+-		if (get_cpu_major_id() >=
+-			AM_MESON_CPU_MAJOR_ID_GXBB) {
+-			/*
+-			 *enable VDEC_1 DMC request
+-			 */
+-			unsigned long flags;
+-			unsigned int mask = 0;
+-
+-			mask = 1 << 13;
+-			if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_G12A)
+-				mask = 1 << 21;
+-
+-			spin_lock_irqsave(&vdec_spin_lock, flags);
+-			codec_dmcbus_write(DMC_REQ_CTRL,
+-				codec_dmcbus_read(DMC_REQ_CTRL) | mask);
+-			spin_unlock_irqrestore(&vdec_spin_lock, flags);
+-		}
+ 	} else if (core == VDEC_2) {
+ 		if (has_vdec2()) {
+ 			/* vdec2 power on */
+@@ -3370,22 +3413,6 @@ void vdec_poweroff(enum vdec_type_e core)
+ 		sleep_val = is_power_ctrl_ver2 ? 0x2 : 0xc;
+ 		iso_val = is_power_ctrl_ver2 ? 0x2 : 0xc0;
+ 
+-		if (get_cpu_major_id() >=
+-			AM_MESON_CPU_MAJOR_ID_GXBB) {
+-			/* disable VDEC_1 DMC REQ*/
+-			unsigned long flags;
+-			unsigned int mask = 0;
+-
+-			mask = 1 << 13;
+-			if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_G12A)
+-				mask = 1 << 21;
+-
+-			spin_lock_irqsave(&vdec_spin_lock, flags);
+-			codec_dmcbus_write(DMC_REQ_CTRL,
+-				codec_dmcbus_read(DMC_REQ_CTRL) & ~mask);
+-			spin_unlock_irqrestore(&vdec_spin_lock, flags);
+-			udelay(10);
+-		}
+ 		/* enable vdec1 isolation */
+ #ifdef CONFIG_AMLOGIC_POWER
+ 		if (is_support_power_ctrl()) {
