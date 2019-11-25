@@ -1,45 +1,43 @@
-commit 92908642929e70e816e79c0de35fc75390995620
-Author: hualing chen <hualing.chen@amlogic.com>
-Date:   Tue Jul 30 16:51:39 2019 +0800
+commit dc4915e0b16148efbf870a75625f1d8b9a38930d
+Author: Hui Zhang <hui.zhang@amlogic.com>
+Date:   Tue Jun 25 09:28:03 2019 +0800
 
-    media_module: control CAM throw mcu and used api to control mcu. [1/1]
+    vvp9: enable low-latency mode by default [1/1]
     
-    PD#SWPL-10659
+    PD#GH-51
     
     Problem:
-    spi_regist_boardinfo is changed,we need used amlogic spi regist api.
+    there is a little delay in vp9 decoder output
     
     Solution:
-    1 change "spi_register_board_info" to "dirspi_register_board_info".
+    enable low-latency mode by default in driver
     
-    Verify:
-    verified on t962x3-t312 box.
+    Verify
+    X301
     
-    Change-Id: I49a2769e368ce0124f381397c8b356ad14e1c785
-    Signed-off-by: hualing chen <hualing.chen@amlogic.com>
+    Change-Id: I6ddea36ad37dc7ac5c9a125cf33d41adecffdbcb
+    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
 
-diff --git a/drivers/stream_input/parser/dvb_ci/aml_spi.c b/drivers/stream_input/parser/dvb_ci/aml_spi.c
-index 91efe2a..49498fa 100644
---- a/drivers/stream_input/parser/dvb_ci/aml_spi.c
-+++ b/drivers/stream_input/parser/dvb_ci/aml_spi.c
-@@ -1101,7 +1101,7 @@ int aml_spi_init(struct platform_device *pdev, struct aml_ci *ci_dev)
- 	spin_lock_init(&(spi_dev->spi_lock));
- 	/*regist api dev*/
- 	pr_dbg("*********spi Dev regist**********\r\n");
--	result = spi_register_board_info(spi_dev->spi_bdinfo, 1);
-+	result = dirspi_register_board_info(spi_dev->spi_bdinfo, 1);
- 	if (result) {
- 		pr_error("register amlspi_dev spi boardinfo failed\n");
- 		goto fail1;
-diff --git a/drivers/stream_input/parser/dvb_ci/aml_spi.h b/drivers/stream_input/parser/dvb_ci/aml_spi.h
-index 12eff6d..7a9493e 100644
---- a/drivers/stream_input/parser/dvb_ci/aml_spi.h
-+++ b/drivers/stream_input/parser/dvb_ci/aml_spi.h
-@@ -112,6 +112,7 @@ extern int dirspi_write(struct spi_device *spi, u8 *buf, int len);
- extern int dirspi_read(struct spi_device *spi, u8 *buf, int len);
- extern void dirspi_start(struct spi_device *spi);
- extern void dirspi_stop(struct spi_device *spi);
-+extern int dirspi_register_board_info(struct spi_board_info const *info, unsigned n);
- extern void dvb_ca_en50221_camready_irq(struct dvb_ca_en50221 *pubca, int slot);
- extern int aml_spi_init(struct platform_device *pdev, struct aml_ci *ci_dev);
- extern int aml_spi_exit(struct aml_ci *ci_dev);
+diff --git a/drivers/frame_provider/decoder/vp9/vvp9.c b/drivers/frame_provider/decoder/vp9/vvp9.c
+index ff93d98..6228950 100644
+--- a/drivers/frame_provider/decoder/vp9/vvp9.c
++++ b/drivers/frame_provider/decoder/vp9/vvp9.c
+@@ -10098,17 +10098,12 @@ static int ammvdec_vp9_probe(struct platform_device *pdev)
+ 
+ 	if (pdata->sys_info) {
+ 		pbi->vvp9_amstream_dec_info = *pdata->sys_info;
+-		if ((unsigned long) pbi->vvp9_amstream_dec_info.param
+-				& 0x08) {
+-				pbi->low_latency_flag = 1;
+-			} else
+-				pbi->low_latency_flag = 0;
+ 	} else {
+ 		pbi->vvp9_amstream_dec_info.width = 0;
+ 		pbi->vvp9_amstream_dec_info.height = 0;
+ 		pbi->vvp9_amstream_dec_info.rate = 30;
+ 	}
+-
++	pbi->low_latency_flag = 1;
+ 	pbi->is_used_v4l = (((unsigned long)
+ 		pbi->vvp9_amstream_dec_info.param & 0x80) >> 7);
+ 	if (pbi->is_used_v4l) {
