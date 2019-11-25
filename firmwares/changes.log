@@ -1,34 +1,33 @@
-commit 29975b377cd5b3c0323001a72e900dfe3a918b79
-Author: rongrong zhou <rongrong.zhou@amlogic.com>
-Date:   Fri Mar 22 17:10:46 2019 +0800
+commit 60e7b9faf399a19d63b733aa58ad42af515958e2
+Author: renjiang.han <renjiang.han@amlogic.com>
+Date:   Fri Mar 22 16:25:41 2019 +0800
 
-    mpeg12: do not use p frame pts for some stream [1/1]
+    path: add ppmgr [4/5]
     
-    PD#SWPL-4402
+    PD#TV-2649
     
     Problem:
-    play not smooth
+    There is no ppmgr in the path.
     
     Solution:
-    do not use P frame pts
+    add ppmgr in the path.
     
     Verify:
-    Verify on X301
+    on u212
     
-    Change-Id: I70b91506d1ecdc9baf8c66a27b706416a769bac6
-    Signed-off-by: rongrong zhou <rongrong.zhou@amlogic.com>
+    Change-Id: If930b1ed868fe319b6baa8d285a605ef2c3ff075
+    Signed-off-by: renjiang.han <renjiang.han@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-index d119032..0842625 100644
---- a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-+++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-@@ -514,8 +514,7 @@ static irqreturn_t vmpeg12_isr_thread_fn(struct vdec_s *vdec, int irq)
- 		"ammvdec_mpeg12: error = 0x%x, offset = 0x%x\n",
- 			info & PICINFO_ERROR, offset);*/
- 
--		if (((info & PICINFO_TYPE_MASK) == PICINFO_TYPE_I) ||
--			((info & PICINFO_TYPE_MASK) == PICINFO_TYPE_P)) {
-+		if (((info & PICINFO_TYPE_MASK) == PICINFO_TYPE_I)) {
- 			if (hw->chunk) {
- 				hw->pts_valid[index] = hw->chunk->pts_valid;
- 				hw->pts[index] = hw->chunk->pts;
+diff --git a/drivers/frame_provider/decoder/utils/vdec.c b/drivers/frame_provider/decoder/utils/vdec.c
+index accd4b7..57159d7 100644
+--- a/drivers/frame_provider/decoder/utils/vdec.c
++++ b/drivers/frame_provider/decoder/utils/vdec.c
+@@ -1885,7 +1885,7 @@ s32 vdec_init(struct vdec_s *vdec, int is_4k)
+ 			} else {
+ 				snprintf(vdec->vfm_map_chain, VDEC_MAP_NAME_SIZE,
+ 					"%s %s", vdec->vf_provider_name,
+-					"amlvideo deinterlace amvideo");
++					"amlvideo ppmgr deinterlace amvideo");
+ 			}
+ 			snprintf(vdec->vfm_map_id, VDEC_MAP_NAME_SIZE,
+ 				"vdec-map-%d", vdec->id);
