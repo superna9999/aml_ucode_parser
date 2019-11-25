@@ -1,116 +1,3103 @@
-commit aa8fd40a105be6d3b879818a5308fa31d92f4241
-Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Wed Apr 3 14:15:29 2019 +0800
+commit a8f62ee02705986b91bbe9d6ca118e05df838aa6
+Author: Rong Zhang <rong.zhang@amlogic.com>
+Date:   Mon Apr 1 21:13:14 2019 +0800
 
-    vh265: pic crop info mistmatch issue[1/1]
+    media_module: mh264/h265/avs2 [2/2]
     
-    PD#TV-3412
+    PD#SWPL-6607
     
     Problem:
-    pic crop info is not match at moment of resolution switching.
-    becuase of crop info is stored in hevc struct. which may cause
-    reslution is mismatch with real size. display will flick.
+            Not support QOS information for mh264.h265,avs2
     
     Solution:
-    store pic crop info to pic struct.
+            Support QOS information picking for mh264,h265,avs2
+            Support QOS information access interface by ioctl
     
     Verify:
-    U212
+            Verified franklin
     
-    Change-Id: Iafcef2335b659286f8c3219e14f71da42d47977c
-    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
+    Change-Id: I630a9d9ca3541ae6329d58b028e7f6d4d3b7f94f
+    Signed-off-by: Rong Zhang <rong.zhang@amlogic.com>
 
+diff --git a/drivers/frame_provider/decoder/avs/avs.c b/drivers/frame_provider/decoder/avs/avs.c
+index dd76fbc..5a7937a 100644
+--- a/drivers/frame_provider/decoder/avs/avs.c
++++ b/drivers/frame_provider/decoder/avs/avs.c
+@@ -426,6 +426,7 @@ static void vavs_isr(void)
+ 	u32 repeat_count;
+ 	u32 picture_type;
+ 	u32 buffer_index;
++	u32 frame_size;
+ 	bool force_interlaced_frame = false;
+ 	unsigned int pts, pts_valid = 0, offset = 0;
+ 	u64 pts_us64;
+@@ -460,6 +461,7 @@ static void vavs_isr(void)
+ 			if (debug_flag & AVS_DEBUG_PRINT)
+ 				pr_info("AVS OFFSET=%x\n", offset);
+ 			if (pts_lookup_offset_us64(PTS_TYPE_VIDEO, offset, &pts,
++				&frame_size,
+ 				0, &pts_us64) == 0) {
+ 				pts_valid = 1;
+ #ifdef DEBUG_PTS
+diff --git a/drivers/frame_provider/decoder/avs2/avs2_global.h b/drivers/frame_provider/decoder/avs2/avs2_global.h
+index 46ebc62..e6c28cf 100644
+--- a/drivers/frame_provider/decoder/avs2/avs2_global.h
++++ b/drivers/frame_provider/decoder/avs2/avs2_global.h
+@@ -800,6 +800,17 @@ struct avs2_frame_s {
+ #ifndef MV_USE_FIXED_BUF
+ 	int mv_buf_index;
+ #endif
++
++	/* picture qos infomation*/
++	int max_qp;
++	int avg_qp;
++	int min_qp;
++	int max_skip;
++	int avg_skip;
++	int min_skip;
++	int max_mv;
++	int min_mv;
++	int avg_mv;
+ };
+ 
+ 
+diff --git a/drivers/frame_provider/decoder/avs2/vavs2.c b/drivers/frame_provider/decoder/avs2/vavs2.c
+index 633c924..790b94b 100644
+--- a/drivers/frame_provider/decoder/avs2/vavs2.c
++++ b/drivers/frame_provider/decoder/avs2/vavs2.c
+@@ -754,7 +754,8 @@ struct AVS2Decoder_s {
+ #ifdef I_ONLY_SUPPORT
+ 	u32 i_only;
+ #endif
+-
++	int frameinfo_enable;
++	struct vframe_qos_s vframe_qos;
+ };
+ 
+ static int  compute_losless_comp_body_size(
+@@ -4246,11 +4247,71 @@ static struct avs2_frame_s *get_disp_pic(struct AVS2Decoder_s *dec)
+ 
+ }
+ 
++
++
++static void fill_frame_info(struct AVS2Decoder_s *dec,
++	struct avs2_frame_s *pic, unsigned int framesize, unsigned int pts)
++{
++	struct vframe_qos_s *vframe_qos = &dec->vframe_qos;
++
++	if (pic->slice_type == I_IMG)
++		vframe_qos->type = 1;
++	else if (pic->slice_type == P_IMG)
++		vframe_qos->type = 2;
++	else if (pic->slice_type == B_IMG)
++		vframe_qos->type = 3;
++/*
++#define SHOW_QOS_INFO
++*/
++	vframe_qos->size = framesize;
++	vframe_qos->pts = pts;
++#ifdef SHOW_QOS_INFO
++	avs2_print(dec, 0, "slice:%d\n", pic->slice_type);
++#endif
++
++
++	vframe_qos->max_mv = pic->max_mv;
++	vframe_qos->avg_mv = pic->avg_mv;
++	vframe_qos->min_mv = pic->min_mv;
++#ifdef SHOW_QOS_INFO
++	avs2_print(dec, 0, "mv: max:%d,  avg:%d, min:%d\n",
++			vframe_qos->max_mv,
++			vframe_qos->avg_mv,
++			vframe_qos->min_mv);
++#endif
++
++	vframe_qos->max_qp = pic->max_qp;
++	vframe_qos->avg_qp = pic->avg_qp;
++	vframe_qos->min_qp = pic->min_qp;
++#ifdef SHOW_QOS_INFO
++	avs2_print(dec, 0, "qp: max:%d,  avg:%d, min:%d\n",
++			vframe_qos->max_qp,
++			vframe_qos->avg_qp,
++			vframe_qos->min_qp);
++#endif
++
++	vframe_qos->max_skip = pic->max_skip;
++	vframe_qos->avg_skip = pic->avg_skip;
++	vframe_qos->min_skip = pic->min_skip;
++#ifdef SHOW_QOS_INFO
++	avs2_print(dec, 0, "skip: max:%d,	avg:%d, min:%d\n",
++			vframe_qos->max_skip,
++			vframe_qos->avg_skip,
++			vframe_qos->min_skip);
++#endif
++
++	vframe_qos->num++;
++
++	if (dec->frameinfo_enable)
++		vdec_fill_frame_info(vframe_qos, 1);
++}
++
+ static void set_vframe(struct AVS2Decoder_s *dec,
+ 	struct vframe_s *vf, struct avs2_frame_s *pic, u8 dummy)
+ {
+ 	unsigned long flags;
+ 	int stream_offset;
++	unsigned int frame_size;
+ 	int pts_discontinue;
+ 	stream_offset = pic->stream_offset;
+ 	avs2_print(dec, AVS2_DBG_BUFMGR,
+@@ -4273,7 +4334,8 @@ static void set_vframe(struct AVS2Decoder_s *dec,
+ 		/* if (pts_lookup_offset(PTS_TYPE_VIDEO,
+ 		   stream_offset, &vf->pts, 0) != 0) { */
+ 		if (pts_lookup_offset_us64
+-			(PTS_TYPE_VIDEO, stream_offset, &vf->pts, 0,
++			(PTS_TYPE_VIDEO, stream_offset,
++			&vf->pts, &frame_size, 0,
+ 			 &vf->pts_us64) != 0) {
+ #ifdef DEBUG_PTS
+ 			dec->pts_missed++;
+@@ -4288,6 +4350,8 @@ static void set_vframe(struct AVS2Decoder_s *dec,
+ 		if (pts_unstable)
+ 			dec->pts_mode = PTS_NONE_REF_USE_DURATION;
+ 
++		fill_frame_info(dec, pic, frame_size, vf->pts);
++
+ 		if ((dec->pts_mode == PTS_NORMAL) && (vf->pts != 0)
+ 			&& dec->get_frame_dur) {
+ 			int pts_diff = (int)vf->pts - dec->last_lookup_pts;
+@@ -4699,6 +4763,440 @@ static int get_frame_rate(union param_u *params, struct AVS2Decoder_s *dec)
+ 	/*avs2_print(dec, 0, "avs2 frame_dur:%d,progressive:%d\n", dec->frame_dur, params->p.progressive_sequence);*/
+ 	return 0;
+ }
++
++
++#define HEVC_MV_INFO   0x310d
++#define HEVC_QP_INFO   0x3137
++#define HEVC_SKIP_INFO 0x3136
++
++/* only when we decoded one field or one frame,
++we can call this function to get qos info*/
++static void get_picture_qos_info(struct AVS2Decoder_s *dec)
++{
++	struct avs2_frame_s *picture = dec->avs2_dec.hc.cur_pic;
++	if (!picture) {
++		avs2_print(dec, AVS2_DBG_BUFMGR_MORE,
++			"%s decode picture is none exist\n");
++
++		return;
++	}
++
++/*
++#define DEBUG_QOS
++*/
++
++	if (get_cpu_major_id() < AM_MESON_CPU_MAJOR_ID_G12A) {
++		unsigned char a[3];
++		unsigned char i, j, t;
++		unsigned long  data;
++
++		data = READ_VREG(HEVC_MV_INFO);
++		if (picture->slice_type == I_IMG)
++			data = 0;
++		a[0] = data & 0xff;
++		a[1] = (data >> 8) & 0xff;
++		a[2] = (data >> 16) & 0xff;
++
++		for (i = 0; i < 3; i++)
++			for (j = i+1; j < 3; j++) {
++				if (a[j] < a[i]) {
++					t = a[j];
++					a[j] = a[i];
++					a[i] = t;
++				} else if (a[j] == a[i]) {
++					a[i]++;
++					t = a[j];
++					a[j] = a[i];
++					a[i] = t;
++				}
++			}
++		picture->max_mv = a[2];
++		picture->avg_mv = a[1];
++		picture->min_mv = a[0];
++#ifdef DEBUG_QOS
++		avs2_print(dec, 0, "mv data %x  a[0]= %x a[1]= %x a[2]= %x\n",
++			data, a[0], a[1], a[2]);
++#endif
++
++		data = READ_VREG(HEVC_QP_INFO);
++		a[0] = data & 0x1f;
++		a[1] = (data >> 8) & 0x3f;
++		a[2] = (data >> 16) & 0x7f;
++
++		for (i = 0; i < 3; i++)
++			for (j = i+1; j < 3; j++) {
++				if (a[j] < a[i]) {
++					t = a[j];
++					a[j] = a[i];
++					a[i] = t;
++				} else if (a[j] == a[i]) {
++					a[i]++;
++					t = a[j];
++					a[j] = a[i];
++					a[i] = t;
++				}
++			}
++		picture->max_qp = a[2];
++		picture->avg_qp = a[1];
++		picture->min_qp = a[0];
++#ifdef DEBUG_QOS
++		avs2_print(dec, 0, "qp data %x  a[0]= %x a[1]= %x a[2]= %x\n",
++			data, a[0], a[1], a[2]);
++#endif
++
++		data = READ_VREG(HEVC_SKIP_INFO);
++		a[0] = data & 0x1f;
++		a[1] = (data >> 8) & 0x3f;
++		a[2] = (data >> 16) & 0x7f;
++
++		for (i = 0; i < 3; i++)
++			for (j = i+1; j < 3; j++) {
++				if (a[j] < a[i]) {
++					t = a[j];
++					a[j] = a[i];
++					a[i] = t;
++				} else if (a[j] == a[i]) {
++					a[i]++;
++					t = a[j];
++					a[j] = a[i];
++					a[i] = t;
++				}
++			}
++		picture->max_skip = a[2];
++		picture->avg_skip = a[1];
++		picture->min_skip = a[0];
++
++#ifdef DEBUG_QOS
++		avs2_print(dec, 0,
++			"skip data %x  a[0]= %x a[1]= %x a[2]= %x\n",
++			data, a[0], a[1], a[2]);
++#endif
++	} else {
++		uint32_t blk88_y_count;
++		uint32_t blk88_c_count;
++		uint32_t blk22_mv_count;
++		uint32_t rdata32;
++		int32_t mv_hi;
++		int32_t mv_lo;
++		uint32_t rdata32_l;
++		uint32_t mvx_L0_hi;
++		uint32_t mvy_L0_hi;
++		uint32_t mvx_L1_hi;
++		uint32_t mvy_L1_hi;
++		int64_t value;
++		uint64_t temp_value;
++#ifdef DEBUG_QOS
++		int pic_number = 0;
++#endif
++
++		picture->max_mv = 0;
++		picture->avg_mv = 0;
++		picture->min_mv = 0;
++
++		picture->max_skip = 0;
++		picture->avg_skip = 0;
++		picture->min_skip = 0;
++
++		picture->max_qp = 0;
++		picture->avg_qp = 0;
++		picture->min_qp = 0;
++
++
++
++#ifdef DEBUG_QOS
++		avs2_print(dec, 0, "slice_type:%d, poc:%d\n",
++			picture->slice_type,
++			pic_number);
++#endif
++		/* set rd_idx to 0 */
++	    WRITE_VREG(HEVC_PIC_QUALITY_CTRL, 0);
++
++	    blk88_y_count = READ_VREG(HEVC_PIC_QUALITY_DATA);
++	    if (blk88_y_count == 0) {
++#ifdef DEBUG_QOS
++			avs2_print(dec, 0,
++				"[Picture %d Quality] NO Data yet.\n",
++				pic_number);
++#endif
++			/* reset all counts */
++			WRITE_VREG(HEVC_PIC_QUALITY_CTRL, (1<<8));
++			return;
++	    }
++		/* qp_y_sum */
++	    rdata32 = READ_VREG(HEVC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	    avs2_print(dec, 0,
++			"[Picture %d Quality] Y QP AVG : %d (%d/%d)\n",
++			pic_number, rdata32/blk88_y_count,
++			rdata32, blk88_y_count);
++#endif
++		picture->avg_qp = rdata32/blk88_y_count;
++		/* intra_y_count */
++	    rdata32 = READ_VREG(HEVC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	    avs2_print(dec, 0,
++			"[Picture %d Quality] Y intra rate : %d%c (%d)\n",
++			pic_number, rdata32*100/blk88_y_count,
++			'%', rdata32);
++#endif
++		/* skipped_y_count */
++	    rdata32 = READ_VREG(HEVC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	    avs2_print(dec, 0,
++			"[Picture %d Quality] Y skipped rate : %d%c (%d)\n",
++			pic_number, rdata32*100/blk88_y_count,
++			'%', rdata32);
++#endif
++		picture->avg_skip = rdata32*100/blk88_y_count;
++		/* coeff_non_zero_y_count */
++	    rdata32 = READ_VREG(HEVC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	    avs2_print(dec, 0,
++			"[Picture %d Quality] Y ZERO_Coeff rate : %d%c (%d)\n",
++			pic_number, (100 - rdata32*100/(blk88_y_count*1)),
++			'%', rdata32);
++#endif
++		/* blk66_c_count */
++	    blk88_c_count = READ_VREG(HEVC_PIC_QUALITY_DATA);
++	    if (blk88_c_count == 0) {
++#ifdef DEBUG_QOS
++			avs2_print(dec, 0,
++				"[Picture %d Quality] NO Data yet.\n",
++				pic_number);
++#endif
++			/* reset all counts */
++			WRITE_VREG(HEVC_PIC_QUALITY_CTRL, (1<<8));
++			return;
++	    }
++		/* qp_c_sum */
++	    rdata32 = READ_VREG(HEVC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	    avs2_print(dec, 0,
++			"[Picture %d Quality] C QP AVG : %d (%d/%d)\n",
++			pic_number, rdata32/blk88_c_count,
++			rdata32, blk88_c_count);
++#endif
++		/* intra_c_count */
++	    rdata32 = READ_VREG(HEVC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	    avs2_print(dec, 0,
++			"[Picture %d Quality] C intra rate : %d%c (%d)\n",
++			pic_number, rdata32*100/blk88_c_count,
++			'%', rdata32);
++#endif
++		/* skipped_cu_c_count */
++	    rdata32 = READ_VREG(HEVC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	    avs2_print(dec, 0,
++			"[Picture %d Quality] C skipped rate : %d%c (%d)\n",
++			pic_number, rdata32*100/blk88_c_count,
++			'%', rdata32);
++#endif
++		/* coeff_non_zero_c_count */
++	    rdata32 = READ_VREG(HEVC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	    avs2_print(dec, 0,
++			"[Picture %d Quality] C ZERO_Coeff rate : %d%c (%d)\n",
++			pic_number, (100 - rdata32*100/(blk88_c_count*1)),
++			'%', rdata32);
++#endif
++
++		/* 1'h0, qp_c_max[6:0], 1'h0, qp_c_min[6:0],
++		1'h0, qp_y_max[6:0], 1'h0, qp_y_min[6:0] */
++	    rdata32 = READ_VREG(HEVC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	    avs2_print(dec, 0, "[Picture %d Quality] Y QP min : %d\n",
++			pic_number, (rdata32>>0)&0xff);
++#endif
++		picture->min_qp = (rdata32>>0)&0xff;
++
++#ifdef DEBUG_QOS
++	    avs2_print(dec, 0, "[Picture %d Quality] Y QP max : %d\n",
++			pic_number, (rdata32>>8)&0xff);
++#endif
++		picture->max_qp = (rdata32>>8)&0xff;
++
++#ifdef DEBUG_QOS
++	    avs2_print(dec, 0, "[Picture %d Quality] C QP min : %d\n",
++			pic_number, (rdata32>>16)&0xff);
++	    avs2_print(dec, 0, "[Picture %d Quality] C QP max : %d\n",
++			pic_number, (rdata32>>24)&0xff);
++#endif
++
++		/* blk22_mv_count */
++	    blk22_mv_count = READ_VREG(HEVC_PIC_QUALITY_DATA);
++	    if (blk22_mv_count == 0) {
++#ifdef DEBUG_QOS
++			avs2_print(dec, 0,
++				"[Picture %d Quality] NO MV Data yet.\n",
++				pic_number);
++#endif
++			/* reset all counts */
++			WRITE_VREG(HEVC_PIC_QUALITY_CTRL, (1<<8));
++			return;
++	    }
++		/* mvy_L1_count[39:32], mvx_L1_count[39:32],
++		mvy_L0_count[39:32], mvx_L0_count[39:32] */
++	    rdata32 = READ_VREG(HEVC_PIC_QUALITY_DATA);
++	    /* should all be 0x00 or 0xff */
++#ifdef DEBUG_QOS
++	    avs2_print(dec, 0,
++			"[Picture %d Quality] MV AVG High Bits: 0x%X\n",
++			pic_number, rdata32);
++#endif
++	    mvx_L0_hi = ((rdata32>>0)&0xff);
++	    mvy_L0_hi = ((rdata32>>8)&0xff);
++	    mvx_L1_hi = ((rdata32>>16)&0xff);
++	    mvy_L1_hi = ((rdata32>>24)&0xff);
++
++		/* mvx_L0_count[31:0] */
++	    rdata32_l = READ_VREG(HEVC_PIC_QUALITY_DATA);
++		temp_value = mvx_L0_hi;
++		temp_value = (temp_value << 32) | rdata32_l;
++
++		if (mvx_L0_hi & 0x80)
++			value = 0xFFFFFFF000000000 | temp_value;
++		else
++			value = temp_value;
++		 value = div_s64(value, blk22_mv_count);
++#ifdef DEBUG_QOS
++		avs2_print(dec, 0,
++			"[Picture %d Quality] MVX_L0 AVG : %d (%lld/%d)\n",
++			pic_number, (int)value,
++			value, blk22_mv_count);
++#endif
++		picture->avg_mv = value;
++
++		/* mvy_L0_count[31:0] */
++	    rdata32_l = READ_VREG(HEVC_PIC_QUALITY_DATA);
++		temp_value = mvy_L0_hi;
++		temp_value = (temp_value << 32) | rdata32_l;
++
++		if (mvy_L0_hi & 0x80)
++			value = 0xFFFFFFF000000000 | temp_value;
++		else
++			value = temp_value;
++#ifdef DEBUG_QOS
++	    avs2_print(dec, 0,
++			"[Picture %d Quality] MVY_L0 AVG : %d (%lld/%d)\n",
++			pic_number, rdata32_l/blk22_mv_count,
++			value, blk22_mv_count);
++#endif
++
++		/* mvx_L1_count[31:0] */
++	    rdata32_l = READ_VREG(HEVC_PIC_QUALITY_DATA);
++		temp_value = mvx_L1_hi;
++		temp_value = (temp_value << 32) | rdata32_l;
++		if (mvx_L1_hi & 0x80)
++			value = 0xFFFFFFF000000000 | temp_value;
++		else
++			value = temp_value;
++#ifdef DEBUG_QOS
++	    avs2_print(dec, 0,
++			"[Picture %d Quality] MVX_L1 AVG : %d (%lld/%d)\n",
++			pic_number, rdata32_l/blk22_mv_count,
++			value, blk22_mv_count);
++#endif
++
++		/* mvy_L1_count[31:0] */
++	    rdata32_l = READ_VREG(HEVC_PIC_QUALITY_DATA);
++		temp_value = mvy_L1_hi;
++		temp_value = (temp_value << 32) | rdata32_l;
++		if (mvy_L1_hi & 0x80)
++			value = 0xFFFFFFF000000000 | temp_value;
++		else
++			value = temp_value;
++#ifdef DEBUG_QOS
++	    avs2_print(dec, 0,
++			"[Picture %d Quality] MVY_L1 AVG : %d (%lld/%d)\n",
++			pic_number, rdata32_l/blk22_mv_count,
++			value, blk22_mv_count);
++#endif
++
++		/* {mvx_L0_max, mvx_L0_min} // format : {sign, abs[14:0]}  */
++	    rdata32 = READ_VREG(HEVC_PIC_QUALITY_DATA);
++	    mv_hi = (rdata32>>16)&0xffff;
++	    if (mv_hi & 0x8000)
++			mv_hi = 0x8000 - mv_hi;
++#ifdef DEBUG_QOS
++	    avs2_print(dec, 0, "[Picture %d Quality] MVX_L0 MAX : %d\n",
++			pic_number, mv_hi);
++#endif
++		picture->max_mv = mv_hi;
++
++	    mv_lo = (rdata32>>0)&0xffff;
++	    if (mv_lo & 0x8000)
++			mv_lo = 0x8000 - mv_lo;
++#ifdef DEBUG_QOS
++	    avs2_print(dec, 0, "[Picture %d Quality] MVX_L0 MIN : %d\n",
++			pic_number, mv_lo);
++#endif
++		picture->min_mv = mv_lo;
++
++		/* {mvy_L0_max, mvy_L0_min} */
++	    rdata32 = READ_VREG(HEVC_PIC_QUALITY_DATA);
++	    mv_hi = (rdata32>>16)&0xffff;
++	    if (mv_hi & 0x8000)
++			mv_hi = 0x8000 - mv_hi;
++#ifdef DEBUG_QOS
++	    avs2_print(dec, 0, "[Picture %d Quality] MVY_L0 MAX : %d\n",
++			pic_number, mv_hi);
++#endif
++
++	    mv_lo = (rdata32>>0)&0xffff;
++	    if (mv_lo & 0x8000)
++			mv_lo = 0x8000 - mv_lo;
++#ifdef DEBUG_QOS
++	    avs2_print(dec, 0, "[Picture %d Quality] MVY_L0 MIN : %d\n",
++			pic_number, mv_lo);
++#endif
++
++		/* {mvx_L1_max, mvx_L1_min} */
++	    rdata32 = READ_VREG(HEVC_PIC_QUALITY_DATA);
++	    mv_hi = (rdata32>>16)&0xffff;
++	    if (mv_hi & 0x8000)
++			mv_hi = 0x8000 - mv_hi;
++#ifdef DEBUG_QOS
++	    avs2_print(dec, 0, "[Picture %d Quality] MVX_L1 MAX : %d\n",
++			pic_number, mv_hi);
++#endif
++
++	    mv_lo = (rdata32>>0)&0xffff;
++	    if (mv_lo & 0x8000)
++			mv_lo = 0x8000 - mv_lo;
++#ifdef DEBUG_QOS
++	    avs2_print(dec, 0, "[Picture %d Quality] MVX_L1 MIN : %d\n",
++			pic_number, mv_lo);
++#endif
++
++		/* {mvy_L1_max, mvy_L1_min} */
++	    rdata32 = READ_VREG(HEVC_PIC_QUALITY_DATA);
++	    mv_hi = (rdata32>>16)&0xffff;
++	    if (mv_hi & 0x8000)
++			mv_hi = 0x8000 - mv_hi;
++#ifdef DEBUG_QOS
++	    avs2_print(dec, 0, "[Picture %d Quality] MVY_L1 MAX : %d\n",
++			pic_number, mv_hi);
++#endif
++	    mv_lo = (rdata32>>0)&0xffff;
++	    if (mv_lo & 0x8000)
++			mv_lo = 0x8000 - mv_lo;
++#ifdef DEBUG_QOS
++	    avs2_print(dec, 0, "[Picture %d Quality] MVY_L1 MIN : %d\n",
++			pic_number, mv_lo);
++#endif
++
++	    rdata32 = READ_VREG(HEVC_PIC_QUALITY_CTRL);
++#ifdef DEBUG_QOS
++	    avs2_print(dec, 0,
++			"[Picture %d Quality] After Read : VDEC_PIC_QUALITY_CTRL : 0x%x\n",
++			pic_number, rdata32);
++#endif
++		/* reset all counts */
++	    WRITE_VREG(HEVC_PIC_QUALITY_CTRL, (1<<8));
++	}
++}
++
+ static irqreturn_t vavs2_isr_thread_fn(int irq, void *data)
+ {
+ 	struct AVS2Decoder_s *dec = (struct AVS2Decoder_s *)data;
+@@ -4741,6 +5239,7 @@ static irqreturn_t vavs2_isr_thread_fn(int irq, void *data)
+ 		dec->start_decoding_flag |= 0x3;
+ 		if (dec->m_ins_flag) {
+ 			update_decoded_pic(dec);
++			get_picture_qos_info(dec);
+ 			reset_process_time(dec);
+ 			dec->dec_result = DEC_RESULT_DONE;
+ 			amhevc_stop();
+@@ -6793,10 +7292,11 @@ static int ammvdec_avs2_probe(struct platform_device *pdev)
+ 	dec->index = pdev->id;
+ 	dec->m_ins_flag = 1;
+ 
+-	if (pdata->use_vfm_path)
++	if (pdata->use_vfm_path) {
+ 		snprintf(pdata->vf_provider_name, VDEC_PROVIDER_NAME_SIZE,
+ 			VFM_DEC_PROVIDER_NAME);
+-	else
++		dec->frameinfo_enable = 1;
++	} else
+ 		snprintf(pdata->vf_provider_name, VDEC_PROVIDER_NAME_SIZE,
+ 			MULTI_INSTANCE_PROVIDER_NAME ".%02x", pdev->id & 0xff);
+ 
+diff --git a/drivers/frame_provider/decoder/h264/vh264.c b/drivers/frame_provider/decoder/h264/vh264.c
+old mode 100644
+new mode 100755
+index f5be8ed..4b8c61a
+--- a/drivers/frame_provider/decoder/h264/vh264.c
++++ b/drivers/frame_provider/decoder/h264/vh264.c
+@@ -257,6 +257,9 @@ static u32 enable_userdata_debug;
+ 
+ static unsigned int enable_switch_fense = 1;
+ #define EN_SWITCH_FENCE() (enable_switch_fense && !is_4k)
++static struct vframe_qos_s s_vframe_qos;
++static int frame_count;
++
+ #if 0
+ static u32 vh264_no_disp_wd_count;
+ #endif
+@@ -303,13 +306,36 @@ static struct work_struct notify_work;
+ static struct work_struct set_clk_work;
+ static struct work_struct userdata_push_work;
+ 
++struct h264_qos_data_node_t {
++	struct list_head list;
++
++	uint32_t b_offset;
++	int poc;
++	/* picture qos infomation*/
++	int max_qp;
++	int avg_qp;
++	int min_qp;
++	int max_skip;
++	int avg_skip;
++	int min_skip;
++	int max_mv;
++	int min_mv;
++	int avg_mv;
++};
+ 
+-
++/*qos data records list waiting for match with picture that be display*/
++static struct list_head picture_qos_list;
++/*free qos data records list*/
++static struct list_head free_qos_nodes_list;
++#define MAX_FREE_QOS_NODES		64
++static struct h264_qos_data_node_t free_nodes[MAX_FREE_QOS_NODES];
++static struct work_struct qos_work;
+ static struct dec_sysinfo vh264_amstream_dec_info;
+ static dma_addr_t mc_dma_handle;
+ static void *mc_cpu_addr;
+ static u32 first_offset;
+ static u32 first_pts;
++static u32 first_frame_size;
+ static u64 first_pts64;
+ static bool first_pts_cached;
+ static void *sei_data_buffer;
+@@ -1309,6 +1335,458 @@ static void vh264_reset_userdata_fifo(struct vdec_s *vdec, int bInit)
+ 	mutex_unlock(&userdata_mutex);
+ }
+ 
++static void h264_reset_qos_mgr(void)
++{
++	int i;
++
++	pr_info("h264_reset_qos_mgr\n");
++
++	INIT_LIST_HEAD(&free_qos_nodes_list);
++	INIT_LIST_HEAD(&picture_qos_list);
++
++	for (i = 0; i < MAX_FREE_QOS_NODES; i++) {
++		free_nodes[i].b_offset = 0xFFFFFFFF;
++
++		list_add_tail(&free_nodes[i].list,
++				&free_qos_nodes_list);
++	}
++}
++
++
++static void load_qos_data(int pic_number, uint32_t b_offset)
++{
++	uint32_t blk88_y_count;
++	uint32_t blk88_c_count;
++	uint32_t blk22_mv_count;
++	uint32_t rdata32;
++	int32_t mv_hi;
++	int32_t mv_lo;
++	uint32_t rdata32_l;
++	uint32_t mvx_L0_hi;
++	uint32_t mvy_L0_hi;
++	uint32_t mvx_L1_hi;
++	uint32_t mvy_L1_hi;
++	int64_t value;
++	uint64_t temp_value;
++/*
++#define DEBUG_QOS
++*/
++#define SUPPORT_NODE
++
++#ifdef SUPPORT_NODE
++	struct h264_qos_data_node_t *node;
++	struct h264_qos_data_node_t *tmp;
++	int bFoundNode = 0;
++
++	node = NULL;
++	if (!list_empty(&picture_qos_list)) {
++		list_for_each_entry_safe(node, tmp, &picture_qos_list, list) {
++			if (node->b_offset == b_offset) {
++				bFoundNode = 1;
++				break;
++			}
++		}
++	}
++	/*
++	pr_info("bFoundNode = %d, node:0x%p\n", bFoundNode, node);
++	*/
++	if (!bFoundNode) {
++		if (!list_empty(&free_qos_nodes_list)) {
++			node = list_entry(
++					free_qos_nodes_list.next,
++					struct h264_qos_data_node_t,
++					list);
++			/*
++			pr_info("get a node:0x%p\n", node);
++			*/
++		} else {
++			pr_info("there is no qos data node avaible\n");
++
++			return;
++		}
++	}
++
++	node->b_offset = b_offset;
++	node->poc = pic_number;
++
++	node->max_mv = 0;
++	node->avg_mv = 0;
++	node->min_mv = 0;
++
++	node->max_skip = 0;
++	node->avg_skip = 0;
++	node->min_skip = 0;
++
++	node->max_qp = 0;
++	node->avg_qp = 0;
++	node->min_qp = 0;
++#endif
++
++
++
++
++
++
++	/* set rd_idx to 0 */
++	WRITE_VREG(VDEC_PIC_QUALITY_CTRL, 0);
++	blk88_y_count = READ_VREG(VDEC_PIC_QUALITY_DATA);
++	if (blk88_y_count == 0) {
++#ifdef DEBUG_QOS
++		pr_info(" [Picture %d Quality] NO Data yet.\n",
++			pic_number);
++#endif
++		/* reset all counts */
++		WRITE_VREG(VDEC_PIC_QUALITY_CTRL, (1<<8));
++
++#ifdef SUPPORT_NODE
++		list_move(&node->list, &picture_qos_list);
++#endif
++		return;
++	}
++	/* qp_y_sum */
++	rdata32 = READ_VREG(VDEC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	pr_info(" [Picture %d Quality] Y QP AVG : %d (%d/%d)\n",
++		pic_number, rdata32/blk88_y_count,
++		rdata32, blk88_y_count);
++#endif
++#ifdef SUPPORT_NODE
++	node->avg_qp = rdata32/blk88_y_count;
++#endif
++
++	/* intra_y_count */
++	rdata32 = READ_VREG(VDEC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	pr_info(" [Picture %d Quality] Y intra rate : %d%c (%d)\n",
++		pic_number, rdata32*100/blk88_y_count,
++		'%', rdata32);
++#endif
++	/* skipped_y_count */
++	rdata32 = READ_VREG(VDEC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	pr_info(" [Picture %d Quality] Y skipped rate : %d%c (%d)\n",
++		pic_number, rdata32*100/blk88_y_count,
++		'%', rdata32);
++#endif
++#ifdef SUPPORT_NODE
++	node->avg_skip = rdata32*100/blk88_y_count;
++#endif
++	/* coeff_non_zero_y_count */
++	rdata32 = READ_VREG(VDEC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	pr_info(" [Picture %d Quality] Y ZERO_Coeff rate : %d%c (%d)\n",
++		pic_number, (100 - rdata32*100/(blk88_y_count*1)),
++		'%', rdata32);
++#endif
++	/* blk66_c_count */
++	blk88_c_count = READ_VREG(VDEC_PIC_QUALITY_DATA);
++	if (blk88_c_count == 0) {
++#ifdef DEBUG_QOS
++		pr_info(" [Picture %d Quality] NO Data yet.\n",
++			pic_number);
++#endif
++		/* reset all counts */
++		WRITE_VREG(VDEC_PIC_QUALITY_CTRL, (1<<8));
++
++#ifdef SUPPORT_NODE
++		list_move(&node->list, &picture_qos_list);
++#endif
++		return;
++	}
++	/* qp_c_sum */
++	rdata32 = READ_VREG(VDEC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	pr_info(" [Picture %d Quality] C QP AVG : %d (%d/%d)\n",
++		pic_number, rdata32/blk88_c_count,
++		rdata32, blk88_c_count);
++#endif
++	/* intra_c_count */
++	rdata32 = READ_VREG(VDEC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	pr_info(" [Picture %d Quality] C intra rate : %d%c (%d)\n",
++		pic_number, rdata32*100/blk88_c_count,
++		'%', rdata32);
++#endif
++	/* skipped_cu_c_count */
++	rdata32 = READ_VREG(VDEC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	pr_info(" [Picture %d Quality] C skipped rate : %d%c (%d)\n",
++		pic_number, rdata32*100/blk88_c_count,
++		'%', rdata32);
++#endif
++	/* coeff_non_zero_c_count */
++	rdata32 = READ_VREG(VDEC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	pr_info(" [Picture %d Quality] C ZERO_Coeff rate : %d%c (%d)\n",
++		pic_number, (100 - rdata32*100/(blk88_c_count*1)),
++		'%', rdata32);
++#endif
++
++	/* 1'h0, qp_c_max[6:0], 1'h0, qp_c_min[6:0],
++	1'h0, qp_y_max[6:0], 1'h0, qp_y_min[6:0] */
++	rdata32 = READ_VREG(VDEC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	pr_info(" [Picture %d Quality] Y QP min : %d\n",
++		pic_number, (rdata32>>0)&0xff);
++#endif
++#ifdef SUPPORT_NODE
++	node->min_qp = (rdata32>>0)&0xff;
++#endif
++
++#ifdef DEBUG_QOS
++	pr_info(" [Picture %d Quality] Y QP max : %d\n",
++		pic_number, (rdata32>>8)&0xff);
++#endif
++#ifdef SUPPORT_NODE
++	node->max_qp = (rdata32>>8)&0xff;
++#endif
++
++#ifdef DEBUG_QOS
++	pr_info(" [Picture %d Quality] C QP min : %d\n",
++		pic_number, (rdata32>>16)&0xff);
++	pr_info(" [Picture %d Quality] C QP max : %d\n",
++		pic_number, (rdata32>>24)&0xff);
++#endif
++
++	/* blk22_mv_count */
++	blk22_mv_count = READ_VREG(VDEC_PIC_QUALITY_DATA);
++	if (blk22_mv_count == 0) {
++#ifdef DEBUG_QOS
++		pr_info(" [Picture %d Quality] NO MV Data yet.\n",
++			pic_number);
++#endif
++		/* reset all counts */
++		WRITE_VREG(VDEC_PIC_QUALITY_CTRL, (1<<8));
++#ifdef SUPPORT_NODE
++		list_move(&node->list, &picture_qos_list);
++#endif
++		return;
++	}
++	/* mvy_L1_count[39:32], mvx_L1_count[39:32],
++	mvy_L0_count[39:32], mvx_L0_count[39:32] */
++	rdata32 = READ_VREG(VDEC_PIC_QUALITY_DATA);
++	/* should all be 0x00 or 0xff */
++#ifdef DEBUG_QOS
++	pr_info(" [Picture %d Quality] MV AVG High Bits: 0x%X\n",
++		pic_number, rdata32);
++#endif
++	mvx_L0_hi = ((rdata32>>0)&0xff);
++	mvy_L0_hi = ((rdata32>>8)&0xff);
++	mvx_L1_hi = ((rdata32>>16)&0xff);
++	mvy_L1_hi = ((rdata32>>24)&0xff);
++
++	/* mvx_L0_count[31:0] */
++	rdata32_l = READ_VREG(VDEC_PIC_QUALITY_DATA);
++	temp_value = mvx_L0_hi;
++	temp_value = (temp_value << 32) | rdata32_l;
++
++	if (mvx_L0_hi & 0x80)
++		value = 0xFFFFFFF000000000 | temp_value;
++	else
++		value = temp_value;
++	value = div_s64(value, blk22_mv_count);
++#ifdef DEBUG_QOS
++	pr_info(" [Picture %d Quality] MVX_L0 AVG : %d (%lld/%d)\n",
++		pic_number, (int)(value),
++		value, blk22_mv_count);
++#endif
++#ifdef SUPPORT_NODE
++	node->avg_mv = value;
++#endif
++
++	/* mvy_L0_count[31:0] */
++	rdata32_l = READ_VREG(VDEC_PIC_QUALITY_DATA);
++	temp_value = mvy_L0_hi;
++	temp_value = (temp_value << 32) | rdata32_l;
++
++	if (mvy_L0_hi & 0x80)
++		value = 0xFFFFFFF000000000 | temp_value;
++	else
++		value = temp_value;
++#ifdef DEBUG_QOS
++	pr_info(" [Picture %d Quality] MVY_L0 AVG : %d (%lld/%d)\n",
++		pic_number, rdata32_l/blk22_mv_count,
++		value, blk22_mv_count);
++#endif
++
++	/* mvx_L1_count[31:0] */
++	rdata32_l = READ_VREG(VDEC_PIC_QUALITY_DATA);
++	temp_value = mvx_L1_hi;
++	temp_value = (temp_value << 32) | rdata32_l;
++	if (mvx_L1_hi & 0x80)
++		value = 0xFFFFFFF000000000 | temp_value;
++	else
++		value = temp_value;
++#ifdef DEBUG_QOS
++	pr_info(" [Picture %d Quality] MVX_L1 AVG : %d (%lld/%d)\n",
++		pic_number, rdata32_l/blk22_mv_count,
++		value, blk22_mv_count);
++#endif
++
++	/* mvy_L1_count[31:0] */
++	rdata32_l = READ_VREG(VDEC_PIC_QUALITY_DATA);
++	temp_value = mvy_L1_hi;
++	temp_value = (temp_value << 32) | rdata32_l;
++	if (mvy_L1_hi & 0x80)
++		value = 0xFFFFFFF000000000 | temp_value;
++	else
++		value = temp_value;
++#ifdef DEBUG_QOS
++	pr_info(" [Picture %d Quality] MVY_L1 AVG : %d (%lld/%d)\n",
++		pic_number, rdata32_l/blk22_mv_count,
++		value, blk22_mv_count);
++#endif
++
++	/* {mvx_L0_max, mvx_L0_min} // format : {sign, abs[14:0]}  */
++	rdata32 = READ_VREG(VDEC_PIC_QUALITY_DATA);
++	mv_hi = (rdata32>>16)&0xffff;
++	if (mv_hi & 0x8000)
++		mv_hi = 0x8000 - mv_hi;
++#ifdef DEBUG_QOS
++	pr_info(" [Picture %d Quality] MVX_L0 MAX : %d\n",
++		pic_number, mv_hi);
++#endif
++#ifdef SUPPORT_NODE
++	node->max_mv = mv_hi;
++#endif
++
++	mv_lo = (rdata32>>0)&0xffff;
++	if (mv_lo & 0x8000)
++		mv_lo = 0x8000 - mv_lo;
++#ifdef DEBUG_QOS
++	pr_info(" [Picture %d Quality] MVX_L0 MIN : %d\n",
++		pic_number, mv_lo);
++#endif
++#ifdef SUPPORT_NODE
++	node->min_mv = mv_lo;
++#endif
++
++	/* {mvy_L0_max, mvy_L0_min} */
++	rdata32 = READ_VREG(VDEC_PIC_QUALITY_DATA);
++	mv_hi = (rdata32>>16)&0xffff;
++	if (mv_hi & 0x8000)
++		mv_hi = 0x8000 - mv_hi;
++#ifdef DEBUG_QOS
++	pr_info(" [Picture %d Quality] MVY_L0 MAX : %d\n",
++		pic_number, mv_hi);
++#endif
++
++	mv_lo = (rdata32>>0)&0xffff;
++	if (mv_lo & 0x8000)
++		mv_lo = 0x8000 - mv_lo;
++#ifdef DEBUG_QOS
++	pr_info(" [Picture %d Quality] MVY_L0 MIN : %d\n",
++		pic_number, mv_lo);
++#endif
++
++	/* {mvx_L1_max, mvx_L1_min} */
++	rdata32 = READ_VREG(VDEC_PIC_QUALITY_DATA);
++	mv_hi = (rdata32>>16)&0xffff;
++	if (mv_hi & 0x8000)
++		mv_hi = 0x8000 - mv_hi;
++#ifdef DEBUG_QOS
++	pr_info(" [Picture %d Quality] MVX_L1 MAX : %d\n",
++		pic_number, mv_hi);
++#endif
++
++	mv_lo = (rdata32>>0)&0xffff;
++	if (mv_lo & 0x8000)
++		mv_lo = 0x8000 - mv_lo;
++#ifdef DEBUG_QOS
++	pr_info(" [Picture %d Quality] MVX_L1 MIN : %d\n",
++		pic_number, mv_lo);
++#endif
++
++	/* {mvy_L1_max, mvy_L1_min} */
++	rdata32 = READ_VREG(VDEC_PIC_QUALITY_DATA);
++	mv_hi = (rdata32>>16)&0xffff;
++	if (mv_hi & 0x8000)
++		mv_hi = 0x8000 - mv_hi;
++#ifdef DEBUG_QOS
++	pr_info(" [Picture %d Quality] MVY_L1 MAX : %d\n",
++		pic_number, mv_hi);
++#endif
++	mv_lo = (rdata32>>0)&0xffff;
++	if (mv_lo & 0x8000)
++		mv_lo = 0x8000 - mv_lo;
++#ifdef DEBUG_QOS
++	pr_info(" [Picture %d Quality] MVY_L1 MIN : %d\n",
++		pic_number, mv_lo);
++#endif
++
++	rdata32 = READ_VREG(VDEC_PIC_QUALITY_CTRL);
++#ifdef DEBUG_QOS
++	pr_info(" [Picture %d Quality] After Read : VDEC_PIC_QUALITY_CTRL : 0x%x\n",
++		pic_number, rdata32);
++#endif
++	/* reset all counts */
++	WRITE_VREG(VDEC_PIC_QUALITY_CTRL, (1<<8));
++#ifdef SUPPORT_NODE
++	list_move(&node->list, &picture_qos_list);
++#endif
++}
++
++void search_qos_node(struct vframe_qos_s *picture_qos, uint32_t b_offset)
++{
++	struct h264_qos_data_node_t *node;
++	struct h264_qos_data_node_t *tmp;
++
++	if (!list_empty(&picture_qos_list)) {
++		list_for_each_entry_safe(node, tmp, &picture_qos_list, list) {
++			if (node->b_offset == b_offset) {
++
++				picture_qos->avg_mv = node->avg_mv;
++				picture_qos->min_mv = node->min_mv;
++				picture_qos->max_mv = node->max_mv;
++
++				picture_qos->avg_skip = node->avg_skip;
++				picture_qos->min_skip = node->min_skip;
++				picture_qos->max_skip = node->max_skip;
++
++				picture_qos->avg_qp = node->avg_qp;
++				picture_qos->min_qp = node->min_qp;
++				picture_qos->max_qp = node->max_qp;
++
++#if 0
++				pr_info("POC:%d, mv: max:%d,  avg:%d, min:%d\n"
++					"qp: max:%d,  avg:%d, min:%d\n"
++					"skip: max:%d,  avg:%d, min:%d\n",
++					node->poc,
++					picture_qos->max_mv,
++					picture_qos->avg_mv,
++					picture_qos->min_mv,
++					picture_qos->max_qp,
++					picture_qos->avg_qp,
++					picture_qos->min_qp,
++					picture_qos->max_skip,
++					picture_qos->avg_skip,
++					picture_qos->min_skip);
++#endif
++				node->b_offset = 0xFFFFFFFF;
++				list_move(&node->list, &free_qos_nodes_list);
++
++				break;
++			}
++		}
++	}
++}
++
++static void qos_do_work(struct work_struct *work)
++{
++	uint32_t poc;
++	uint32_t bOffset;
++
++
++	poc = READ_VREG(AV_SCRATCH_M);
++	bOffset = READ_VREG(AV_SCRATCH_L);
++/*
++	pr_info("poc:%d, bOffset:0x%x\n", poc, bOffset);
++*/
++	load_qos_data(poc, bOffset);
++
++
++	WRITE_VREG(AV_SCRATCH_0, 0);
++}
+ 
+ static void userdata_push_do_work(struct work_struct *work)
+ {
+@@ -2084,9 +2562,12 @@ static void vh264_isr(void)
+ 	unsigned int cpu_cmd;
+ 	unsigned int pts, pts_lookup_save, pts_valid_save, pts_valid = 0;
+ 	unsigned int pts_us64_valid = 0;
++	unsigned int  framesize;
+ 	u64 pts_us64;
+ 	bool force_interlaced_frame = false;
++#ifdef ENABLE_SEI_ITU_T35
+ 	unsigned int sei_itu35_flags;
++#endif
+ 	static const unsigned int idr_num =
+ 		FIX_FRAME_RATE_CHECK_IDRFRAME_NUM;
+ 	static const unsigned int flg_1080_itl =
+@@ -2266,6 +2747,7 @@ static void vh264_isr(void)
+ 				 && (first_pts_cached))) {
+ 				pts = first_pts;
+ 				pts_us64 = first_pts64;
++				framesize = first_frame_size;
+ 				first_pts_cached = false;
+ 				pts_valid = 1;
+ 				pts_us64_valid = 1;
+@@ -2273,8 +2755,8 @@ static void vh264_isr(void)
+ 				pts_hit++;
+ #endif
+ 			} else if (pts_lookup_offset_us64
+-					   (PTS_TYPE_VIDEO, b_offset, &pts, 0,
+-						&pts_us64) == 0) {
++					(PTS_TYPE_VIDEO, b_offset, &pts,
++					&framesize, 0, &pts_us64) == 0) {
+ 				pts_valid = 1;
+ 				pts_us64_valid = 1;
+ #ifdef DEBUG_PTS
+@@ -2283,11 +2765,100 @@ static void vh264_isr(void)
+ 			} else {
+ 				pts_valid = 0;
+ 				pts_us64_valid = 0;
++				framesize = 0;
+ #ifdef DEBUG_PTS
+ 				pts_missed++;
+ #endif
+ 			}
+ 
++			if (idr_flag)
++				s_vframe_qos.type = 4;
++			else if (slice_type == SLICE_TYPE_I)
++				s_vframe_qos.type = 1;
++			else if (slice_type == SLICE_TYPE_P)
++				s_vframe_qos.type = 2;
++			else if (slice_type == SLICE_TYPE_B || slice_type == 8)
++				s_vframe_qos.type = 3;
++
++			s_vframe_qos.size = framesize;
++
++			if (pts_valid)
++				s_vframe_qos.pts = pts;
++			else
++				s_vframe_qos.pts = last_pts + DUR2PTS(frame_dur);
++#ifndef ENABLE_SEI_ITU_T35
++			if (get_cpu_major_id() < AM_MESON_CPU_MAJOR_ID_G12A) {
++				u32 reg_data;
++				if (i) {
++					reg_data = READ_VREG(AV_SCRATCH_N);
++					s_vframe_qos.max_mv
++						= (reg_data >> 16) & 0xffff;
++					s_vframe_qos.avg_mv
++						= (reg_data >> 8) & 0xff;
++					s_vframe_qos.min_mv
++						=  reg_data & 0xff;
++					reg_data = READ_VREG(AV_SCRATCH_L);
++					s_vframe_qos.max_qp
++						= (reg_data >> 16) & 0xff;
++					s_vframe_qos.avg_qp
++						= (reg_data >> 8) & 0xff;
++					s_vframe_qos.min_qp
++						=  reg_data & 0xff;
++					reg_data = READ_VREG(AV_SCRATCH_M);
++					s_vframe_qos.max_skip
++						= (reg_data >> 16) & 0xff;
++					s_vframe_qos.avg_skip
++						= (reg_data >> 8) & 0xff;
++					s_vframe_qos.min_skip
++						=  reg_data & 0xff;
++				} else {
++					reg_data = READ_VREG(AV_SCRATCH_J);
++					s_vframe_qos.max_mv
++						= (reg_data >> 16) & 0xffff;
++					s_vframe_qos.avg_mv
++						= (reg_data >> 8) & 0xff;
++					s_vframe_qos.min_mv
++						=  reg_data & 0xff;
++					reg_data = READ_VREG(AV_SCRATCH_I);
++					s_vframe_qos.max_qp
++						= (reg_data >> 16) & 0xff;
++					s_vframe_qos.avg_qp
++						= (reg_data >> 8) & 0xff;
++					s_vframe_qos.min_qp
++						=  reg_data & 0xff;
++					reg_data = READ_VREG(AV_SCRATCH_K);
++					s_vframe_qos.max_skip
++						= (reg_data >> 16) & 0xff;
++					s_vframe_qos.avg_skip
++						= (reg_data >> 8) & 0xff;
++					s_vframe_qos.min_skip
++						=  reg_data & 0xff;
++				}
++				if (decoder_debug_flag&0x2) {
++					pr_info("max_mv %d    avg_mv %d  min_mv %d slice_type %d offset %x   i =  %d\n",
++						s_vframe_qos.max_mv,
++						s_vframe_qos.avg_mv,
++						s_vframe_qos.min_mv,
++						slice_type,
++						b_offset,
++						i);
++					pr_info("max_qp %d    avg_qp %d  min_qp %d\n",
++						s_vframe_qos.max_qp,
++						s_vframe_qos.avg_qp,
++						s_vframe_qos.min_qp);
++					pr_info("max_skip %d  avg_skip %d  min_skip %d\n",
++						s_vframe_qos.max_skip,
++						s_vframe_qos.avg_skip,
++						s_vframe_qos.min_skip);
++				}
++			} else
++				search_qos_node(&s_vframe_qos, b_offset);
++#endif
++			frame_count++;
++
++			s_vframe_qos.num = frame_count;
++			vdec_fill_frame_info(&s_vframe_qos, 1);
++
+ 			/* on second IDR frame,check the diff between pts
+ 			 *  compute from duration and pts from lookup ,
+ 			 * if large than frame_dur,we think it is uncorrect.
+@@ -2647,12 +3218,14 @@ static void vh264_isr(void)
+ 	} else if ((cpu_cmd & 0xff) == 9) {
+ 		first_offset = READ_VREG(AV_SCRATCH_1);
+ 		if (pts_lookup_offset_us64
+-			(PTS_TYPE_VIDEO, first_offset, &first_pts, 0,
++			(PTS_TYPE_VIDEO, first_offset, &first_pts,
++			&first_frame_size, 0,
+ 			 &first_pts64) == 0)
+ 			first_pts_cached = true;
+ 		WRITE_VREG(AV_SCRATCH_0, 0);
+ 	} else if ((cpu_cmd & 0xff) == 0xa) {
+ 		int b_offset;
++		unsigned int frame_size;
+ 
+ 		b_offset = READ_VREG(AV_SCRATCH_2);
+ 		buffer_index = READ_VREG(AV_SCRATCH_1);
+@@ -2666,7 +3239,8 @@ static void vh264_isr(void)
+ 			return IRQ_HANDLED;
+ 		}
+ 		if (pts_lookup_offset_us64 (PTS_TYPE_VIDEO, b_offset,
+-				&pts, 0, &pts_us64) != 0)
++				&pts, &frame_size,
++				0, &pts_us64) != 0)
+ 			vf->pts_us64 = vf->pts = 0;
+ 		else {
+ 			vf->pts_us64 = pts_us64;
+@@ -2693,12 +3267,15 @@ static void vh264_isr(void)
+ 		kfifo_put(&delay_display_q,
+ 			(const struct vframe_s *)vf);
+ 		WRITE_VREG(AV_SCRATCH_0, 0);
++	} else if ((cpu_cmd & 0xff) == 0xB) {
++		schedule_work(&qos_work);
+ 	}
+-
++#ifdef ENABLE_SEI_ITU_T35
+ 	sei_itu35_flags = READ_VREG(AV_SCRATCH_J);
+ 	if (sei_itu35_flags & (1 << 15)) {	/* data ready */
+ 		schedule_work(&userdata_push_work);
+ 	}
++#endif
+ #ifdef HANDLE_H264_IRQ
+ 	return IRQ_HANDLED;
+ #else
+@@ -3118,6 +3695,7 @@ static int vh264_local_init(void)
+ 	no_idr_error_count = 0;
+ 
+ 	vh264_reset_userdata_fifo(vdec_h264, 1);
++	h264_reset_qos_mgr();
+ 
+ 	if (enable_switch_fense) {
+ 		for (i = 0; i < ARRAY_SIZE(fense_buffer_spec); i++) {
+@@ -3165,6 +3743,8 @@ static s32 vh264_init(void)
+ 	iponly_early_mode = 0;
+ 	saved_idc_level = 0;
+ 
++	frame_count = 0;
++	memset(&s_vframe_qos, 0, sizeof(s_vframe_qos));
+ 	/*init vdec status*/
+ 	ret = vh264_vdec_info_init();
+ 	if (0 != ret)
+@@ -3695,6 +4275,9 @@ static int amvdec_h264_probe(struct platform_device *pdev)
+ 	INIT_WORK(&notify_work, vh264_notify_work);
+ 	INIT_WORK(&set_clk_work, vh264_set_clk);
+ 	INIT_WORK(&userdata_push_work, userdata_push_do_work);
++	INIT_WORK(&qos_work, qos_do_work);
++
++
+ 
+ 	atomic_set(&vh264_active, 1);
+ 
+@@ -3712,6 +4295,9 @@ static int amvdec_h264_remove(struct platform_device *pdev)
+ 	cancel_work_sync(&notify_work);
+ 	cancel_work_sync(&set_clk_work);
+ 	cancel_work_sync(&userdata_push_work);
++	cancel_work_sync(&qos_work);
++
++	mutex_lock(&vh264_mutex);
+ 	vh264_stop(MODE_FULL);
+ 	wait_vh264_search_done();
+ 	mutex_lock(&vh264_mutex);
+@@ -3812,6 +4398,9 @@ module_param(sync_outside, uint, 0664);
+ MODULE_PARM_DESC(sync_outside, "\n amvdec_h264 sync_outside\n");
+ module_param(dec_control, uint, 0664);
+ MODULE_PARM_DESC(dec_control, "\n amvdec_h264 decoder control\n");
++module_param(frame_count, uint, 0664);
++MODULE_PARM_DESC(frame_count,
++       "\n amvdec_h264 decoded total count\n");
+ module_param(fatal_error_reset, uint, 0664);
+ MODULE_PARM_DESC(fatal_error_reset,
+ 		"\n amvdec_h264 decoder reset when fatal error happens\n");
+diff --git a/drivers/frame_provider/decoder/h264/vh264_4k2k.c b/drivers/frame_provider/decoder/h264/vh264_4k2k.c
+index 897147f..8ea595f 100644
+--- a/drivers/frame_provider/decoder/h264/vh264_4k2k.c
++++ b/drivers/frame_provider/decoder/h264/vh264_4k2k.c
+@@ -684,6 +684,7 @@ static irqreturn_t vh264_4k2k_isr(int irq, void *dev_id)
+ 	unsigned int stream_offset;
+ 	struct vframe_s *vf = NULL;
+ 	int ret = READ_VREG(MAILBOX_COMMAND);
++	u32 frame_size;
+ 
+ 	switch (ret & 0xff) {
+ 	case CMD_ALLOC_VIEW:
+@@ -720,6 +721,7 @@ static irqreturn_t vh264_4k2k_isr(int irq, void *dev_id)
+ 				ret = pts_lookup_offset_us64(PTS_TYPE_VIDEO,
+ 							stream_offset,
+ 							&vf->pts,
++							&frame_size,
+ 							0,
+ 							&vf->pts_us64);
+ 				if (ret != 0)
+diff --git a/drivers/frame_provider/decoder/h264/vh264_mvc.c b/drivers/frame_provider/decoder/h264/vh264_mvc.c
+index 70d26bc..5181a45 100644
+--- a/drivers/frame_provider/decoder/h264/vh264_mvc.c
++++ b/drivers/frame_provider/decoder/h264/vh264_mvc.c
+@@ -891,6 +891,7 @@ static void vh264mvc_isr(void)
+ 	struct vframe_s *vf;
+ 	unsigned int pts, pts_valid = 0;
+ 	u64 pts_us64;
++	u32 frame_size;
+ 	int ret = READ_VREG(MAILBOX_COMMAND);
+ 	/* pr_info("vh264mvc_isr, cmd =%x\n", ret); */
+ 	switch (ret & 0xff) {
+@@ -1024,6 +1025,7 @@ static void vh264mvc_isr(void)
+ 				if (pts_lookup_offset_us64
+ 					(PTS_TYPE_VIDEO,
+ 					 vfpool_idx[slot].stream_offset, &pts,
++					 &frame_size,
+ 					 0x10000, &pts_us64) == 0)
+ 					pts_valid = 1;
+ 				else
+diff --git a/drivers/frame_provider/decoder/h264_multi/h264_dpb.c b/drivers/frame_provider/decoder/h264_multi/h264_dpb.c
+index b4aefd0..903a368 100644
+--- a/drivers/frame_provider/decoder/h264_multi/h264_dpb.c
++++ b/drivers/frame_provider/decoder/h264_multi/h264_dpb.c
+@@ -1597,6 +1597,8 @@ static void insert_picture_in_dpb(struct h264_dpb_stru *p_H264_Dpb,
+ 	case FRAME:
+ 		fs->frame = p;
+ 		fs->is_used = 3;
++		fs->slice_type = p->slice_type;
++		fs->frame_size = p->frame_size;
+ 		if (p->used_for_reference) {
+ 			fs->is_reference = 3;
+ 			fs->is_orig_reference = 3;
+@@ -1623,6 +1625,12 @@ static void insert_picture_in_dpb(struct h264_dpb_stru *p_H264_Dpb,
+ 		fs->top_field = p;
+ 		fs->is_used |= 1;
+ 		fs->layer_id = p->layer_id;
++		if (fs->frame_size == 0) {
++			fs->slice_type = p->slice_type;
++//			fs->pts = p->pts;
++//			fs->pts64 = p->pts64;
++		}
++		fs->frame_size += p->frame_size;
+ #if (MVC_EXTENSION_ENABLE)
+ 		fs->view_id = p->view_id;
+ 		fs->inter_view_flag[0] = p->inter_view_flag;
+@@ -1649,6 +1657,12 @@ static void insert_picture_in_dpb(struct h264_dpb_stru *p_H264_Dpb,
+ 		fs->bottom_field = p;
+ 		fs->is_used |= 2;
+ 		fs->layer_id = p->layer_id;
++		if (fs->frame_size == 0) {
++			fs->slice_type = p->slice_type;
++//			fs->pts = p->pts;
++//			fs->pts64 = p->pts64;
++		}
++		fs->frame_size += p->frame_size;
+ #if (MVC_EXTENSION_ENABLE)
+ 		fs->view_id = p->view_id;
+ 		fs->inter_view_flag[1] = p->inter_view_flag;
+@@ -1678,6 +1692,19 @@ static void insert_picture_in_dpb(struct h264_dpb_stru *p_H264_Dpb,
+ 	fs->is_output = p->is_output;
+ 	fs->pre_output = p->pre_output;
+ 
++	/* picture qos infomation*/
++	fs->max_mv = p->max_mv;
++	fs->avg_mv = p->avg_mv;
++	fs->min_mv = p->min_mv;
++
++	fs->max_qp = p->max_qp;
++	fs->avg_qp = p->avg_qp;
++	fs->min_qp = p->min_qp;
++
++	fs->max_skip = p->max_skip;
++	fs->avg_skip = p->avg_skip;
++	fs->min_skip = p->min_skip;
++
+ 	if (fs->is_used == 3) {
+ 		calculate_frame_no(p_Vid, p);
+ #if 0
+@@ -1960,7 +1987,7 @@ static void remove_frame_from_dpb(struct h264_dpb_stru *p_H264_Dpb, int pos)
+ 	fs->is_long_term = 0;
+ 	fs->is_reference = 0;
+ 	fs->is_orig_reference = 0;
+-
++	fs->frame_size = 0;
+ 	/* move empty framestore to end of buffer */
+ 	tmp = p_Dpb->fs[pos];
+ 
+diff --git a/drivers/frame_provider/decoder/h264_multi/h264_dpb.h b/drivers/frame_provider/decoder/h264_multi/h264_dpb.h
+index 54c82ad..e68d330 100644
+--- a/drivers/frame_provider/decoder/h264_multi/h264_dpb.h
++++ b/drivers/frame_provider/decoder/h264_multi/h264_dpb.h
+@@ -693,6 +693,17 @@ struct StorablePicture {
+ 	u64         pts64;
+ 	u64         timestamp;
+ 	unsigned char data_flag;
++	/* picture qos infomation*/
++	int frame_size;
++	int max_qp;
++	int avg_qp;
++	int min_qp;
++	int max_skip;
++	int avg_skip;
++	int min_skip;
++	int max_mv;
++	int min_mv;
++	int avg_mv;
+ };
+ 
+ struct FrameStore {
+@@ -756,6 +767,21 @@ struct FrameStore {
+ 	u32       pts;
+ 	u64       pts64;
+ 	u64       timestamp;
++
++
++	/* picture qos infomation*/
++	int slice_type;
++	int frame_size;
++
++	int max_qp;
++	int avg_qp;
++	int min_qp;
++	int max_skip;
++	int avg_skip;
++	int min_skip;
++	int max_mv;
++	int min_mv;
++	int avg_mv;
+ };
+ 
+ 
+diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+index 9c51508..96aaca6 100644
+--- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
++++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+@@ -22,6 +22,7 @@
+ #include <linux/timer.h>
+ #include <linux/kfifo.h>
+ #include <linux/platform_device.h>
++#include <linux/random.h>
+ 
+ #include <linux/amlogic/media/utils/amstream.h>
+ #include <linux/amlogic/media/frame_sync/ptsserv.h>
+@@ -829,6 +830,8 @@ struct vdec_h264_hw_s {
+ 	int need_cache_size;
+ 	u64 sc_start_time;
+ 	u8 frmbase_cont_flag;
++	struct vframe_qos_s vframe_qos;
++	int frameinfo_enable;
+ };
+ 
+ static u32 again_threshold = 0x40;
+@@ -2377,6 +2380,52 @@ static int check_force_interlace(struct vdec_h264_hw_s *hw,
+ 	return bForceInterlace;
+ }
+ 
++static void fill_frame_info(struct vdec_h264_hw_s *hw, struct FrameStore *frame)
++{
++	struct vframe_qos_s *vframe_qos = &hw->vframe_qos;
++	if (frame->slice_type == I_SLICE)
++		vframe_qos->type = 1;
++	else if (frame->slice_type == P_SLICE)
++		vframe_qos->type = 2;
++	else if (frame->slice_type == B_SLICE)
++		vframe_qos->type = 3;
++
++	vframe_qos->size = frame->frame_size;
++	vframe_qos->pts = frame->pts64;
++
++	vframe_qos->max_mv = frame->max_mv;
++	vframe_qos->avg_mv = frame->avg_mv;
++	vframe_qos->min_mv = frame->min_mv;
++/*
++	pr_info("mv: max:%d,  avg:%d, min:%d\n",
++		vframe_qos->max_mv,
++		vframe_qos->avg_mv,
++		vframe_qos->min_mv);
++*/
++
++	vframe_qos->max_qp = frame->max_qp;
++	vframe_qos->avg_qp = frame->avg_qp;
++	vframe_qos->min_qp = frame->min_qp;
++/*
++	pr_info("qp: max:%d,  avg:%d, min:%d\n",
++		vframe_qos->max_qp,
++		vframe_qos->avg_qp,
++		vframe_qos->min_qp);
++*/
++
++	vframe_qos->max_skip = frame->max_skip;
++	vframe_qos->avg_skip = frame->avg_skip;
++	vframe_qos->min_skip = frame->min_skip;
++/*
++	pr_info("skip: max:%d,  avg:%d, min:%d\n",
++		vframe_qos->max_skip,
++		vframe_qos->avg_skip,
++		vframe_qos->min_skip);
++*/
++	vframe_qos->num++;
++	if (hw->frameinfo_enable)
++		vdec_fill_frame_info(vframe_qos, 1);
++}
+ int prepare_display_buf(struct vdec_s *vdec, struct FrameStore *frame)
+ {
+ 	struct vdec_h264_hw_s *hw = (struct vdec_h264_hw_s *)vdec->private;
+@@ -2453,6 +2502,7 @@ int prepare_display_buf(struct vdec_s *vdec, struct FrameStore *frame)
+ 	if (bForceInterlace)
+ 		vf_count = 2;
+ 	hw->buffer_spec[buffer_index].vf_ref = 0;
++	fill_frame_info(hw, frame);
+ 	for (i = 0; i < vf_count; i++) {
+ 		if (kfifo_get(&hw->newframe_q, &vf) == 0 ||
+ 			vf == NULL) {
+@@ -3777,6 +3827,402 @@ static void set_frame_info(struct vdec_h264_hw_s *hw, struct vframe_s *vf,
+ 
+ }
+ 
++static void get_picture_qos_info(struct StorablePicture *picture)
++{
++	if (get_cpu_major_id() < AM_MESON_CPU_MAJOR_ID_G12A) {
++		unsigned char a[3];
++		unsigned char i, j, t;
++		unsigned long  data;
++
++		get_random_bytes(&data, sizeof(unsigned long));
++		if (picture->slice_type == I_SLICE)
++			data = 0;
++		a[0] = data & 0xff;
++		a[1] = (data >> 8) & 0xff;
++		a[2] = (data >> 16) & 0xff;
++
++		for (i = 0; i < 3; i++)
++			for (j = i+1; j < 3; j++) {
++				if (a[j] < a[i]) {
++					t = a[j];
++					a[j] = a[i];
++					a[i] = t;
++				} else if (a[j] == a[i]) {
++					a[i]++;
++					t = a[j];
++					a[j] = a[i];
++					a[i] = t;
++				}
++			}
++		picture->max_mv = a[2];
++		picture->avg_mv = a[1];
++		picture->min_mv = a[0];
++		/*
++		pr_info("mv data %x  a[0]= %x a[1]= %x a[2]= %x\n",
++			data, a[0], a[1], a[2]);
++		*/
++
++		get_random_bytes(&data, sizeof(unsigned long));
++		a[0] = data & 0x1f;
++		a[1] = (data >> 8) & 0x3f;
++		a[2] = (data >> 16) & 0x7f;
++
++		for (i = 0; i < 3; i++)
++			for (j = i+1; j < 3; j++) {
++				if (a[j] < a[i]) {
++					t = a[j];
++					a[j] = a[i];
++					a[i] = t;
++				} else if (a[j] == a[i]) {
++					a[i]++;
++					t = a[j];
++					a[j] = a[i];
++					a[i] = t;
++				}
++			}
++		picture->max_qp = a[2];
++		picture->avg_qp = a[1];
++		picture->min_qp = a[0];
++		/*
++		pr_info("qp data %x  a[0]= %x a[1]= %x a[2]= %x\n",
++			data, a[0], a[1], a[2]);
++		*/
++
++		get_random_bytes(&data, sizeof(unsigned long));
++		a[0] = data & 0x1f;
++		a[1] = (data >> 8) & 0x3f;
++		a[2] = (data >> 16) & 0x7f;
++
++		for (i = 0; i < 3; i++)
++			for (j = i+1; j < 3; j++) {
++				if (a[j] < a[i]) {
++					t = a[j];
++					a[j] = a[i];
++					a[i] = t;
++				} else if (a[j] == a[i]) {
++					a[i]++;
++					t = a[j];
++					a[j] = a[i];
++					a[i] = t;
++				}
++			}
++		picture->max_skip = a[2];
++		picture->avg_skip = a[1];
++		picture->min_skip = a[0];
++
++
++		/*
++		pr_info("skip data %x  a[0]= %x a[1]= %x a[2]= %x\n",
++			data,a[0], a[1], a[2]);
++		*/
++	} else {
++		uint32_t blk88_y_count;
++		uint32_t blk88_c_count;
++		uint32_t blk22_mv_count;
++		uint32_t rdata32;
++		int32_t mv_hi;
++		int32_t mv_lo;
++		uint32_t rdata32_l;
++		uint32_t mvx_L0_hi;
++		uint32_t mvy_L0_hi;
++		uint32_t mvx_L1_hi;
++		uint32_t mvy_L1_hi;
++		int64_t value;
++		uint64_t temp_value;
++/*
++#define DEBUG_QOS
++*/
++#ifdef DEBUG_QOS
++		int pic_number = picture->poc;
++#endif
++
++		picture->max_mv = 0;
++		picture->avg_mv = 0;
++		picture->min_mv = 0;
++
++		picture->max_skip = 0;
++		picture->avg_skip = 0;
++		picture->min_skip = 0;
++
++		picture->max_qp = 0;
++		picture->avg_qp = 0;
++		picture->min_qp = 0;
++
++
++
++
++
++		/* set rd_idx to 0 */
++	    WRITE_VREG(VDEC_PIC_QUALITY_CTRL, 0);
++	    blk88_y_count = READ_VREG(VDEC_PIC_QUALITY_DATA);
++	    if (blk88_y_count == 0) {
++#ifdef DEBUG_QOS
++			pr_info(" [Picture %d Quality] NO Data yet.\n",
++				pic_number);
++#endif
++			/* reset all counts */
++			WRITE_VREG(VDEC_PIC_QUALITY_CTRL, (1<<8));
++			return;
++	    }
++		/* qp_y_sum */
++	    rdata32 = READ_VREG(VDEC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	    pr_info(" [Picture %d Quality] Y QP AVG : %d (%d/%d)\n",
++			pic_number, rdata32/blk88_y_count,
++			rdata32, blk88_y_count);
++#endif
++		picture->avg_qp = rdata32/blk88_y_count;
++		/* intra_y_count */
++	    rdata32 = READ_VREG(VDEC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	    pr_info(" [Picture %d Quality] Y intra rate : %d%c (%d)\n",
++			pic_number, rdata32*100/blk88_y_count,
++			'%', rdata32);
++#endif
++		/* skipped_y_count */
++	    rdata32 = READ_VREG(VDEC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	    pr_info(" [Picture %d Quality] Y skipped rate : %d%c (%d)\n",
++			pic_number, rdata32*100/blk88_y_count,
++			'%', rdata32);
++#endif
++		picture->avg_skip = rdata32*100/blk88_y_count;
++		/* coeff_non_zero_y_count */
++	    rdata32 = READ_VREG(VDEC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	    pr_info(" [Picture %d Quality] Y ZERO_Coeff rate : %d%c (%d)\n",
++			pic_number, (100 - rdata32*100/(blk88_y_count*1)),
++			'%', rdata32);
++#endif
++		/* blk66_c_count */
++	    blk88_c_count = READ_VREG(VDEC_PIC_QUALITY_DATA);
++	    if (blk88_c_count == 0) {
++#ifdef DEBUG_QOS
++			pr_info(" [Picture %d Quality] NO Data yet.\n",
++				pic_number);
++#endif
++			/* reset all counts */
++			WRITE_VREG(VDEC_PIC_QUALITY_CTRL, (1<<8));
++			return;
++	    }
++		/* qp_c_sum */
++	    rdata32 = READ_VREG(VDEC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	    pr_info(" [Picture %d Quality] C QP AVG : %d (%d/%d)\n",
++			pic_number, rdata32/blk88_c_count,
++			rdata32, blk88_c_count);
++#endif
++		/* intra_c_count */
++	    rdata32 = READ_VREG(VDEC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	    pr_info(" [Picture %d Quality] C intra rate : %d%c (%d)\n",
++			pic_number, rdata32*100/blk88_c_count,
++			'%', rdata32);
++#endif
++		/* skipped_cu_c_count */
++	    rdata32 = READ_VREG(VDEC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	    pr_info(" [Picture %d Quality] C skipped rate : %d%c (%d)\n",
++			pic_number, rdata32*100/blk88_c_count,
++			'%', rdata32);
++#endif
++		/* coeff_non_zero_c_count */
++	    rdata32 = READ_VREG(VDEC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	    pr_info(" [Picture %d Quality] C ZERO_Coeff rate : %d%c (%d)\n",
++			pic_number, (100 - rdata32*100/(blk88_c_count*1)),
++			'%', rdata32);
++#endif
++
++		/* 1'h0, qp_c_max[6:0], 1'h0, qp_c_min[6:0],
++		1'h0, qp_y_max[6:0], 1'h0, qp_y_min[6:0] */
++	    rdata32 = READ_VREG(VDEC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	    pr_info(" [Picture %d Quality] Y QP min : %d\n",
++			pic_number, (rdata32>>0)&0xff);
++#endif
++		picture->min_qp = (rdata32>>0)&0xff;
++
++#ifdef DEBUG_QOS
++	    pr_info(" [Picture %d Quality] Y QP max : %d\n",
++			pic_number, (rdata32>>8)&0xff);
++#endif
++		picture->max_qp = (rdata32>>8)&0xff;
++
++#ifdef DEBUG_QOS
++	    pr_info(" [Picture %d Quality] C QP min : %d\n",
++			pic_number, (rdata32>>16)&0xff);
++	    pr_info(" [Picture %d Quality] C QP max : %d\n",
++			pic_number, (rdata32>>24)&0xff);
++#endif
++
++		/* blk22_mv_count */
++	    blk22_mv_count = READ_VREG(VDEC_PIC_QUALITY_DATA);
++	    if (blk22_mv_count == 0) {
++#ifdef DEBUG_QOS
++			pr_info(" [Picture %d Quality] NO MV Data yet.\n",
++				pic_number);
++#endif
++			/* reset all counts */
++			WRITE_VREG(VDEC_PIC_QUALITY_CTRL, (1<<8));
++			return;
++	    }
++		/* mvy_L1_count[39:32], mvx_L1_count[39:32],
++		mvy_L0_count[39:32], mvx_L0_count[39:32] */
++	    rdata32 = READ_VREG(VDEC_PIC_QUALITY_DATA);
++	    /* should all be 0x00 or 0xff */
++#ifdef DEBUG_QOS
++	    pr_info(" [Picture %d Quality] MV AVG High Bits: 0x%X\n",
++			pic_number, rdata32);
++#endif
++	    mvx_L0_hi = ((rdata32>>0)&0xff);
++	    mvy_L0_hi = ((rdata32>>8)&0xff);
++	    mvx_L1_hi = ((rdata32>>16)&0xff);
++	    mvy_L1_hi = ((rdata32>>24)&0xff);
++
++		/* mvx_L0_count[31:0] */
++	    rdata32_l = READ_VREG(VDEC_PIC_QUALITY_DATA);
++		temp_value = mvx_L0_hi;
++		temp_value = (temp_value << 32) | rdata32_l;
++
++		if (mvx_L0_hi & 0x80)
++			value = 0xFFFFFFF000000000 | temp_value;
++		else
++			value = temp_value;
++		value = div_s64(value, blk22_mv_count);
++#ifdef DEBUG_QOS
++		pr_info(" [Picture %d Quality] MVX_L0 AVG : %d (%lld/%d)\n",
++			pic_number, (int)(value),
++			value, blk22_mv_count);
++#endif
++		picture->avg_mv = value;
++
++		/* mvy_L0_count[31:0] */
++	    rdata32_l = READ_VREG(VDEC_PIC_QUALITY_DATA);
++		temp_value = mvy_L0_hi;
++		temp_value = (temp_value << 32) | rdata32_l;
++
++		if (mvy_L0_hi & 0x80)
++			value = 0xFFFFFFF000000000 | temp_value;
++		else
++			value = temp_value;
++#ifdef DEBUG_QOS
++	    pr_info(" [Picture %d Quality] MVY_L0 AVG : %d (%lld/%d)\n",
++			pic_number, rdata32_l/blk22_mv_count,
++			value, blk22_mv_count);
++#endif
++
++		/* mvx_L1_count[31:0] */
++	    rdata32_l = READ_VREG(VDEC_PIC_QUALITY_DATA);
++		temp_value = mvx_L1_hi;
++		temp_value = (temp_value << 32) | rdata32_l;
++		if (mvx_L1_hi & 0x80)
++			value = 0xFFFFFFF000000000 | temp_value;
++		else
++			value = temp_value;
++#ifdef DEBUG_QOS
++	    pr_info(" [Picture %d Quality] MVX_L1 AVG : %d (%lld/%d)\n",
++			pic_number, rdata32_l/blk22_mv_count,
++			value, blk22_mv_count);
++#endif
++
++		/* mvy_L1_count[31:0] */
++	    rdata32_l = READ_VREG(VDEC_PIC_QUALITY_DATA);
++		temp_value = mvy_L1_hi;
++		temp_value = (temp_value << 32) | rdata32_l;
++		if (mvy_L1_hi & 0x80)
++			value = 0xFFFFFFF000000000 | temp_value;
++		else
++			value = temp_value;
++#ifdef DEBUG_QOS
++	    pr_info(" [Picture %d Quality] MVY_L1 AVG : %d (%lld/%d)\n",
++			pic_number, rdata32_l/blk22_mv_count,
++			value, blk22_mv_count);
++#endif
++
++		/* {mvx_L0_max, mvx_L0_min} // format : {sign, abs[14:0]}  */
++	    rdata32 = READ_VREG(VDEC_PIC_QUALITY_DATA);
++	    mv_hi = (rdata32>>16)&0xffff;
++	    if (mv_hi & 0x8000)
++			mv_hi = 0x8000 - mv_hi;
++#ifdef DEBUG_QOS
++	    pr_info(" [Picture %d Quality] MVX_L0 MAX : %d\n",
++			pic_number, mv_hi);
++#endif
++		picture->max_mv = mv_hi;
++
++	    mv_lo = (rdata32>>0)&0xffff;
++	    if (mv_lo & 0x8000)
++			mv_lo = 0x8000 - mv_lo;
++#ifdef DEBUG_QOS
++	    pr_info(" [Picture %d Quality] MVX_L0 MIN : %d\n",
++			pic_number, mv_lo);
++#endif
++		picture->min_mv = mv_lo;
++
++		/* {mvy_L0_max, mvy_L0_min} */
++	    rdata32 = READ_VREG(VDEC_PIC_QUALITY_DATA);
++	    mv_hi = (rdata32>>16)&0xffff;
++	    if (mv_hi & 0x8000)
++			mv_hi = 0x8000 - mv_hi;
++#ifdef DEBUG_QOS
++	    pr_info(" [Picture %d Quality] MVY_L0 MAX : %d\n",
++			pic_number, mv_hi);
++#endif
++
++	    mv_lo = (rdata32>>0)&0xffff;
++	    if (mv_lo & 0x8000)
++			mv_lo = 0x8000 - mv_lo;
++#ifdef DEBUG_QOS
++	    pr_info(" [Picture %d Quality] MVY_L0 MIN : %d\n",
++			pic_number, mv_lo);
++#endif
++
++		/* {mvx_L1_max, mvx_L1_min} */
++	    rdata32 = READ_VREG(VDEC_PIC_QUALITY_DATA);
++	    mv_hi = (rdata32>>16)&0xffff;
++	    if (mv_hi & 0x8000)
++			mv_hi = 0x8000 - mv_hi;
++#ifdef DEBUG_QOS
++	    pr_info(" [Picture %d Quality] MVX_L1 MAX : %d\n",
++			pic_number, mv_hi);
++#endif
++
++	    mv_lo = (rdata32>>0)&0xffff;
++	    if (mv_lo & 0x8000)
++			mv_lo = 0x8000 - mv_lo;
++#ifdef DEBUG_QOS
++	    pr_info(" [Picture %d Quality] MVX_L1 MIN : %d\n",
++			pic_number, mv_lo);
++#endif
++
++		/* {mvy_L1_max, mvy_L1_min} */
++	    rdata32 = READ_VREG(VDEC_PIC_QUALITY_DATA);
++	    mv_hi = (rdata32>>16)&0xffff;
++	    if (mv_hi & 0x8000)
++			mv_hi = 0x8000 - mv_hi;
++#ifdef DEBUG_QOS
++	    pr_info(" [Picture %d Quality] MVY_L1 MAX : %d\n",
++			pic_number, mv_hi);
++#endif
++	    mv_lo = (rdata32>>0)&0xffff;
++	    if (mv_lo & 0x8000)
++			mv_lo = 0x8000 - mv_lo;
++#ifdef DEBUG_QOS
++	    pr_info(" [Picture %d Quality] MVY_L1 MIN : %d\n",
++			pic_number, mv_lo);
++#endif
++
++	    rdata32 = READ_VREG(VDEC_PIC_QUALITY_CTRL);
++#ifdef DEBUG_QOS
++	    pr_info(" [Picture %d Quality] After Read : VDEC_PIC_QUALITY_CTRL : 0x%x\n",
++			pic_number, rdata32);
++#endif
++		/* reset all counts */
++	    WRITE_VREG(VDEC_PIC_QUALITY_CTRL, (1<<8));
++	}
++}
++
+ static int get_max_dec_frame_buf_size(int level_idc,
+ 		int max_reference_frame_num, int mb_width,
+ 		int mb_height)
+@@ -4921,6 +5367,7 @@ pic_done_proc:
+ 			hw->frmbase_cont_flag = 0;
+ 
+ 		if (p_H264_Dpb->mVideo.dec_picture) {
++			get_picture_qos_info(p_H264_Dpb->mVideo.dec_picture);
+ #ifdef CONFIG_AMLOGIC_MEDIA_ENHANCEMENT_DOLBYVISION
+ 			DEL_EXIST(hw,
+ 				p_H264_Dpb->mVideo.dec_picture) = 0;
+@@ -4963,7 +5410,8 @@ pic_done_proc:
+ 				u32 offset = pic->offset_delimiter_lo |
+ 					(pic->offset_delimiter_hi << 16);
+ 				if (pts_lookup_offset_us64(PTS_TYPE_VIDEO,
+-					offset, &pic->pts, 0, &pic->pts64)) {
++					offset, &pic->pts, &pic->frame_size,
++					0, &pic->pts64)) {
+ 					pic->pts = 0;
+ 					pic->pts64 = 0;
+ #ifdef MH264_USERDATA_ENABLE
+@@ -7799,9 +8247,11 @@ static int ammvdec_h264_probe(struct platform_device *pdev)
+ 	pdata->user_data_read = NULL;
+ 	pdata->reset_userdata_fifo = NULL;
+ #endif
+-	if (pdata->use_vfm_path)
++	if (pdata->use_vfm_path) {
+ 		snprintf(pdata->vf_provider_name, VDEC_PROVIDER_NAME_SIZE,
+ 			VFM_DEC_PROVIDER_NAME);
++		hw->frameinfo_enable = 1;
++	}
+ #ifdef CONFIG_AMLOGIC_MEDIA_ENHANCEMENT_DOLBYVISION
+ 	else if (vdec_dual(pdata)) {
+ 		if (dv_toggle_prov_name) /*debug purpose*/
 diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
-index e585fe6..fbc1a43 100644
+index fbc1a43..ce322d4 100644
 --- a/drivers/frame_provider/decoder/h265/vh265.c
 +++ b/drivers/frame_provider/decoder/h265/vh265.c
-@@ -1360,6 +1360,12 @@ struct PIC_s {
- 	u32 sar_height;
- 	u32 double_write_mode;
- 	u32 video_signal_type;
-+	unsigned short conformance_window_flag;
-+	unsigned short conf_win_left_offset;
-+	unsigned short conf_win_right_offset;
-+	unsigned short conf_win_top_offset;
-+	unsigned short conf_win_bottom_offset;
-+	unsigned short chroma_format_idc;
+@@ -290,6 +290,10 @@ static u32 pts_unstable;
+ #define MV_BUFFER_IDX(n) (BUF_POOL_SIZE + 1 + n)
+ #endif
+ 
++#define HEVC_MV_INFO   0x310d
++#define HEVC_QP_INFO   0x3137
++#define HEVC_SKIP_INFO 0x3136
++
+ const u32 h265_version = 201602101;
+ static u32 debug_mask = 0xffffffff;
+ static u32 log_mask;
+@@ -1366,6 +1370,17 @@ struct PIC_s {
+ 	unsigned short conf_win_top_offset;
+ 	unsigned short conf_win_bottom_offset;
+ 	unsigned short chroma_format_idc;
++
++	/* picture qos infomation*/
++	int max_qp;
++	int avg_qp;
++	int min_qp;
++	int max_skip;
++	int avg_skip;
++	int min_skip;
++	int max_mv;
++	int min_mv;
++	int avg_mv;
  } /*PIC_t */;
  
  #define MAX_TILE_COL_NUM    10
-@@ -5265,6 +5271,20 @@ static struct PIC_s *get_new_pic(struct hevc_state_s *hevc,
- 			hevc->bit_depth_chroma;
- 		new_pic->video_signal_type =
- 			hevc->video_signal_type;
+@@ -1687,6 +1702,9 @@ struct hevc_state_s {
+ 	u32 skip_first_nal;
+ 	bool is_swap;
+ 	bool is_4k;
 +
-+		new_pic->conformance_window_flag =
-+			hevc->param.p.conformance_window_flag;
-+		new_pic->conf_win_left_offset =
-+			hevc->param.p.conf_win_left_offset;
-+		new_pic->conf_win_right_offset =
-+			hevc->param.p.conf_win_right_offset;
-+		new_pic->conf_win_top_offset =
-+			hevc->param.p.conf_win_top_offset;
-+		new_pic->conf_win_bottom_offset =
-+			hevc->param.p.conf_win_bottom_offset;
-+		new_pic->chroma_format_idc =
-+				hevc->param.p.chroma_format_idc;
-+
- 		hevc_print(hevc, H265_DEBUG_BUFMGR_MORE,
- 			"%s: index %d, buf_idx %d, decode_idx %d, POC %d\n",
- 			__func__, new_pic->index,
-@@ -7755,12 +7775,12 @@ static int prepare_display_buf(struct hevc_state_s *hevc, struct PIC_s *pic)
- 		 *	need move below code to get_new_pic(),
- 		 *	hevc->xxx can only be used by current decoded pic
- 		 */
--		if (hevc->param.p.conformance_window_flag &&
-+		if (pic->conformance_window_flag &&
- 			(get_dbg_flag(hevc) &
- 				H265_DEBUG_IGNORE_CONFORMANCE_WINDOW) == 0) {
- 			unsigned int SubWidthC, SubHeightC;
++	int frameinfo_enable;
++	struct vframe_qos_s vframe_qos;
+ } /*hevc_stru_t */;
  
--			switch (hevc->param.p.chroma_format_idc) {
-+			switch (pic->chroma_format_idc) {
- 			case 1:
- 				SubWidthC = 2;
- 				SubHeightC = 2;
-@@ -7775,27 +7795,27 @@ static int prepare_display_buf(struct hevc_state_s *hevc, struct PIC_s *pic)
- 				break;
+ #ifdef AGAIN_HAS_THRESHOLD
+@@ -5798,6 +5816,431 @@ static void check_pic_decoded_error(struct hevc_state_s *hevc,
+ 	}
+ }
+ 
++/* only when we decoded one field or one frame,
++we can call this function to get qos info*/
++static void get_picture_qos_info(struct hevc_state_s *hevc)
++{
++	struct PIC_s *picture = hevc->cur_pic;
++
++/*
++#define DEBUG_QOS
++*/
++
++	if (!hevc->cur_pic)
++		return;
++
++	if (get_cpu_major_id() < AM_MESON_CPU_MAJOR_ID_G12A) {
++		unsigned char a[3];
++		unsigned char i, j, t;
++		unsigned long  data;
++
++		data = READ_VREG(HEVC_MV_INFO);
++		if (picture->slice_type == I_SLICE)
++			data = 0;
++		a[0] = data & 0xff;
++		a[1] = (data >> 8) & 0xff;
++		a[2] = (data >> 16) & 0xff;
++
++		for (i = 0; i < 3; i++)
++			for (j = i+1; j < 3; j++) {
++				if (a[j] < a[i]) {
++					t = a[j];
++					a[j] = a[i];
++					a[i] = t;
++				} else if (a[j] == a[i]) {
++					a[i]++;
++					t = a[j];
++					a[j] = a[i];
++					a[i] = t;
++				}
++			}
++		picture->max_mv = a[2];
++		picture->avg_mv = a[1];
++		picture->min_mv = a[0];
++#ifdef DEBUG_QOS
++		hevc_print(hevc, 0, "mv data %x  a[0]= %x a[1]= %x a[2]= %x\n",
++			data, a[0], a[1], a[2]);
++#endif
++
++		data = READ_VREG(HEVC_QP_INFO);
++		a[0] = data & 0x1f;
++		a[1] = (data >> 8) & 0x3f;
++		a[2] = (data >> 16) & 0x7f;
++
++		for (i = 0; i < 3; i++)
++			for (j = i+1; j < 3; j++) {
++				if (a[j] < a[i]) {
++					t = a[j];
++					a[j] = a[i];
++					a[i] = t;
++				} else if (a[j] == a[i]) {
++					a[i]++;
++					t = a[j];
++					a[j] = a[i];
++					a[i] = t;
++				}
++			}
++		picture->max_qp = a[2];
++		picture->avg_qp = a[1];
++		picture->min_qp = a[0];
++#ifdef DEBUG_QOS
++		hevc_print(hevc, 0, "qp data %x  a[0]= %x a[1]= %x a[2]= %x\n",
++			data, a[0], a[1], a[2]);
++#endif
++
++		data = READ_VREG(HEVC_SKIP_INFO);
++		a[0] = data & 0x1f;
++		a[1] = (data >> 8) & 0x3f;
++		a[2] = (data >> 16) & 0x7f;
++
++		for (i = 0; i < 3; i++)
++			for (j = i+1; j < 3; j++) {
++				if (a[j] < a[i]) {
++					t = a[j];
++					a[j] = a[i];
++					a[i] = t;
++				} else if (a[j] == a[i]) {
++					a[i]++;
++					t = a[j];
++					a[j] = a[i];
++					a[i] = t;
++				}
++			}
++		picture->max_skip = a[2];
++		picture->avg_skip = a[1];
++		picture->min_skip = a[0];
++
++#ifdef DEBUG_QOS
++		hevc_print(hevc, 0,
++			"skip data %x  a[0]= %x a[1]= %x a[2]= %x\n",
++			data, a[0], a[1], a[2]);
++#endif
++	} else {
++		uint32_t blk88_y_count;
++		uint32_t blk88_c_count;
++		uint32_t blk22_mv_count;
++		uint32_t rdata32;
++		int32_t mv_hi;
++		int32_t mv_lo;
++		uint32_t rdata32_l;
++		uint32_t mvx_L0_hi;
++		uint32_t mvy_L0_hi;
++		uint32_t mvx_L1_hi;
++		uint32_t mvy_L1_hi;
++		int64_t value;
++		uint64_t temp_value;
++#ifdef DEBUG_QOS
++		int pic_number = picture->POC;
++#endif
++
++		picture->max_mv = 0;
++		picture->avg_mv = 0;
++		picture->min_mv = 0;
++
++		picture->max_skip = 0;
++		picture->avg_skip = 0;
++		picture->min_skip = 0;
++
++		picture->max_qp = 0;
++		picture->avg_qp = 0;
++		picture->min_qp = 0;
++
++
++
++#ifdef DEBUG_QOS
++		hevc_print(hevc, 0, "slice_type:%d, poc:%d\n",
++			picture->slice_type,
++			picture->POC);
++#endif
++		/* set rd_idx to 0 */
++	    WRITE_VREG(HEVC_PIC_QUALITY_CTRL, 0);
++
++	    blk88_y_count = READ_VREG(HEVC_PIC_QUALITY_DATA);
++	    if (blk88_y_count == 0) {
++#ifdef DEBUG_QOS
++			hevc_print(hevc, 0,
++				"[Picture %d Quality] NO Data yet.\n",
++				pic_number);
++#endif
++			/* reset all counts */
++			WRITE_VREG(HEVC_PIC_QUALITY_CTRL, (1<<8));
++			return;
++	    }
++		/* qp_y_sum */
++	    rdata32 = READ_VREG(HEVC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	    hevc_print(hevc, 0,
++			"[Picture %d Quality] Y QP AVG : %d (%d/%d)\n",
++			pic_number, rdata32/blk88_y_count,
++			rdata32, blk88_y_count);
++#endif
++		picture->avg_qp = rdata32/blk88_y_count;
++		/* intra_y_count */
++	    rdata32 = READ_VREG(HEVC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	    hevc_print(hevc, 0,
++			"[Picture %d Quality] Y intra rate : %d%c (%d)\n",
++			pic_number, rdata32*100/blk88_y_count,
++			'%', rdata32);
++#endif
++		/* skipped_y_count */
++	    rdata32 = READ_VREG(HEVC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	    hevc_print(hevc, 0,
++			"[Picture %d Quality] Y skipped rate : %d%c (%d)\n",
++			pic_number, rdata32*100/blk88_y_count,
++			'%', rdata32);
++#endif
++		picture->avg_skip = rdata32*100/blk88_y_count;
++		/* coeff_non_zero_y_count */
++	    rdata32 = READ_VREG(HEVC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	    hevc_print(hevc, 0,
++			"[Picture %d Quality] Y ZERO_Coeff rate : %d%c (%d)\n",
++			pic_number, (100 - rdata32*100/(blk88_y_count*1)),
++			'%', rdata32);
++#endif
++		/* blk66_c_count */
++	    blk88_c_count = READ_VREG(HEVC_PIC_QUALITY_DATA);
++	    if (blk88_c_count == 0) {
++#ifdef DEBUG_QOS
++			hevc_print(hevc, 0,
++				"[Picture %d Quality] NO Data yet.\n",
++				pic_number);
++#endif
++			/* reset all counts */
++			WRITE_VREG(HEVC_PIC_QUALITY_CTRL, (1<<8));
++			return;
++	    }
++		/* qp_c_sum */
++	    rdata32 = READ_VREG(HEVC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	    hevc_print(hevc, 0,
++			"[Picture %d Quality] C QP AVG : %d (%d/%d)\n",
++			pic_number, rdata32/blk88_c_count,
++			rdata32, blk88_c_count);
++#endif
++		/* intra_c_count */
++	    rdata32 = READ_VREG(HEVC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	    hevc_print(hevc, 0,
++			"[Picture %d Quality] C intra rate : %d%c (%d)\n",
++			pic_number, rdata32*100/blk88_c_count,
++			'%', rdata32);
++#endif
++		/* skipped_cu_c_count */
++	    rdata32 = READ_VREG(HEVC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	    hevc_print(hevc, 0,
++			"[Picture %d Quality] C skipped rate : %d%c (%d)\n",
++			pic_number, rdata32*100/blk88_c_count,
++			'%', rdata32);
++#endif
++		/* coeff_non_zero_c_count */
++	    rdata32 = READ_VREG(HEVC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	    hevc_print(hevc, 0,
++			"[Picture %d Quality] C ZERO_Coeff rate : %d%c (%d)\n",
++			pic_number, (100 - rdata32*100/(blk88_c_count*1)),
++			'%', rdata32);
++#endif
++
++		/* 1'h0, qp_c_max[6:0], 1'h0, qp_c_min[6:0],
++		1'h0, qp_y_max[6:0], 1'h0, qp_y_min[6:0] */
++	    rdata32 = READ_VREG(HEVC_PIC_QUALITY_DATA);
++#ifdef DEBUG_QOS
++	    hevc_print(hevc, 0, "[Picture %d Quality] Y QP min : %d\n",
++			pic_number, (rdata32>>0)&0xff);
++#endif
++		picture->min_qp = (rdata32>>0)&0xff;
++
++#ifdef DEBUG_QOS
++	    hevc_print(hevc, 0, "[Picture %d Quality] Y QP max : %d\n",
++			pic_number, (rdata32>>8)&0xff);
++#endif
++		picture->max_qp = (rdata32>>8)&0xff;
++
++#ifdef DEBUG_QOS
++	    hevc_print(hevc, 0, "[Picture %d Quality] C QP min : %d\n",
++			pic_number, (rdata32>>16)&0xff);
++	    hevc_print(hevc, 0, "[Picture %d Quality] C QP max : %d\n",
++			pic_number, (rdata32>>24)&0xff);
++#endif
++
++		/* blk22_mv_count */
++	    blk22_mv_count = READ_VREG(HEVC_PIC_QUALITY_DATA);
++	    if (blk22_mv_count == 0) {
++#ifdef DEBUG_QOS
++			hevc_print(hevc, 0,
++				"[Picture %d Quality] NO MV Data yet.\n",
++				pic_number);
++#endif
++			/* reset all counts */
++			WRITE_VREG(HEVC_PIC_QUALITY_CTRL, (1<<8));
++			return;
++	    }
++		/* mvy_L1_count[39:32], mvx_L1_count[39:32],
++		mvy_L0_count[39:32], mvx_L0_count[39:32] */
++	    rdata32 = READ_VREG(HEVC_PIC_QUALITY_DATA);
++	    /* should all be 0x00 or 0xff */
++#ifdef DEBUG_QOS
++	    hevc_print(hevc, 0,
++			"[Picture %d Quality] MV AVG High Bits: 0x%X\n",
++			pic_number, rdata32);
++#endif
++	    mvx_L0_hi = ((rdata32>>0)&0xff);
++	    mvy_L0_hi = ((rdata32>>8)&0xff);
++	    mvx_L1_hi = ((rdata32>>16)&0xff);
++	    mvy_L1_hi = ((rdata32>>24)&0xff);
++
++		/* mvx_L0_count[31:0] */
++	    rdata32_l = READ_VREG(HEVC_PIC_QUALITY_DATA);
++		temp_value = mvx_L0_hi;
++		temp_value = (temp_value << 32) | rdata32_l;
++
++		if (mvx_L0_hi & 0x80)
++			value = 0xFFFFFFF000000000 | temp_value;
++		else
++			value = temp_value;
++		 value = div_s64(value, blk22_mv_count);
++#ifdef DEBUG_QOS
++		hevc_print(hevc, 0,
++			"[Picture %d Quality] MVX_L0 AVG : %d (%lld/%d)\n",
++			pic_number, (int)value,
++			value, blk22_mv_count);
++#endif
++		picture->avg_mv = value;
++
++		/* mvy_L0_count[31:0] */
++	    rdata32_l = READ_VREG(HEVC_PIC_QUALITY_DATA);
++		temp_value = mvy_L0_hi;
++		temp_value = (temp_value << 32) | rdata32_l;
++
++		if (mvy_L0_hi & 0x80)
++			value = 0xFFFFFFF000000000 | temp_value;
++		else
++			value = temp_value;
++#ifdef DEBUG_QOS
++	    hevc_print(hevc, 0,
++			"[Picture %d Quality] MVY_L0 AVG : %d (%lld/%d)\n",
++			pic_number, rdata32_l/blk22_mv_count,
++			value, blk22_mv_count);
++#endif
++
++		/* mvx_L1_count[31:0] */
++	    rdata32_l = READ_VREG(HEVC_PIC_QUALITY_DATA);
++		temp_value = mvx_L1_hi;
++		temp_value = (temp_value << 32) | rdata32_l;
++		if (mvx_L1_hi & 0x80)
++			value = 0xFFFFFFF000000000 | temp_value;
++		else
++			value = temp_value;
++#ifdef DEBUG_QOS
++	    hevc_print(hevc, 0,
++			"[Picture %d Quality] MVX_L1 AVG : %d (%lld/%d)\n",
++			pic_number, rdata32_l/blk22_mv_count,
++			value, blk22_mv_count);
++#endif
++
++		/* mvy_L1_count[31:0] */
++	    rdata32_l = READ_VREG(HEVC_PIC_QUALITY_DATA);
++		temp_value = mvy_L1_hi;
++		temp_value = (temp_value << 32) | rdata32_l;
++		if (mvy_L1_hi & 0x80)
++			value = 0xFFFFFFF000000000 | temp_value;
++		else
++			value = temp_value;
++#ifdef DEBUG_QOS
++	    hevc_print(hevc, 0,
++			"[Picture %d Quality] MVY_L1 AVG : %d (%lld/%d)\n",
++			pic_number, rdata32_l/blk22_mv_count,
++			value, blk22_mv_count);
++#endif
++
++		/* {mvx_L0_max, mvx_L0_min} // format : {sign, abs[14:0]}  */
++	    rdata32 = READ_VREG(HEVC_PIC_QUALITY_DATA);
++	    mv_hi = (rdata32>>16)&0xffff;
++	    if (mv_hi & 0x8000)
++			mv_hi = 0x8000 - mv_hi;
++#ifdef DEBUG_QOS
++	    hevc_print(hevc, 0, "[Picture %d Quality] MVX_L0 MAX : %d\n",
++			pic_number, mv_hi);
++#endif
++		picture->max_mv = mv_hi;
++
++	    mv_lo = (rdata32>>0)&0xffff;
++	    if (mv_lo & 0x8000)
++			mv_lo = 0x8000 - mv_lo;
++#ifdef DEBUG_QOS
++	    hevc_print(hevc, 0, "[Picture %d Quality] MVX_L0 MIN : %d\n",
++			pic_number, mv_lo);
++#endif
++		picture->min_mv = mv_lo;
++
++		/* {mvy_L0_max, mvy_L0_min} */
++	    rdata32 = READ_VREG(HEVC_PIC_QUALITY_DATA);
++	    mv_hi = (rdata32>>16)&0xffff;
++	    if (mv_hi & 0x8000)
++			mv_hi = 0x8000 - mv_hi;
++#ifdef DEBUG_QOS
++	    hevc_print(hevc, 0, "[Picture %d Quality] MVY_L0 MAX : %d\n",
++			pic_number, mv_hi);
++#endif
++
++	    mv_lo = (rdata32>>0)&0xffff;
++	    if (mv_lo & 0x8000)
++			mv_lo = 0x8000 - mv_lo;
++#ifdef DEBUG_QOS
++	    hevc_print(hevc, 0, "[Picture %d Quality] MVY_L0 MIN : %d\n",
++			pic_number, mv_lo);
++#endif
++
++		/* {mvx_L1_max, mvx_L1_min} */
++	    rdata32 = READ_VREG(HEVC_PIC_QUALITY_DATA);
++	    mv_hi = (rdata32>>16)&0xffff;
++	    if (mv_hi & 0x8000)
++			mv_hi = 0x8000 - mv_hi;
++#ifdef DEBUG_QOS
++	    hevc_print(hevc, 0, "[Picture %d Quality] MVX_L1 MAX : %d\n",
++			pic_number, mv_hi);
++#endif
++
++	    mv_lo = (rdata32>>0)&0xffff;
++	    if (mv_lo & 0x8000)
++			mv_lo = 0x8000 - mv_lo;
++#ifdef DEBUG_QOS
++	    hevc_print(hevc, 0, "[Picture %d Quality] MVX_L1 MIN : %d\n",
++			pic_number, mv_lo);
++#endif
++
++		/* {mvy_L1_max, mvy_L1_min} */
++	    rdata32 = READ_VREG(HEVC_PIC_QUALITY_DATA);
++	    mv_hi = (rdata32>>16)&0xffff;
++	    if (mv_hi & 0x8000)
++			mv_hi = 0x8000 - mv_hi;
++#ifdef DEBUG_QOS
++	    hevc_print(hevc, 0, "[Picture %d Quality] MVY_L1 MAX : %d\n",
++			pic_number, mv_hi);
++#endif
++	    mv_lo = (rdata32>>0)&0xffff;
++	    if (mv_lo & 0x8000)
++			mv_lo = 0x8000 - mv_lo;
++#ifdef DEBUG_QOS
++	    hevc_print(hevc, 0, "[Picture %d Quality] MVY_L1 MIN : %d\n",
++			pic_number, mv_lo);
++#endif
++
++	    rdata32 = READ_VREG(HEVC_PIC_QUALITY_CTRL);
++#ifdef DEBUG_QOS
++	    hevc_print(hevc, 0,
++			"[Picture %d Quality] After Read : VDEC_PIC_QUALITY_CTRL : 0x%x\n",
++			pic_number, rdata32);
++#endif
++		/* reset all counts */
++	    WRITE_VREG(HEVC_PIC_QUALITY_CTRL, (1<<8));
++	}
++}
++
+ static int hevc_slice_segment_header_process(struct hevc_state_s *hevc,
+ 		union param_u *rpm_param,
+ 		int decode_pic_begin)
+@@ -6057,6 +6500,10 @@ static int hevc_slice_segment_header_process(struct hevc_state_s *hevc,
+ 					hevc->pic_list_init_flag = 3;
+ 				}
  			}
- 			 vf->width -= SubWidthC *
--				(hevc->param.p.conf_win_left_offset +
--				hevc->param.p.conf_win_right_offset);
-+				(pic->conf_win_left_offset +
-+				pic->conf_win_right_offset);
- 			 vf->height -= SubHeightC *
--				(hevc->param.p.conf_win_top_offset +
--				hevc->param.p.conf_win_bottom_offset);
-+				(pic->conf_win_top_offset +
-+				pic->conf_win_bottom_offset);
++			if (!hevc->m_ins_flag) {
++				if (hevc->cur_pic)
++					get_picture_qos_info(hevc);
++			}
+ 			hevc->first_pic_after_recover = 0;
+ 			if (get_dbg_flag(hevc) & H265_DEBUG_BUFMGR_MORE)
+ 				dump_pic_list(hevc);
+@@ -7527,6 +7974,65 @@ static void update_vf_memhandle(struct hevc_state_s *hevc,
+ 	}
+ 	return;
+ }
++
++static void fill_frame_info(struct hevc_state_s *hevc,
++	struct PIC_s *pic, unsigned int framesize, unsigned int pts)
++{
++	struct vframe_qos_s *vframe_qos = &hevc->vframe_qos;
++	if (hevc->m_nalUnitType == NAL_UNIT_CODED_SLICE_IDR)
++		vframe_qos->type = 4;
++	else if (pic->slice_type == I_SLICE)
++		vframe_qos->type = 1;
++	else if (pic->slice_type == P_SLICE)
++		vframe_qos->type = 2;
++	else if (pic->slice_type == B_SLICE)
++		vframe_qos->type = 3;
++/*
++#define SHOW_QOS_INFO
++*/
++	vframe_qos->size = framesize;
++	vframe_qos->pts = pts;
++#ifdef SHOW_QOS_INFO
++	hevc_print(hevc, 0, "slice:%d, poc:%d\n", pic->slice_type, pic->POC);
++#endif
++
++
++	vframe_qos->max_mv = pic->max_mv;
++	vframe_qos->avg_mv = pic->avg_mv;
++	vframe_qos->min_mv = pic->min_mv;
++#ifdef SHOW_QOS_INFO
++	hevc_print(hevc, 0, "mv: max:%d,  avg:%d, min:%d\n",
++			vframe_qos->max_mv,
++			vframe_qos->avg_mv,
++			vframe_qos->min_mv);
++#endif
++
++	vframe_qos->max_qp = pic->max_qp;
++	vframe_qos->avg_qp = pic->avg_qp;
++	vframe_qos->min_qp = pic->min_qp;
++#ifdef SHOW_QOS_INFO
++	hevc_print(hevc, 0, "qp: max:%d,  avg:%d, min:%d\n",
++			vframe_qos->max_qp,
++			vframe_qos->avg_qp,
++			vframe_qos->min_qp);
++#endif
++
++	vframe_qos->max_skip = pic->max_skip;
++	vframe_qos->avg_skip = pic->avg_skip;
++	vframe_qos->min_skip = pic->min_skip;
++#ifdef SHOW_QOS_INFO
++	hevc_print(hevc, 0, "skip: max:%d,	avg:%d, min:%d\n",
++			vframe_qos->max_skip,
++			vframe_qos->avg_skip,
++			vframe_qos->min_skip);
++#endif
++
++	vframe_qos->num++;
++
++	if (hevc->frameinfo_enable)
++		vdec_fill_frame_info(vframe_qos, 1);
++}
++
+ static int prepare_display_buf(struct hevc_state_s *hevc, struct PIC_s *pic)
+ {
+ #ifdef CONFIG_AMLOGIC_MEDIA_ENHANCEMENT_DOLBYVISION
+@@ -7535,6 +8041,8 @@ static int prepare_display_buf(struct hevc_state_s *hevc, struct PIC_s *pic)
+ 	struct vframe_s *vf = NULL;
+ 	int stream_offset = pic->stream_offset;
+ 	unsigned short slice_type = pic->slice_type;
++	u32 frame_size;
++
+ 	if (force_disp_pic_index & 0x100) {
+ 		/*recycle directly*/
+ 		pic->output_ready = 0;
+@@ -7568,7 +8076,8 @@ static int prepare_display_buf(struct hevc_state_s *hevc, struct PIC_s *pic)
+ 			"call pts_lookup_offset_us64(0x%x)\n",
+ 			stream_offset);
+ 		if (pts_lookup_offset_us64
+-			(PTS_TYPE_VIDEO, stream_offset, &vf->pts, 0,
++			(PTS_TYPE_VIDEO, stream_offset, &vf->pts,
++			&frame_size, 0,
+ 			 &vf->pts_us64) != 0) {
+ #ifdef DEBUG_PTS
+ 			hevc->pts_missed++;
+@@ -7593,6 +8102,8 @@ static int prepare_display_buf(struct hevc_state_s *hevc, struct PIC_s *pic)
+ 		if (pts_unstable && (hevc->frame_dur > 0))
+ 			hevc->pts_mode = PTS_NONE_REF_USE_DURATION;
  
- 			 vf->compWidth -= SubWidthC *
--				(hevc->param.p.conf_win_left_offset +
--				hevc->param.p.conf_win_right_offset);
-+				(pic->conf_win_left_offset +
-+				pic->conf_win_right_offset);
- 			 vf->compHeight -= SubHeightC *
--				(hevc->param.p.conf_win_top_offset +
--				hevc->param.p.conf_win_bottom_offset);
-+				(pic->conf_win_top_offset +
-+				pic->conf_win_bottom_offset);
++		fill_frame_info(hevc, pic, frame_size, vf->pts);
++
+ 		if ((hevc->pts_mode == PTS_NORMAL) && (vf->pts != 0)
+ 			&& hevc->get_frame_dur) {
+ 			int pts_diff = (int)vf->pts - hevc->last_lookup_pts;
+@@ -8582,6 +9093,7 @@ pic_done:
+ 			}
  
- 			if (get_dbg_flag(hevc) & H265_DEBUG_BUFMGR)
- 				hevc_print(hevc, 0,
- 					"conformance_window %d, %d, %d, %d, %d => cropped width %d, height %d com_w %d com_h %d\n",
--					hevc->param.p.chroma_format_idc,
--					hevc->param.p.conf_win_left_offset,
--					hevc->param.p.conf_win_right_offset,
--					hevc->param.p.conf_win_top_offset,
--					hevc->param.p.conf_win_bottom_offset,
-+					pic->chroma_format_idc,
-+					pic->conf_win_left_offset,
-+					pic->conf_win_right_offset,
-+					pic->conf_win_top_offset,
-+					pic->conf_win_bottom_offset,
- 					vf->width, vf->height, vf->compWidth, vf->compHeight);
+ 			read_decode_info(hevc);
++			get_picture_qos_info(hevc);
+ #ifdef CONFIG_AMLOGIC_MEDIA_ENHANCEMENT_DOLBYVISION
+ 			hevc->start_parser_type = 0;
+ 			hevc->switch_dvlayer_flag = 0;
+@@ -11279,6 +11791,7 @@ static int amvdec_h265_probe(struct platform_device *pdev)
+ 	hevc->uninit_list = 0;
+ 	hevc->fatal_error = 0;
+ 	hevc->show_frame_num = 0;
++	hevc->frameinfo_enable = 1;
+ #ifdef MULTI_INSTANCE_SUPPORT
+ 	hevc->platform_dev = pdev;
+ 	platform_set_drvdata(pdev, pdata);
+@@ -11603,10 +12116,12 @@ static int ammvdec_h265_probe(struct platform_device *pdev)
+ 	hevc->index = pdev->id;
+ 	hevc->m_ins_flag = 1;
+ 
+-	if (pdata->use_vfm_path)
++	if (pdata->use_vfm_path) {
+ 		snprintf(pdata->vf_provider_name,
+ 		VDEC_PROVIDER_NAME_SIZE,
+ 			VFM_DEC_PROVIDER_NAME);
++		hevc->frameinfo_enable = 1;
++	}
+ #ifdef CONFIG_AMLOGIC_MEDIA_ENHANCEMENT_DOLBYVISION
+ 	else if (vdec_dual(pdata)) {
+ 		struct hevc_state_s *hevc_pair = NULL;
+diff --git a/drivers/frame_provider/decoder/mjpeg/vmjpeg.c b/drivers/frame_provider/decoder/mjpeg/vmjpeg.c
+index 4614789..1c69a5a 100644
+--- a/drivers/frame_provider/decoder/mjpeg/vmjpeg.c
++++ b/drivers/frame_provider/decoder/mjpeg/vmjpeg.c
+@@ -170,6 +170,7 @@ static irqreturn_t vmjpeg_isr(int irq, void *dev_id)
+ 	u32 reg, offset, pts, pts_valid = 0;
+ 	struct vframe_s *vf = NULL;
+ 	u64 pts_us64;
++	u32 frame_size;
+ 
+ 	WRITE_VREG(ASSIST_MBOX1_CLR_REG, 1);
+ 
+@@ -179,7 +180,8 @@ static irqreturn_t vmjpeg_isr(int irq, void *dev_id)
+ 		offset = READ_VREG(MREG_FRAME_OFFSET);
+ 
+ 		if (pts_lookup_offset_us64
+-			(PTS_TYPE_VIDEO, offset, &pts, 0, &pts_us64) == 0)
++			(PTS_TYPE_VIDEO, offset, &pts,
++			&frame_size, 0, &pts_us64) == 0)
+ 			pts_valid = 1;
+ 
+ 		if ((reg & PICINFO_INTERLACE) == 0) {
+diff --git a/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c b/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c
+index c3ed460..4c5de2a 100644
+--- a/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c
++++ b/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c
+@@ -247,6 +247,7 @@ static irqreturn_t vmjpeg_isr(struct vdec_s *vdec, int irq)
+ 	struct vframe_s *vf = NULL;
+ 	u32 index, offset = 0, pts;
+ 	u64 pts_us64;
++	u32 frame_size;
+ 
+ 	if (!hw)
+ 		return IRQ_HANDLED;
+@@ -290,7 +291,8 @@ static irqreturn_t vmjpeg_isr(struct vdec_s *vdec, int irq)
+ 	} else {
+ 		offset = READ_VREG(MREG_FRAME_OFFSET);
+ 		if (pts_lookup_offset_us64
+-			(PTS_TYPE_VIDEO, offset, &pts, 3000,
++			(PTS_TYPE_VIDEO, offset, &pts,
++			&frame_size, 3000,
+ 			&pts_us64) == 0) {
+ 			vf->pts = pts;
+ 			vf->pts_us64 = pts_us64;
+diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
+index ea5b991..3ba30e0 100644
+--- a/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
++++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
+@@ -864,6 +864,7 @@ static irqreturn_t vmpeg12_isr(int irq, void *dev_id)
+ 	u32 reg, info, seqinfo, offset, pts, pts_valid = 0;
+ 	struct vframe_s *vf;
+ 	u64 pts_us64 = 0;
++	u32 frame_size;
+ 
+ 	WRITE_VREG(ASSIST_MBOX1_CLR_REG, 1);
+ 
+@@ -880,7 +881,8 @@ static irqreturn_t vmpeg12_isr(int irq, void *dev_id)
+ 			first_i_frame_ready = 1;
+ 
+ 		if ((pts_lookup_offset_us64
+-			 (PTS_TYPE_VIDEO, offset, &pts, 0, &pts_us64) == 0)
++			 (PTS_TYPE_VIDEO, offset, &pts,
++			 &frame_size, 0, &pts_us64) == 0)
+ 			&& (((info & PICINFO_TYPE_MASK) == PICINFO_TYPE_I)
+ 				|| ((info & PICINFO_TYPE_MASK) ==
+ 					PICINFO_TYPE_P)))
+diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
+index 2af9c3e..b5d1ef4 100644
+--- a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
++++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
+@@ -1209,6 +1209,7 @@ static irqreturn_t vmpeg12_isr_thread_fn(struct vdec_s *vdec, int irq)
+ 	struct vframe_s *vf = NULL;
+ 	u32 index;
+ 	u64 pts_us64 = 0;
++	u32 frame_size;
+ 	struct vdec_mpeg12_hw_s *hw =
+ 	(struct vdec_mpeg12_hw_s *)(vdec->private);
+ 
+@@ -1290,7 +1291,8 @@ static irqreturn_t vmpeg12_isr_thread_fn(struct vdec_s *vdec, int irq)
+ 			hw->chunk->size, hw->chunk->offset);
+ 		} else {
+ 				if (pts_lookup_offset_us64(PTS_TYPE_VIDEO,
+-				offset, &pts, 0, &pts_us64) == 0) {
++				offset, &pts, &frame_size,
++				0, &pts_us64) == 0) {
+ 					hw->pts_valid[index] = true;
+ 					hw->pts[index] = pts;
+ 					hw->pts64[index] = pts_us64;
+diff --git a/drivers/frame_provider/decoder/mpeg4/vmpeg4.c b/drivers/frame_provider/decoder/mpeg4/vmpeg4.c
+index e93ed66..dd9c089 100644
+--- a/drivers/frame_provider/decoder/mpeg4/vmpeg4.c
++++ b/drivers/frame_provider/decoder/mpeg4/vmpeg4.c
+@@ -293,6 +293,7 @@ static irqreturn_t vmpeg4_isr(int irq, void *dev_id)
+ 	u32 pts, pts_valid = 0, offset = 0;
+ 	u64 pts_us64 = 0;
+ 	u32 rate, vop_time_inc, repeat_cnt, duration = 3200;
++	u32 frame_size;
+ 
+ 	reg = READ_VREG(MREG_BUFFEROUT);
+ 
+@@ -385,7 +386,8 @@ static irqreturn_t vmpeg4_isr(int irq, void *dev_id)
+ 			 *263 may need small?
+ 			 */
+ 			if (pts_lookup_offset_us64
+-				(PTS_TYPE_VIDEO, offset, &pts, 3000,
++				(PTS_TYPE_VIDEO, offset, &pts,
++				&frame_size, 3000,
+ 				 &pts_us64) == 0) {
+ 				pts_valid = 1;
+ 				last_anch_pts = pts;
+diff --git a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
+index 06393ea..1c96f22 100644
+--- a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
++++ b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
+@@ -438,6 +438,7 @@ static irqreturn_t vmpeg4_isr_thread_fn(struct vdec_s *vdec, int irq)
+ 	u32 pts, offset = 0;
+ 	bool pts_valid = false;
+ 	u64 pts_us64 = 0;
++	u32 frame_size;
+ 	u32 time_increment_resolution, fixed_vop_rate, vop_time_inc;
+ 	u32 repeat_cnt, duration = 3200;
+ 	struct vdec_mpeg4_hw_s *hw = (struct vdec_mpeg4_hw_s *)(vdec->private);
+@@ -576,7 +577,8 @@ static irqreturn_t vmpeg4_isr_thread_fn(struct vdec_s *vdec, int irq)
+ 				hw->pts64[index] = hw->chunk->pts64;
+ 			} else {
+ 				if (pts_lookup_offset_us64
+-					(PTS_TYPE_VIDEO, offset, &pts, 3000,
++					(PTS_TYPE_VIDEO, offset, &pts,
++					&frame_size, 3000,
+ 					&pts_us64) == 0) {
+ 					hw->pts_valid[index] = true;
+ 					hw->pts[index] = pts;
+diff --git a/drivers/frame_provider/decoder/utils/vdec.c b/drivers/frame_provider/decoder/utils/vdec.c
+index f62b76a..6fd76a7 100644
+--- a/drivers/frame_provider/decoder/utils/vdec.c
++++ b/drivers/frame_provider/decoder/utils/vdec.c
+@@ -100,6 +100,18 @@ static DEFINE_SPINLOCK(vdec_spin_lock);
+ #define HEVC_TEST_LIMIT 100
+ #define GXBB_REV_A_MINOR 0xA
+ 
++#define PRINT_FRAME_INFO 1
++#define DISABLE_FRAME_INFO 2
++
++static int frameinfo_flag = 0;
++//static int path_debug = 0;
++
++static struct vframe_qos_s *frame_info_buf_in = NULL;
++static struct vframe_qos_s *frame_info_buf_out = NULL;
++static int frame_qos_wr = 0;
++static int frame_qos_rd = 0;
++int decode_underflow = 0;
++
+ #define CANVAS_MAX_SIZE (AMVDEC_CANVAS_MAX1 - AMVDEC_CANVAS_START_INDEX + 1 + AMVDEC_CANVAS_MAX2 + 1)
+ 
+ struct am_reg {
+@@ -1977,7 +1989,25 @@ s32 vdec_init(struct vdec_s *vdec, int is_4k)
+ 		vdec->sys_info->height);
+ 	/* vdec is now ready to be active */
+ 	vdec_set_status(vdec, VDEC_STATUS_DISCONNECTED);
++	if (p->use_vfm_path) {
++		frame_info_buf_in = (struct vframe_qos_s *)
++			kmalloc(QOS_FRAME_NUM*sizeof(struct vframe_qos_s), GFP_KERNEL);
++		if (!frame_info_buf_in)
++			pr_err("kmalloc: frame_info_buf_in failed\n");
++		else
++			memset(frame_info_buf_in, 0,
++					QOS_FRAME_NUM*sizeof(struct vframe_qos_s));
+ 
++		frame_info_buf_out = (struct vframe_qos_s *)
++			kmalloc(QOS_FRAME_NUM*sizeof(struct vframe_qos_s), GFP_KERNEL);
++		if (!frame_info_buf_out)
++			pr_err("kmalloc: frame_info_buf_out failed\n");
++		else
++			memset(frame_info_buf_out, 0,
++					QOS_FRAME_NUM*sizeof(struct vframe_qos_s));
++		frame_qos_wr = 0;
++		frame_qos_rd = 0;
++	}
+ 	return 0;
+ 
+ error:
+@@ -2038,6 +2068,14 @@ void vdec_release(struct vdec_s *vdec)
+ 	platform_device_unregister(vdec->dev);
+ 	pr_debug("vdec_release instance %p, total %d\n", vdec,
+ 		atomic_read(&vdec_core->vdec_nr));
++	if (vdec->use_vfm_path) {
++		kfree(frame_info_buf_in);
++		frame_info_buf_in = NULL;
++		kfree(frame_info_buf_out);
++		frame_info_buf_out = NULL;
++		frame_qos_wr = 0;
++		frame_qos_rd = 0;
++	}
+ 	vdec_destroy(vdec);
+ 
+ 	mutex_lock(&vdec_mutex);
+@@ -4431,6 +4469,105 @@ static int __init vdec_mem_setup(struct reserved_mem *rmem)
+ 	return 0;
+ }
+ 
++void vdec_fill_frame_info(struct vframe_qos_s *vframe_qos, int debug)
++{
++	if (frame_info_buf_in == NULL) {
++		pr_info("error,frame_info_buf_in is null\n");
++		return;
++	}
++	if (frame_info_buf_out == NULL) {
++		pr_info("error,frame_info_buf_out is null\n");
++		return;
++	}
++	if (frame_qos_wr >= QOS_FRAME_NUM)
++		frame_qos_wr = 0;
++
++	if (frame_qos_wr >= QOS_FRAME_NUM ||
++			frame_qos_wr < 0) {
++		pr_info("error,index :%d is error\n", frame_qos_wr);
++		return;
++	}
++	if (frameinfo_flag == DISABLE_FRAME_INFO)
++		return;
++
++	if (frameinfo_flag == PRINT_FRAME_INFO) {
++		pr_info("num %d size %d pts %d\n",
++				vframe_qos->num,
++				vframe_qos->size,
++				vframe_qos->pts);
++		pr_info("mv min_mv %d avg_mv %d max_mv %d\n",
++				vframe_qos->min_mv,
++				vframe_qos->avg_mv,
++				vframe_qos->max_mv);
++		pr_info("qp min_qp %d avg_qp %d max_qp %d\n",
++				vframe_qos->min_qp,
++				vframe_qos->avg_qp,
++				vframe_qos->max_qp);
++		pr_info("skip min_skip %d avg_skip %d max_skip %d\n",
++				vframe_qos->min_skip,
++				vframe_qos->avg_skip,
++				vframe_qos->max_skip);
++	}
++	memcpy(&frame_info_buf_in[frame_qos_wr++],
++			vframe_qos, sizeof(struct vframe_qos_s));
++	if (frame_qos_wr >= QOS_FRAME_NUM)
++		frame_qos_wr = 0;
++
++	/*pr_info("frame_qos_wr:%d\n", frame_qos_wr);*/
++
++}
++EXPORT_SYMBOL(vdec_fill_frame_info);
++
++struct vframe_qos_s *vdec_get_qos_info(void)
++{
++	int write_count = 0;
++	int qos_wr = frame_qos_wr;
++
++	if (frame_info_buf_in == NULL) {
++		pr_info("error,frame_info_buf_in is null\n");
++		return NULL;
++	}
++	if (frame_info_buf_out == NULL) {
++		pr_info("error,frame_info_buf_out is null\n");
++		return NULL;
++	}
++
++
++	memset(frame_info_buf_out, 0,
++			QOS_FRAME_NUM*sizeof(struct vframe_qos_s));
++	if (frame_qos_rd > qos_wr) {
++		write_count = QOS_FRAME_NUM - frame_qos_rd;
++		if (write_count > 0 && write_count <= QOS_FRAME_NUM) {
++			memcpy(frame_info_buf_out, &frame_info_buf_in[0],
++				write_count*sizeof(struct vframe_qos_s));
++			if ((write_count + qos_wr) <= QOS_FRAME_NUM)
++				memcpy(&frame_info_buf_out[write_count], frame_info_buf_in,
++					qos_wr*sizeof(struct vframe_qos_s));
++			else
++				pr_info("get_qos_info:%d,out of range\n", __LINE__);
++		} else
++			pr_info("get_qos_info:%d,out of range\n", __LINE__);
++	} else if (frame_qos_rd < qos_wr) {
++		write_count =  qos_wr - frame_qos_rd;
++		if (write_count > 0 && write_count < QOS_FRAME_NUM)
++			memcpy(frame_info_buf_out, &frame_info_buf_in[frame_qos_rd],
++				(write_count)*sizeof(struct vframe_qos_s));
++		else
++			pr_info("get_qos_info:%d, out of range\n", __LINE__);
++	}
++	/*
++	   pr_info("cnt:%d,size:%d,num:%d,rd:%d,wr:%d\n",
++	   wirte_count,
++	   frame_info_buf_out[0].size,
++	   frame_info_buf_out[0].num,
++	   frame_qos_rd,qos_wr);
++	*/
++	frame_qos_rd = qos_wr;
++	return frame_info_buf_out;
++}
++EXPORT_SYMBOL(vdec_get_qos_info);
++
++
+ RESERVEDMEM_OF_DECLARE(vdec, "amlogic, vdec-memory", vdec_mem_setup);
+ /*
+ uint force_hevc_clock_cntl;
+@@ -4448,6 +4585,9 @@ module_param(parallel_decode, int, 0664);
+ module_param(fps_detection, int, 0664);
+ module_param(fps_clear, int, 0664);
+ 
++module_param(frameinfo_flag, int, 0664);
++MODULE_PARM_DESC(frameinfo_flag,
++				"\n frameinfo_flag\n");
+ /*
+ *module_init(vdec_module_init);
+ *module_exit(vdec_module_exit);
+diff --git a/drivers/frame_provider/decoder/utils/vdec.h b/drivers/frame_provider/decoder/utils/vdec.h
+index b09a739..6972e7d 100644
+--- a/drivers/frame_provider/decoder/utils/vdec.h
++++ b/drivers/frame_provider/decoder/utils/vdec.h
+@@ -120,6 +120,7 @@ extern void dma_contiguous_early_fixup(phys_addr_t base, unsigned long size);
+ unsigned int get_vdec_clk_config_settings(void);
+ void update_vdec_clk_config_settings(unsigned int config);
+ //unsigned int get_mmu_mode(void);//DEBUG_TMP
++extern void vdec_fill_frame_info(struct vframe_qos_s *vframe_qos, int debug);
+ 
+ struct vdec_s;
+ enum vformat_t;
+@@ -443,4 +444,5 @@ void vdec_set_timestamp(struct vdec_s *vdec, u64 timestamp);
+ 
+ struct vdec_s *vdec_get_with_id(unsigned int id);
+ 
++extern struct vframe_qos_s *vdec_get_qos_info(void);
+ #endif				/* VDEC_H */
+diff --git a/drivers/frame_provider/decoder/vc1/vvc1.c b/drivers/frame_provider/decoder/vc1/vvc1.c
+index 8782f3d..d20f318 100644
+--- a/drivers/frame_provider/decoder/vc1/vvc1.c
++++ b/drivers/frame_provider/decoder/vc1/vvc1.c
+@@ -282,6 +282,7 @@ static irqreturn_t vvc1_isr(int irq, void *dev_id)
+ 	unsigned int pts, pts_valid = 0, offset = 0;
+ 	u32 v_width, v_height;
+ 	u64 pts_us64 = 0;
++	u32 frame_size;
+ 
+ 	reg = READ_VREG(VC1_BUFFEROUT);
+ 
+@@ -308,7 +309,8 @@ static irqreturn_t vvc1_isr(int irq, void *dev_id)
+ 			offset = READ_VREG(VC1_OFFSET_REG);
+ 			if (pts_lookup_offset_us64(
+ 					PTS_TYPE_VIDEO,
+-					offset, &pts, 0, &pts_us64) == 0) {
++					offset, &pts, &frame_size,
++					0, &pts_us64) == 0) {
+ 				pts_valid = 1;
+ #ifdef DEBUG_PTS
+ 				pts_hit++;
+diff --git a/drivers/frame_provider/decoder/vp9/vvp9.c b/drivers/frame_provider/decoder/vp9/vvp9.c
+index 4483297..1f25ab6 100644
+--- a/drivers/frame_provider/decoder/vp9/vvp9.c
++++ b/drivers/frame_provider/decoder/vp9/vvp9.c
+@@ -6653,6 +6653,7 @@ static int prepare_display_buf(struct VP9Decoder_s *pbi,
+ 	u32 pts_valid = 0, pts_us64_valid = 0;
+ 	u32 pts_save;
+ 	u64 pts_us64_save;
++	u32 frame_size;
+ 
+ 	if (debug & VP9_DEBUG_BUFMGR)
+ 		pr_info("%s index = %d\r\n", __func__, pic_config->index);
+@@ -6683,8 +6684,9 @@ static int prepare_display_buf(struct VP9Decoder_s *pbi,
+ 		 *   stream_offset, &vf->pts, 0) != 0) {
+ 		 */
+ 		if (pts_lookup_offset_us64
+-			(PTS_TYPE_VIDEO, stream_offset, &vf->pts, 0,
+-			 &vf->pts_us64) != 0) {
++			(PTS_TYPE_VIDEO, stream_offset, &vf->pts,
++			&frame_size, 0,
++			&vf->pts_us64) != 0) {
+ #ifdef DEBUG_PTS
+ 			pbi->pts_missed++;
+ #endif
+diff --git a/drivers/stream_input/amports/adec.c b/drivers/stream_input/amports/adec.c
+index ce014e1..5bca205 100644
+--- a/drivers/stream_input/amports/adec.c
++++ b/drivers/stream_input/amports/adec.c
+@@ -121,13 +121,14 @@ static ssize_t datawidth_show(struct class *class,
+ static ssize_t pts_show(struct class *class, struct class_attribute *attr,
+ 						char *buf)
+ {
+-	u32 pts;
++	u32 pts, frame_size;
+ 	u32 pts_margin = 0;
+ 
+ 	if (astream_dev->samplerate <= 12000)
+ 		pts_margin = 512;
+ 
+-	if (INFO_VALID && (pts_lookup(PTS_TYPE_AUDIO, &pts, pts_margin) >= 0))
++	if (INFO_VALID && (pts_lookup(PTS_TYPE_AUDIO, &pts,
++			&frame_size, pts_margin) >= 0))
+ 		return sprintf(buf, "0x%x\n", pts);
+ 	else
+ 		return sprintf(buf, "%s\n", na_string);
+diff --git a/drivers/stream_input/amports/amstream.c b/drivers/stream_input/amports/amstream.c
+index a1b4a47..c821cf1 100644
+--- a/drivers/stream_input/amports/amstream.c
++++ b/drivers/stream_input/amports/amstream.c
+@@ -1856,10 +1856,11 @@ static long amstream_ioctl_get(struct port_priv_s *priv, ulong arg)
+ 		break;
+ 	case AMSTREAM_GET_APTS_LOOKUP:
+ 		if (this->type & PORT_TYPE_AUDIO) {
+-			u32 pts = 0, offset;
++			u32 pts = 0, frame_size, offset;
+ 
+ 			offset = parm.data_32;
+-			pts_lookup_offset(PTS_TYPE_AUDIO, offset, &pts, 300);
++			pts_lookup_offset(PTS_TYPE_AUDIO, offset, &pts,
++				&frame_size, 300);
+ 			parm.data_32 = pts;
  		}
+ 		break;
+@@ -2542,6 +2543,20 @@ static long amstream_do_ioctl_new(struct port_priv_s *priv,
+ 		else
+ 			r = -EINVAL;
+ 		break;
++	case AMSTREAM_IOC_GET_QOSINFO:
++		{
++			struct av_param_qosinfo_t  __user *uarg = (void *)arg;
++			struct vframe_qos_s *qos_info = vdec_get_qos_info();
++			if (this->type & PORT_TYPE_VIDEO) {
++				if (qos_info != NULL && copy_to_user((void *)uarg->vframe_qos,
++							qos_info,
++							QOS_FRAME_NUM*sizeof(struct vframe_qos_s))) {
++					r = -EFAULT;
++					break;
++				}
++			}
++		}
++		break;
+ 	default:
+ 		r = -ENOIOCTLCMD;
+ 		break;
+@@ -3100,10 +3115,11 @@ static long amstream_do_ioctl_old(struct port_priv_s *priv,
  
+ 	case AMSTREAM_IOC_APTS_LOOKUP:
+ 		if (this->type & PORT_TYPE_AUDIO) {
+-			u32 pts = 0, offset;
++			u32 pts = 0, frame_size, offset;
+ 
+ 			get_user(offset, (unsigned long __user *)arg);
+-			pts_lookup_offset(PTS_TYPE_AUDIO, offset, &pts, 300);
++			pts_lookup_offset(PTS_TYPE_AUDIO, offset, &pts,
++				&frame_size, 300);
+ 			put_user(pts, (int __user *)arg);
+ 		}
+ 		return 0;
+@@ -3275,6 +3291,7 @@ static long amstream_do_ioctl(struct port_priv_s *priv,
+ 	case AMSTREAM_IOC_GET_PTR:
+ 	case AMSTREAM_IOC_SET_PTR:
+ 	case AMSTREAM_IOC_SYSINFO:
++	case AMSTREAM_IOC_GET_QOSINFO:
+ 		r = amstream_do_ioctl_new(priv, cmd, arg);
+ 		break;
+ 	default:
