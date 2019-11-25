@@ -1,95 +1,68 @@
-commit c4265acedff9f9ad083f9548a3852f31223eca43
-Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Wed Jan 16 12:30:36 2019 +0800
+commit c1181ed9f4a647ac076883c08cdcf6e6abdf0cda
+Author: Xiaoming Sui <xiaoming.sui@amlogic.com>
+Date:   Wed Apr 24 11:44:53 2019 +0800
 
-    media_module: single mode fw load failed issue [1/1]
+    avsync: amstream: fix dtv avsync problem when arc pluged [2/3]
     
-    PD#SWPL-4263
+    PD#SWPL-7270
     
     Problem:
-    when run hevc stream mode first. then to run hevc single
-    mode. fw load failed. (vdec core no issue). the root cause
-    is that hevc dmc is disabled when hevc remove. it need to be
-    enabled before fw load. single mode missed it
+    when arc pluged in or out, the avsync is lost.
     
     Solution:
-    add hevc dmc enable before hevc fw load in single mode
+    when arc pluged in or out, reset the dtv audio to resync
+    the audio and video.
     
     Verify:
-    U212
+    X301
     
-    Change-Id: Iad6a578b285d3a5fedc8d8b4da98af6a50d5b80b
-    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
+    Change-Id: I4644d85589e14565a4d4b7bb1622a6e51f94df27
+    Signed-off-by: Xiaoming Sui <xiaoming.sui@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/avs2/vavs2.c b/drivers/frame_provider/decoder/avs2/vavs2.c
-index 790b94b..cc22161 100644
---- a/drivers/frame_provider/decoder/avs2/vavs2.c
-+++ b/drivers/frame_provider/decoder/avs2/vavs2.c
-@@ -6338,7 +6338,7 @@ static s32 vavs2_init(struct vdec_s *vdec)
- 
- 		return 0;
- 	}
--
-+	hevc_enable_DMC(hw_to_vdec(dec));
- 	amhevc_enable();
- 
- 	ret = amhevc_loadmc_ex(VFORMAT_AVS2, NULL, fw->data);
-diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
-index 371d3df..f0d97b5 100644
---- a/drivers/frame_provider/decoder/h265/vh265.c
-+++ b/drivers/frame_provider/decoder/h265/vh265.c
-@@ -10590,6 +10590,7 @@ static s32 vh265_init(struct hevc_state_s *hevc)
- 		return 0;
- 	}
- #endif
-+	hevc_enable_DMC(hw_to_vdec(hevc));
- 	amhevc_enable();
- 
- 	if (hevc->mmu_enable)
-diff --git a/drivers/frame_provider/decoder/utils/vdec.c b/drivers/frame_provider/decoder/utils/vdec.c
-index 9f65381..3e7a47f 100644
---- a/drivers/frame_provider/decoder/utils/vdec.c
-+++ b/drivers/frame_provider/decoder/utils/vdec.c
-@@ -3563,6 +3563,17 @@ void vdec_reset_core(struct vdec_s *vdec)
+diff --git a/drivers/stream_input/amports/amstream.c b/drivers/stream_input/amports/amstream.c
+index 2c0ae39..5bfdb00 100644
+--- a/drivers/stream_input/amports/amstream.c
++++ b/drivers/stream_input/amports/amstream.c
+@@ -3842,6 +3842,33 @@ static ssize_t show_maxdelay(struct class *class,
+ 	return size;
  }
- EXPORT_SYMBOL(vdec_reset_core);
  
-+void hevc_enable_DMC(struct vdec_s *vdec)
++static ssize_t audio_path_store(struct class *class,
++	struct class_attribute *attr,
++	const char *buf, size_t size)
 +{
-+	unsigned long flags;
-+	spin_lock_irqsave(&vdec_spin_lock, flags);
-+	codec_dmcbus_write(DMC_REQ_CTRL,
-+	codec_dmcbus_read(DMC_REQ_CTRL) | (1 << 4));
-+	spin_unlock_irqrestore(&vdec_spin_lock, flags);
++	unsigned int val = 0;
++	int i;
++	ssize_t ret;
++	struct stream_buf_s *pabuf = &bufs[BUF_TYPE_AUDIO];
++	struct stream_port_s *this;
++	ret = kstrtoint(buf, 0, &val);
++	if (ret != 0)
++		return -EINVAL;
++	if (val != 1)
++		return -EINVAL;
++	for (i = 0; i < MAX_AMSTREAM_PORT_NUM; i++) {
++		if (strcmp(ports[i].name, "amstream_mpts") == 0 ||
++			strcmp(ports[i].name, "amstream_mpts_sched") == 0) {
++			this = &ports[i];
++			if ((this->flag & PORT_FLAG_AFORMAT) != 0) {
++				pr_info("audio_port_reset %s\n", ports[i].name);
++				audio_port_reset(this, pabuf);
++			}
++		}
++	}
++	return size;
 +}
 +
-+EXPORT_SYMBOL(hevc_enable_DMC);
-+
- void hevc_reset_core(struct vdec_s *vdec)
- {
- 	unsigned long flags;
-diff --git a/drivers/frame_provider/decoder/utils/vdec.h b/drivers/frame_provider/decoder/utils/vdec.h
-index 6972e7d..b7287fb 100644
---- a/drivers/frame_provider/decoder/utils/vdec.h
-+++ b/drivers/frame_provider/decoder/utils/vdec.h
-@@ -421,6 +421,7 @@ extern void vdec_set_step_mode(void);
+ static struct class_attribute amstream_class_attrs[] = {
+ 	__ATTR_RO(ports),
+ 	__ATTR_RO(bufs),
+@@ -3851,6 +3878,8 @@ static struct class_attribute amstream_class_attrs[] = {
+ 	show_canuse_buferlevel, store_canuse_buferlevel),
+ 	__ATTR(max_buffer_delay_ms, S_IRUGO | S_IWUSR | S_IWGRP, show_maxdelay,
+ 	store_maxdelay),
++	__ATTR(reset_audio_port, S_IRUGO | S_IWUSR | S_IWGRP,
++	NULL, audio_path_store),
+ 	__ATTR_NULL
+ };
  
- extern void vdec_disable_DMC(struct vdec_s *vdec);
- extern void vdec_enable_DMC(struct vdec_s *vdec);
-+extern void hevc_enable_DMC(struct vdec_s *vdec);
- 
- int vdec_read_user_data(struct vdec_s *vdec,
- 				struct userdata_param_t *p_userdata_param);
-diff --git a/drivers/frame_provider/decoder/vp9/vvp9.c b/drivers/frame_provider/decoder/vp9/vvp9.c
-index cc83d60..42ecd46 100644
---- a/drivers/frame_provider/decoder/vp9/vvp9.c
-+++ b/drivers/frame_provider/decoder/vp9/vvp9.c
-@@ -8099,7 +8099,7 @@ static s32 vvp9_init(struct VP9Decoder_s *pbi)
- 		return 0;
- 	}
- #endif
--
-+	hevc_enable_DMC(hw_to_vdec(pbi));
- 	amhevc_enable();
- 
- 	ret = amhevc_loadmc_ex(VFORMAT_VP9, NULL, fw->data);
