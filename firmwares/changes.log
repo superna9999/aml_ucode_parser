@@ -1,319 +1,79 @@
-commit 7c2956be8409c187622900c3d3c3678349d51e0c
+commit 00eef5b2ddbba917d3e58fca5a91397922ec200d
 Author: Peng Yixin <yixin.peng@amlogic.com>
-Date:   Fri Dec 14 17:26:26 2018 +0800
+Date:   Fri Sep 27 15:48:39 2019 +0800
 
-    media_module: add without display node [1/1]
+    media_module: h264 add force modify canvas mode node [1/1]
     
-    PD#IPTV-4140
+    PD#NONE
     
     Problem:
-    There are no nodes to test for decoding performance without display.
+    Cannot modify canvas mode with node.
     
     Solution:
-    Add without display node to resolve this issue.
+    Add logic to solve this problem.
     
     Verify:
     u212
     
-    Change-Id: Idec4b174f194dd719853cae7fd8fdbe56f54f816
+    Change-Id: I487fa2d50b60f7bdfb309fd9f2a18e42c9658956
     Signed-off-by: Peng Yixin <yixin.peng@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/avs2/vavs2.c b/drivers/frame_provider/decoder/avs2/vavs2.c
-index 31f76e6..6258a75 100644
---- a/drivers/frame_provider/decoder/avs2/vavs2.c
-+++ b/drivers/frame_provider/decoder/avs2/vavs2.c
-@@ -266,6 +266,7 @@ static u32 again_threshold;
-  *	0x300, if > 720p, use mode 4, else use mode 1;
-  */
- static u32 double_write_mode;
-+static u32 without_display_mode;
- 
- #define DRIVER_NAME "amvdec_avs2"
- #define MODULE_NAME "amvdec_avs2"
-@@ -4584,8 +4585,11 @@ static int avs2_prepare_display_buf(struct AVS2Decoder_s *dec)
- 			vdec_count_info(gvs, 0, stream_offset);
- 	#endif
- 			hw_to_vdec(dec)->vdec_fps_detec(hw_to_vdec(dec)->id);
--			vf_notify_receiver(dec->provider_name,
--			VFRAME_EVENT_PROVIDER_VFRAME_READY, NULL);
-+			if (without_display_mode == 0) {
-+				vf_notify_receiver(dec->provider_name,
-+				VFRAME_EVENT_PROVIDER_VFRAME_READY, NULL);
-+			} else
-+				vavs2_vf_put(vavs2_vf_get(dec), dec);
- 		}
- 	}
- /*!NO_DISPLAY*/
-@@ -7773,6 +7777,9 @@ module_param(force_disp_pic_index, int, 0664);
- MODULE_PARM_DESC(force_disp_pic_index,
- 	"\n amvdec_h265 force_disp_pic_index\n");
- 
-+module_param(without_display_mode, uint, 0664);
-+MODULE_PARM_DESC(without_display_mode, "\n without_display_mode\n");
+diff --git a/drivers/frame_provider/decoder/h264_multi/h264_dpb.h b/drivers/frame_provider/decoder/h264_multi/h264_dpb.h
+index f3c8114..471ffa5 100644
+--- a/drivers/frame_provider/decoder/h264_multi/h264_dpb.h
++++ b/drivers/frame_provider/decoder/h264_multi/h264_dpb.h
+@@ -41,6 +41,18 @@
+ #define PRINT_FLAG_V4L_DETAIL         0x8000
+ #define DISABLE_ERROR_HANDLE          0x10000
+ #define DEBUG_DUMP_STAT               0x80000
++/*setting canvas mode and endian.
++  if this flag is set, value of canvas mode
++  will according to the value of mem_map_mode.
++  endian will be forced set to 0 in
++  CANVAS_BLKMODE_LINEAR mode.
++  otherwise picture will display abnormal.
++  if this flag is not set, value of canvas mode
++  will be determined by the user speace config.
++  endian will be set 7 in CANVAS_BLKMODE_LINEAR mode.
++*/
++#define IGNORE_PARAM_FROM_CONFIG      0x8000000
 +
- module_init(amvdec_avs2_driver_init_module);
- module_exit(amvdec_avs2_driver_remove_module);
  
+ #define PIC_SINGLE_FRAME			0
+ #define PIC_TOP_BOT_TOP				1
 diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-index 65105a0..e3dac31 100644
+index e3dac31..b378d1d 100644
 --- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
 +++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-@@ -319,7 +319,7 @@ static unsigned int frmbase_cont_bitlevel2 = 0x1;
- 	0x20000: vdec dw horizotal/vertical  1/2
- */
- static u32 double_write_mode;
--
-+static u32 without_display_mode;
- #define IS_VDEC_DW(hw)  (hw->double_write_mode >> 16 & 0xf)
+@@ -120,6 +120,7 @@
  
- static void vmh264_dump_state(struct vdec_s *vdec);
-@@ -2715,8 +2715,11 @@ int prepare_display_buf(struct vdec_s *vdec, struct FrameStore *frame)
- 		ATRACE_COUNTER(MODULE_NAME, vf->pts);
- 		hw->vf_pre_count++;
- 		vdec->vdec_fps_detec(vdec->id);
--		vf_notify_receiver(vdec->vf_provider_name,
--			VFRAME_EVENT_PROVIDER_VFRAME_READY, NULL);
-+		if (without_display_mode == 0) {
-+			vf_notify_receiver(vdec->vf_provider_name,
-+				VFRAME_EVENT_PROVIDER_VFRAME_READY, NULL);
-+		} else
-+			vh264_vf_put(vh264_vf_get(vdec), vdec);
- 	}
- 	if (dpb_is_debug(DECODE_ID(hw),
- 		PRINT_FLAG_DUMP_BUFSPEC))
-@@ -9196,6 +9199,10 @@ MODULE_PARM_DESC(double_write_mode, "\n double_write_mode\n");
- module_param(mem_map_mode, uint, 0664);
- MODULE_PARM_DESC(mem_map_mode, "\n mem_map_mode\n");
- 
-+module_param(without_display_mode, uint, 0664);
-+MODULE_PARM_DESC(without_display_mode, "\n without_display_mode\n");
+ #define H264_MMU
+ #define VIDEO_SIGNAL_TYPE_AVAILABLE_MASK	0x20000000
 +
-+
- module_init(ammvdec_h264_driver_init_module);
- module_exit(ammvdec_h264_driver_remove_module);
+ static int mmu_enable;
+ /*mmu do not support mbaff*/
+ static int force_enable_mmu = 0;
+@@ -1867,7 +1868,10 @@ static void config_decode_canvas(struct vdec_h264_hw_s *hw, int i)
  
-diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
-index d9e06fd..9cb3f22 100644
---- a/drivers/frame_provider/decoder/h265/vh265.c
-+++ b/drivers/frame_provider/decoder/h265/vh265.c
-@@ -535,6 +535,8 @@ static DEFINE_MUTEX(vh265_log_mutex);
- 
- static struct vdec_info *gvs;
- 
-+static u32 without_display_mode;
-+
- /**************************************************
-  *
-  *h265 buffer management include
-@@ -8704,8 +8706,12 @@ static int prepare_display_buf(struct hevc_state_s *hevc, struct PIC_s *pic)
- 		vdec_count_info(gvs, 0, stream_offset);
- #endif
- 		hw_to_vdec(hevc)->vdec_fps_detec(hw_to_vdec(hevc)->id);
--		vf_notify_receiver(hevc->provider_name,
-+		if (without_display_mode == 0) {
-+			vf_notify_receiver(hevc->provider_name,
- 				VFRAME_EVENT_PROVIDER_VFRAME_READY, NULL);
-+		}
+ 	if (hw->canvas_mode == CANVAS_BLKMODE_LINEAR) {
+ 		blkmode = CANVAS_BLKMODE_LINEAR;
+-		endian = 7;
++		if ((h264_debug_flag & IGNORE_PARAM_FROM_CONFIG) == 0)
++			endian = 7;
 +		else
-+			vh265_vf_put(vh265_vf_get(vdec), vdec);
++			endian = 0;
  	}
  
- 	return 0;
-@@ -13016,6 +13022,8 @@ MODULE_PARM_DESC(disp_vframe_valve_level, "\n disp_vframe_valve_level\n");
- module_param(pic_list_debug, uint, 0664);
- MODULE_PARM_DESC(pic_list_debug, "\n pic_list_debug\n");
+ 	if (hw->is_used_v4l) {
+@@ -8618,7 +8622,10 @@ static int ammvdec_h264_probe(struct platform_device *pdev)
+ 	/* the ctx from v4l2 driver. */
+ 	hw->v4l2_ctx = pdata->private;
  
-+module_param(without_display_mode, uint, 0664);
-+MODULE_PARM_DESC(without_display_mode, "\n amvdec_h265 without_display_mode\n");
+-	hw->canvas_mode = pdata->canvas_mode;
++	if ((h264_debug_flag & IGNORE_PARAM_FROM_CONFIG) == 0)
++		hw->canvas_mode = pdata->canvas_mode;
++	else
++		hw->canvas_mode = mem_map_mode;
  
- module_init(amvdec_h265_driver_init_module);
- module_exit(amvdec_h265_driver_remove_module);
-diff --git a/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c b/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c
-index 3318523..94539f9 100644
---- a/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c
-+++ b/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c
-@@ -95,6 +95,7 @@ static int vmjpeg_vf_states(struct vframe_states *states, void *);
- static int vmjpeg_event_cb(int type, void *data, void *private_data);
- static void vmjpeg_work(struct work_struct *work);
- static int pre_decode_buf_level = 0x800;
-+static u32 without_display_mode;
- #undef pr_info
- #define pr_info printk
- unsigned int mmjpeg_debug_mask = 0xff;
-@@ -316,9 +317,12 @@ static irqreturn_t vmjpeg_isr(struct vdec_s *vdec, int irq)
- 	__func__, hw->frame_num,
- 	vf->pts, vf->pts_us64, vf->duration);
- 	vdec->vdec_fps_detec(vdec->id);
--	vf_notify_receiver(vdec->vf_provider_name,
--			VFRAME_EVENT_PROVIDER_VFRAME_READY,
--			NULL);
-+	if (without_display_mode == 0) {
-+		vf_notify_receiver(vdec->vf_provider_name,
-+				VFRAME_EVENT_PROVIDER_VFRAME_READY,
-+				NULL);
-+	} else
-+		vmjpeg_vf_put(vmjpeg_vf_get(vdec), vdec);
- 
- 	hw->dec_result = DEC_RESULT_DONE;
- 
-@@ -1317,6 +1321,9 @@ MODULE_PARM_DESC(radr, "\nradr\n");
- module_param(rval, uint, 0664);
- MODULE_PARM_DESC(rval, "\nrval\n");
- 
-+module_param(without_display_mode, uint, 0664);
-+MODULE_PARM_DESC(without_display_mode, "\n without_display_mode\n");
-+
- module_init(ammvdec_mjpeg_driver_init_module);
- module_exit(ammvdec_mjpeg_driver_remove_module);
- 
-diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-index 6d37a0e..36894e6 100644
---- a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-+++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-@@ -112,6 +112,8 @@ static u32 udebug_flag;
- static unsigned int radr;
- static unsigned int rval;
- 
-+static u32 without_display_mode;
-+
- #define VMPEG12_DEV_NUM        9
- static unsigned int max_decode_instance_num = VMPEG12_DEV_NUM;
- static unsigned int max_process_time[VMPEG12_DEV_NUM];
-@@ -1331,8 +1333,14 @@ static int prepare_display_buf(struct vdec_mpeg12_hw_s *hw,
- 				hw->mm_blk_handle, index);
- 			kfifo_put(&hw->display_q,
- 				(const struct vframe_s *)vf);
--			vf_notify_receiver(vdec->vf_provider_name,
--				VFRAME_EVENT_PROVIDER_VFRAME_READY, NULL);
-+			if (without_display_mode == 0) {
-+				vf_notify_receiver(vdec->vf_provider_name,
-+					VFRAME_EVENT_PROVIDER_VFRAME_READY,
-+					NULL);
-+			} else
-+				vmpeg_vf_put(vmpeg_vf_get(vdec), vdec);
-+
-+
- 		}
- 	}
- 	return 0;
-@@ -2785,11 +2793,16 @@ module_param_array(max_process_time, uint, &max_decode_instance_num, 0664);
- module_param(udebug_flag, uint, 0664);
- MODULE_PARM_DESC(udebug_flag, "\n ammvdec_mpeg12 udebug_flag\n");
- 
-+
- #ifdef AGAIN_HAS_THRESHOLD
- module_param(again_threshold, uint, 0664);
- MODULE_PARM_DESC(again_threshold, "\n again_threshold\n");
- #endif
- 
-+module_param(without_display_mode, uint, 0664);
-+MODULE_PARM_DESC(without_display_mode, "\n ammvdec_mpeg12 without_display_mode\n");
-+
-+
- module_init(ammvdec_mpeg12_driver_init_module);
- module_exit(ammvdec_mpeg12_driver_remove_module);
- 
-diff --git a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
-index 4e870ba..d3bdb51 100644
---- a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
-+++ b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
-@@ -147,6 +147,8 @@ static unsigned int max_decode_instance_num = VMPEG4_DEV_NUM;
- static unsigned int max_process_time[VMPEG4_DEV_NUM];
- static unsigned int decode_timeout_val = 100;
- 
-+static u32 without_display_mode;
-+
- #undef pr_info
- #define pr_info printk
- unsigned int mpeg4_debug_mask = 0xff;
-@@ -528,8 +530,11 @@ static int prepare_display_buf(struct vdec_mpeg4_hw_s * hw,
- 			ATRACE_COUNTER(MODULE_NAME, vf->pts);
- 			vdec->vdec_fps_detec(vdec->id);
- 			hw->frame_num++;
--			vf_notify_receiver(vdec->vf_provider_name,
--				VFRAME_EVENT_PROVIDER_VFRAME_READY, NULL);
-+			if (without_display_mode == 0) {
-+				vf_notify_receiver(vdec->vf_provider_name,
-+					VFRAME_EVENT_PROVIDER_VFRAME_READY, NULL);
-+			} else
-+				vmpeg_vf_put(vmpeg_vf_get(vdec), vdec);
- 		}
- 
- 		if (kfifo_get(&hw->newframe_q, &vf) == 0) {
-@@ -576,8 +581,11 @@ static int prepare_display_buf(struct vdec_mpeg4_hw_s * hw,
- 			vdec->vdec_fps_detec(vdec->id);
- 			decoder_do_frame_check(vdec, vf);
- 			hw->frame_num++;
--			vf_notify_receiver(vdec->vf_provider_name,
--				VFRAME_EVENT_PROVIDER_VFRAME_READY, NULL);
-+			if (without_display_mode == 0) {
-+				vf_notify_receiver(vdec->vf_provider_name,
-+					VFRAME_EVENT_PROVIDER_VFRAME_READY, NULL);
-+			} else
-+				vmpeg_vf_put(vmpeg_vf_get(vdec), vdec);
- 		}
- 	} else {
- 		/* progressive */
-@@ -629,8 +637,12 @@ static int prepare_display_buf(struct vdec_mpeg4_hw_s * hw,
- 			vdec->vdec_fps_detec(vdec->id);
- 			decoder_do_frame_check(vdec, vf);
- 			hw->frame_num++;
--			vf_notify_receiver(vdec->vf_provider_name,
--				VFRAME_EVENT_PROVIDER_VFRAME_READY, NULL);
-+
-+			if (without_display_mode == 0) {
-+				vf_notify_receiver(vdec->vf_provider_name,
-+					VFRAME_EVENT_PROVIDER_VFRAME_READY, NULL);
-+			} else
-+				vmpeg_vf_put(vmpeg_vf_get(vdec), vdec);
- 		}
- 
- 	}
-@@ -2237,6 +2249,10 @@ MODULE_PARM_DESC(pre_decode_buf_level,
- 
- module_param(udebug_flag, uint, 0664);
- MODULE_PARM_DESC(udebug_flag, "\n ammvdec_mpeg4 udebug_flag\n");
-+
-+module_param(without_display_mode, uint, 0664);
-+MODULE_PARM_DESC(without_display_mode, "\n ammvdec_mpeg4 without_display_mode\n");
-+
- module_init(ammvdec_mpeg4_driver_init_module);
- module_exit(ammvdec_mpeg4_driver_remove_module);
- 
-diff --git a/drivers/frame_provider/decoder/vp9/vvp9.c b/drivers/frame_provider/decoder/vp9/vvp9.c
-index b0dd586..f8eac8a 100644
---- a/drivers/frame_provider/decoder/vp9/vvp9.c
-+++ b/drivers/frame_provider/decoder/vp9/vvp9.c
-@@ -393,6 +393,8 @@ static u32 udebug_pause_val;
- 
- static u32 udebug_pause_decode_idx;
- 
-+static u32 without_display_mode;
-+
- #define DEBUG_REG
- #ifdef DEBUG_REG
- void WRITE_VREG_DBG2(unsigned int adr, unsigned int val)
-@@ -6977,8 +6979,11 @@ static int prepare_display_buf(struct VP9Decoder_s *pbi,
- 			vdec_count_info(gvs, 0, stream_offset);
- #endif
- 			hw_to_vdec(pbi)->vdec_fps_detec(hw_to_vdec(pbi)->id);
--			vf_notify_receiver(pbi->provider_name,
--					VFRAME_EVENT_PROVIDER_VFRAME_READY, NULL);
-+			if (without_display_mode == 0) {
-+				vf_notify_receiver(pbi->provider_name,
-+						VFRAME_EVENT_PROVIDER_VFRAME_READY, NULL);
-+			} else
-+				vvp9_vf_put(vvp9_vf_get(pbi), pbi);
- 		} else {
- 			pbi->stat |= VP9_TRIGGER_FRAME_DONE;
- 			hevc_source_changed(VFORMAT_VP9, 196, 196, 30);
-@@ -10553,6 +10558,9 @@ MODULE_PARM_DESC(udebug_pause_val, "\n udebug_pause_val\n");
- module_param(udebug_pause_decode_idx, uint, 0664);
- MODULE_PARM_DESC(udebug_pause_decode_idx, "\n udebug_pause_decode_idx\n");
- 
-+module_param(without_display_mode, uint, 0664);
-+MODULE_PARM_DESC(without_display_mode, "\n without_display_mode\n");
-+
- module_init(amvdec_vp9_driver_init_module);
- module_exit(amvdec_vp9_driver_remove_module);
+ 	platform_set_drvdata(pdev, pdata);
  
