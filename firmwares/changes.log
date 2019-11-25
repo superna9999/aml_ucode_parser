@@ -1,41 +1,76 @@
-commit 5c363baa3a7855aee272eedf5094ef959df43420
-Author: shihong.zheng <shihong.zheng@amlogic.com>
-Date:   Thu May 9 10:24:43 2019 +0800
+commit b23e1587561dcf41e0641a2887615088ecb58689
+Author: Conglin Guo <conglin.guo@amlogic.com>
+Date:   Tue May 14 21:29:12 2019 +0800
 
-    userdata: fix a crash problem when reset userdata fifo. [1/1]
+    media_modules: cts Security Test Cases crash [1/1]
     
-    PD#OTT-3218
+    PD#SWPL-8383
     
     Problem:
-    crash when unreg, instance may be release.
-    PC is at vmh264_reset_userdata_fifo+0x5c/0x74 [amvdec_mh264]
-    LR is at wake_up_klogd+0x8c/0xb8.
+    cts Security Test Cases crash
     
     Solution:
-    mutex_lock to avoid concurrence with release.
+    1 check head param legality.just check the first head param.
     
     Verify:
-    S905X2-U212
+    u212
     
-    Change-Id: Ia46b7dcedc106ee852c329727c0fb431d1f7e45f
-    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
+    Change-Id: I263225cf7ff3dac3b9fac02cec29699711036175
+    Signed-off-by: Conglin Guo <conglin.guo@amlogic.com>
 
-diff --git a/drivers/stream_input/amports/amstream.c b/drivers/stream_input/amports/amstream.c
-index 5bfdb00..765502c 100644
---- a/drivers/stream_input/amports/amstream.c
-+++ b/drivers/stream_input/amports/amstream.c
-@@ -3123,12 +3123,14 @@ static long amstream_do_ioctl_old(struct port_priv_s *priv,
- 			struct vdec_s *vdec;
- 			int vdec_id;
+diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+index 1a8f371..bdc16f1 100644
+--- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
++++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+@@ -4369,6 +4369,7 @@ static int vh264_set_params(struct vdec_h264_hw_s *hw,
+ 	unsigned int crop_infor, crop_bottom, crop_right;
+ 	unsigned int used_reorder_dpb_size_margin
+ 		= reorder_dpb_size_margin;
++
+ #ifdef CONFIG_AMLOGIC_MEDIA_ENHANCEMENT_DOLBYVISION
+ 	if (vdec->master || vdec->slave)
+ 		used_reorder_dpb_size_margin =
+@@ -4493,11 +4494,18 @@ static int vh264_set_params(struct vdec_h264_hw_s *hw,
+ 			mb_height, mb_width, mb_total,
+ 			level_idc, max_reference_size);
  
-+			mutex_lock(&amstream_mutex);
- 			get_user(vdec_id, (int __user *)arg);
- 			vdec = vdec_get_vdec_by_id(vdec_id);
- 			if (vdec) {
- 				vdec_reset_userdata_fifo(vdec, 0);
- 				pr_info("reset_userdata_fifo for vdec: %d\n", vdec_id);
++
+ 		p_H264_Dpb->colocated_buf_size = mb_total * 96;
+ 		hw->dpb.reorder_pic_num =
+ 			get_max_dec_frame_buf_size(level_idc,
+ 			max_reference_size, mb_width, mb_height);
+ 
++			if (hw->dpb.reorder_pic_num > MAX_VF_BUF_NUM) {
++				dpb_print(DECODE_ID(hw), 0,
++			"%s abnormal reorder_pic_num  %d\n", __func__, hw->dpb.reorder_pic_num);
++				return -1;
++				}
++
+ 		dpb_print(DECODE_ID(hw), 0,
+ 			"restriction_flag=%d, max_dec_frame_buffering=%d, reorder_pic_num=%d\n",
+ 			hw->bitstream_restriction_flag,
+@@ -7642,13 +7650,9 @@ static void vh264_work(struct work_struct *work)
+ 		u32 param3 = READ_VREG(AV_SCRATCH_6);
+ 		u32 param4 = READ_VREG(AV_SCRATCH_B);
+ 		if (vh264_set_params(hw, param1,
+-			param2, param3, param4) < 0)
+-			hw->stat |= DECODER_FATAL_ERROR_SIZE_OVERFLOW;
+-		WRITE_VREG(AV_SCRATCH_0, (hw->max_reference_size<<24) |
+-			(hw->dpb.mDPB.size<<16) |
+-			(hw->dpb.mDPB.size<<8));
+-		start_process_time(hw);
+-		return;
++			param2, param3, param4) < 0) {
++				goto result_done;
++			}
+ 	} else
+ 	if (((hw->dec_result == DEC_RESULT_GET_DATA) ||
+ 		(hw->dec_result == DEC_RESULT_GET_DATA_RETRY))
+@@ -8776,6 +8780,7 @@ static int ammvdec_h264_remove(struct platform_device *pdev)
  			}
-+			mutex_unlock(&amstream_mutex);
- 		} else
- 			r = -EINVAL;
- 		break;
+ 		}
+ 	}
++
+ 	ammvdec_h264_mmu_release(hw);
+ 	h264_free_hw_stru(&pdev->dev, (void *)hw);
+ 	clk_adj_frame_count = 0;
