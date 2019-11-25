@@ -1,56 +1,46 @@
-commit 7330800776b693f277829f5f085488690463d6ad
-Author: Peng Yixin <yixin.peng@amlogic.com>
-Date:   Thu May 30 17:32:50 2019 +0800
+commit e6c53468ade19b4628356ffa72eb400d39e29d80
+Author: yongchun.li <yongchun.li@amlogic.com>
+Date:   Thu May 30 17:30:24 2019 -0700
 
-    module: fixed play 1080p video,seek operation lead to system crash [1/1]
+    media: Media.mk remove the useless and misleading defines [1/1]
     
-    PD#SWPL-9190
+    PD#SWPL-8995
     
     Problem:
-    play 1080p video,seek operation lead to system crash
+    1. Media definition CONFIG_AMLOGIC_MEDIA_GE2D and
+    CONFIG_AMLOGIC_MEDIA_ENHANCEMENT_DOLBYVISION were defined from kernel config,
+    the definitions here are useless,  misleading and potential casue mismatch.
+    2. HEVC video encoder shale use the module control defined in Media.mk
     
     Solution:
-    The code incorrectly called DEC_RESULT_DONE,
-    caused a problem with the decoding schedule and panic.
+    Remove those useless definitions,and HEVC encoder use
+    CONFIG_AMLOGIC_MEDIA_VENC_H265 in make file intead hard code.
     
     Verify:
-    verified on x301
+    U211
     
-    Change-Id: Ibf897891bf090cf89326083c13c06bcd31f79e30
-    Signed-off-by: Peng Yixin <yixin.peng@amlogic.com>
+    Change-Id: I19c691ee4953cfd2e476a2f67da92cf416197bc9
+    Signed-off-by: yongchun.li <yongchun.li@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-index ebace1a..3159647 100644
---- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
-+++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-@@ -5794,12 +5794,10 @@ pic_done_proc:
- 			hw->got_valid_nal = 1;
- 		}
- #endif
--		if (!hw->wait_for_udr_send) {
--			hw->dec_result = DEC_RESULT_DONE;
--			dpb_print(DECODE_ID(hw), PRINT_FLAG_VDEC_STATUS,
--				"%s wait_for_udr_send\n", __func__);
--			vdec_schedule_work(&hw->work);
--		}
-+
-+		hw->dec_result = DEC_RESULT_DONE;
-+		vdec_schedule_work(&hw->work);
-+
- #ifdef CONFIG_AMLOGIC_MEDIA_ENHANCEMENT_DOLBYVISION
- 	} else if (
- 			(dec_dpb_status == H264_FIND_NEXT_PIC_NAL) ||
-@@ -7419,13 +7417,6 @@ static void user_data_ready_notify_work(struct work_struct *work)
- 	vdec_wakeup_userdata_poll(hw_to_vdec(hw));
+diff --git a/Media.mk b/Media.mk
+index eba1e1e..8ca1d1d 100644
+--- a/Media.mk
++++ b/Media.mk
+@@ -20,9 +20,7 @@ CONFIGS := CONFIG_AMLOGIC_MEDIA_VDEC_MPEG12=m \
+ 	CONFIG_AMLOGIC_MEDIA_VDEC_AVS=m \
+ 	CONFIG_AMLOGIC_MEDIA_VDEC_AVS2=m \
+ 	CONFIG_AMLOGIC_MEDIA_VENC_H264=m \
+-	CONFIG_AMLOGIC_MEDIA_VENC_H265=m \
+-	CONFIG_AMLOGIC_MEDIA_ENHANCEMENT_DOLBYVISION=y
+-        CONFIG_AMLOGIC_MEDIA_GE2D=y
++	CONFIG_AMLOGIC_MEDIA_VENC_H265=m
  
- 	hw->wait_for_udr_send = 0;
--	if (!hw->frmbase_cont_flag) {
--		hw->dec_result = DEC_RESULT_DONE;
--		dpb_print(DECODE_ID(hw), PRINT_FLAG_VDEC_STATUS,
--			"%s\n", __func__);
--
--		vdec_schedule_work(&hw->work);
--	}
- }
- 
- static int vmh264_user_data_read(struct vdec_s *vdec,
+ define copy-media-modules
+ $(foreach m, $(shell find $(strip $(1)) -name "*.ko"),\
+diff --git a/drivers/frame_sink/encoder/h265/Makefile b/drivers/frame_sink/encoder/h265/Makefile
+index e7414bf..833822c 100644
+--- a/drivers/frame_sink/encoder/h265/Makefile
++++ b/drivers/frame_sink/encoder/h265/Makefile
+@@ -1 +1 @@
+-obj-m	+=	vpu.o
++obj-$(CONFIG_AMLOGIC_MEDIA_VENC_H265)	+=	vpu.o
