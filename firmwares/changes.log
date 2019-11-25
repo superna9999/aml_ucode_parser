@@ -1,56 +1,37 @@
-commit 500f055993471283af760f7c2097e3e9a1817dad
-Author: shihong.zheng <shihong.zheng@amlogic.com>
-Date:   Mon Jul 1 16:48:43 2019 +0800
+commit 024aec293bb579079352d4e991b3a4cc6e475a3f
+Author: Chia-hung Duan <chiahungduan@google.com>
+Date:   Wed Jul 3 14:25:31 2019 +0800
 
-    mh264: fix h264 aspect ratio error. [1/1]
+    build: fix uninitialized-use when build with prebuilt toolchain [1/1]
     
-    PD#SWPL-10327
+    PD#SWPL-8241
     
     Problem:
-    h264 multi intance aspect ratio wrong.
-    aspect ratio is calc in back end now. in vui_config func,
-    no calculation about h264_ar in most case, just set it to 0x3ff.
-    when dtv get it from vdecstat by ioctl, aspect ratio will be wrong.
+    **SYNC from GOOGLE**
+    Build failed due to uninitialzed variable
     
-    Solution:.
-    porting the calculation of aspect ratio to vdec_status
-    from single mode.
+    Solution:
+    Init to reasonable value
     
     Verify:
-    x301
+    Build with Android prebuilt toolchain
     
-    Change-Id: Ib8e44b0995f46d18c30d202d6c17faefe6e2257f
-    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
+    Change-Id: Ieb8cd73d357c64dd3629079fc9a2a86c60717ebf
+    Reviewed-on: https://eureka-partner-review.googlesource.com/c/amlogic/media_modules/+/132909
+    Tested-by: Ben Cheng <bccheng@google.com>
+    Reviewed-by: Ben Cheng <bccheng@google.com>
+    Commit-Queue: Ben Cheng <bccheng@google.com>
 
 diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-index 1166a70..ab81fea 100644
+index ab81fea..2a81fc5 100644
 --- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
 +++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-@@ -6437,6 +6437,10 @@ static int dec_status(struct vdec_s *vdec, struct vdec_info *vstatus)
- 		vstatus->frame_rate = -1;
- 	vstatus->error_count = 0;
- 	vstatus->status = hw->stat;
-+	if (hw->h264_ar == 0x3ff)
-+		hw->h264_ar = (0x100 *
-+			hw->frame_height * hw->height_aspect_ratio) /
-+			(hw->frame_width * hw->width_aspect_ratio);
- 	ar = min_t(u32,
- 			hw->h264_ar,
- 			DISP_RATIO_ASPECT_RATIO_MAX);
-diff --git a/drivers/frame_provider/decoder/utils/vdec.c b/drivers/frame_provider/decoder/utils/vdec.c
-index 4f5ca65..3694b8e 100644
---- a/drivers/frame_provider/decoder/utils/vdec.c
-+++ b/drivers/frame_provider/decoder/utils/vdec.c
-@@ -4617,10 +4617,10 @@ static ssize_t vdec_status_show(struct class *class,
- 				"%13s : %u\n", "hw err count",
- 				vs.error_count);
- 			pbuf += sprintf(pbuf,
--				"%13s : %llu %s\n\n", "total data",
-+				"%13s : %llu %s\n", "total data",
- 				vs.total_data / 1024, "KB");
- 			pbuf += sprintf(pbuf,
--				"%13s : %x\n", "ratio_control",
-+				"%13s : %x\n\n", "ratio_control",
- 				vs.ratio_control);
- 
- 			vdec_num++;
+@@ -5118,7 +5118,7 @@ static int parse_one_sei_record(struct vdec_h264_hw_s *hw,
+ 	int payload_type;
+ 	int payload_size;
+ 	u8 *p_sei;
+-	int temp;
++	int temp = 0;
+ 	int bit_offset;
+ 	int read_size;
+ 	struct h264_dpb_stru *p_H264_Dpb = &hw->dpb;
