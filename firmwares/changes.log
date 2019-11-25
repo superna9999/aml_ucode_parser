@@ -1,34 +1,33 @@
-commit 6fa5ee3290930fcab9647f187d0d21d4c06b915a
-Author: Peng Yixin <yixin.peng@amlogic.com>
-Date:   Fri Apr 26 17:09:21 2019 +0800
+commit 4032338e3b246031172a3862d70ff300a746869d
+Author: renjiang.han <renjiang.han@amlogic.com>
+Date:   Wed Apr 24 18:59:10 2019 +0800
 
-    media: fix some KASAN bug: [1/1]
+    vdec: add ppmgr for tb [1/1]
     
-    PD#SWPL-7788
+    PD#SWPL-6260
     
     Problem:
-    KASAN detected some "global-out-of-bounds" bug.
+    The motion picture is severely jagged.
     
     Solution:
-    Fixed these bug.
+    Add top bottom for detection and processing.
     
     Verify:
-    Verified X301
+    on u212
     
-    Change-Id: Ic5b945f8fd5a9fbab7a08d2aa61061b152940d72
-    Signed-off-by: Peng Yixin <yixin.peng@amlogic.com>
+    Change-Id: I488ee9040dac3c8acafd6e5a6de15801f9b02135
+    Signed-off-by: renjiang.han <renjiang.han@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-index 08d5421..10f2c19 100644
---- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
-+++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-@@ -2745,7 +2745,8 @@ void print_pic_info(int decindex, const char *info,
- 		info,
- 		picture_structure_name[pic->structure],
- 		pic->coded_frame ? "Frame" : "Field",
--		(slice_type < 0) ? "" : slice_type_name[slice_type],
-+		(slice_type < 0 ||
-+		slice_type >= (sizeof(slice_type_name) / sizeof(slice_type_name[0]))) ? "" : slice_type_name[slice_type],
- 		pic->mb_aff_frame_flag,
- 		pic->poc,
- 		pic->pic_num,
+diff --git a/drivers/frame_provider/decoder/utils/vdec.c b/drivers/frame_provider/decoder/utils/vdec.c
+index 3e7a47f..8f5a8b2 100644
+--- a/drivers/frame_provider/decoder/utils/vdec.c
++++ b/drivers/frame_provider/decoder/utils/vdec.c
+@@ -1967,7 +1967,7 @@ s32 vdec_init(struct vdec_s *vdec, int is_4k)
+ 			} else {
+ 				snprintf(vdec->vfm_map_chain, VDEC_MAP_NAME_SIZE,
+ 					"%s %s", vdec->vf_provider_name,
+-					"amlvideo deinterlace amvideo");
++					"amlvideo ppmgr deinterlace amvideo");
+ 			}
+ 			snprintf(vdec->vfm_map_id, VDEC_MAP_NAME_SIZE,
+ 				"vdec-map-%d", vdec->id);
