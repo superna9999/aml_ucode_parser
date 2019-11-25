@@ -1,36 +1,29 @@
-commit 84bbaed7966b2e048ca8207d2001c1b5f2c7bcc8
+commit 660f805eed9d8979fbb8a258967519e211227c44
 Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Thu Sep 5 19:38:38 2019 +0800
+Date:   Mon Sep 9 16:59:43 2019 +0800
 
-    vmh264: fix frame drop issue in nts [1/1]
+    vmh264: fix memory pollution issue caused by DCAC DMA  [1/1]
     
-    PD#SWPL-13465
+    PD#SWPL-13280
     
     Problem:
-    force di happaned when resolution changed,which
-    cause frame drop in nts
+    DCAC dma address is invalid. cause memory pollution
     
     Solution:
-    disable force di in secure mode
+    read mem_offset from SCRATCH register directly. because
+    some corner cases, mem_offset will be set to 0. it will
+    cause DMA Address outof range
+    
+    ucode gerrit: 85293
+    ucode change id: I4b82d
+    ucode commit id: 5aed5
     
     Verify:
-    U212
+    x301
     
-    Change-Id: Ie19edacef07c46ac3eb39385b674a1d366c3c3c3
+    Change-Id: Ifdadb92c0f86e5ed2e6f23cbb4d43e8a9544c23e
     Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-index aa065e5..e9fedd0 100644
---- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
-+++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-@@ -2382,7 +2382,9 @@ static int check_force_interlace(struct vdec_h264_hw_s *hw,
- 	struct FrameStore *frame)
- {
- 	int bForceInterlace = 0;
--
-+	/* no di in secure mode, disable force di */
-+	if (vdec_secure(hw_to_vdec(hw)))
-+		return 0;
- 	if (frame->frame) {
- 		if (frame->frame->coded_frame
- 			&& !frame->frame->frame_mbs_only_flag) {
+diff --git a/firmware/video_ucode.bin b/firmware/video_ucode.bin
+index cd6b03c..25ae9a5 100755
+Binary files a/firmware/video_ucode.bin and b/firmware/video_ucode.bin differ
