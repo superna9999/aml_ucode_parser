@@ -1,98 +1,115 @@
-commit fce110d522416834d2369bd1c0721c0c69bc02c8
-Author: Conglin Guo <conglin.guo@amlogic.com>
-Date:   Fri Apr 12 15:14:52 2019 +0800
+commit a1feb50416e8fba11d26892e604259aaa6b55a34
+Author: Chuangcheng Peng <chuangcheng.peng@amlogic.com>
+Date:   Mon Apr 15 13:57:18 2019 +0800
 
-    media_modules: timeout_process trigger softlockup crash [1/1]
+    dvb: tm2 support hiu1 [1/2]
     
-    PD#SWPL-6395
+    PD#SWPL-6806
     
     Problem:
-    timeout trigger softlockup.
+        tm2 support hiu1 in bringup
     
     Solution:
-    1 amvdec_stop,adjust timeout HZ to HZ/10,Cancel
-      the  timeout warning.
-    2 First clear timeout, after amvdec_stop Reduce
-      frequent triggers timeout_process.
+       tm2 support hiu1 in bringup
     
     Verify:
-    T962X2
+       veify at AB301
     
-    Change-Id: I5312786395db30fdb511d6e980f20e4ed466c3c1
-    Signed-off-by: Conglin Guo <conglin.guo@amlogic.com>
+    Change-Id: If158788a29b6e96395cb2f546276f516c1cb7a0b
+    Signed-off-by: Chuangcheng Peng <chuangcheng.peng@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-index 249e6ff..842e5be 100644
---- a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-+++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-@@ -2135,18 +2135,19 @@ static void reset_process_time(struct vdec_mpeg12_hw_s *hw)
- }
- static void start_process_time(struct vdec_mpeg12_hw_s *hw)
- {
--	hw->decode_timeout_count = 2;
-+	hw->decode_timeout_count = 10;
- 	hw->start_process_time = jiffies;
- }
- static void timeout_process(struct vdec_mpeg12_hw_s *hw)
- {
- 	struct vdec_s *vdec = hw_to_vdec(hw);
-+
-+	reset_process_time(hw);
- 	amvdec_stop();
- 	debug_print(DECODE_ID(hw), PRINT_FLAG_ERROR,
- 	"%s decoder timeout, status=%d, level=%d\n",
- 	__func__, vdec->status, READ_VREG(VLD_MEM_VIFIFO_LEVEL));
- 	hw->dec_result = DEC_RESULT_DONE;
--	reset_process_time(hw);
- 	hw->first_i_frame_ready = 0;
- 	vdec_schedule_work(&hw->work);
- }
-diff --git a/drivers/frame_provider/decoder/utils/amvdec.c b/drivers/frame_provider/decoder/utils/amvdec.c
-index bcbb404..1d4e6f5 100644
---- a/drivers/frame_provider/decoder/utils/amvdec.c
-+++ b/drivers/frame_provider/decoder/utils/amvdec.c
-@@ -810,7 +810,7 @@ EXPORT_SYMBOL(amhevc_start);
+diff --git a/drivers/stream_input/parser/hw_demux/aml_dmx.c b/drivers/stream_input/parser/hw_demux/aml_dmx.c
+index 724bc0c..3b2b9a7 100644
+--- a/drivers/stream_input/parser/hw_demux/aml_dmx.c
++++ b/drivers/stream_input/parser/hw_demux/aml_dmx.c
+@@ -1715,7 +1715,9 @@ static void stb_enable(struct aml_dvb *dvb)
+ 		WRITE_MPEG_REG(TS_HIU1_CONFIG,
+ 			       (demux_skipbyte << FILE_M2TS_SKIP_BYTES_HIU1) |
+ 			       (hiu << TS_HIU_ENABLE_HIU1) |
+-			       (fec_clk << FEC_CLK_DIV_HIU1));
++			       (fec_clk << FEC_CLK_DIV_HIU1) |
++			       (0xBB << TS_PACKAGE_LENGTH_SUB_1_HIU1) |
++				   (0x47 << FEC_SYNC_BYTE_HIU1));
+ 	} else {
+ 		/* invert ts out clk  end */
+ 		WRITE_MPEG_REG(TS_FILE_CONFIG,
+@@ -3140,9 +3142,15 @@ static int dmx_enable(struct aml_dmx *dmx)
+ 			      (7<<VIDEO_ENDIAN) |
+ 			      (7 << OTHER_ENDIAN) |
+ 			      (7 << BYPASS_ENDIAN) | (0 << SECTION_ENDIAN));
+-		DMX_WRITE_REG(dmx->id, TS_HIU_CTL,
++		if (fec_sel != 8) {
++			DMX_WRITE_REG(dmx->id, TS_HIU_CTL,
+ //			      (0 << LAST_BURST_THRESHOLD) |
+ 			   (hi_bsf << USE_HI_BSF_INTERFACE));
++		} else {
++			DMX_WRITE_REG(dmx->id, TS_HIU_CTL,
++				  (1 << PDTS_WR_SEL) |
++			   (hi_bsf << USE_HI_BSF_INTERFACE));
++		}
  
- void amvdec_stop(void)
- {
--	ulong timeout = jiffies + HZ;
-+	ulong timeout = jiffies + HZ/10;
- 
- 	WRITE_VREG(MPSR, 0);
- 	WRITE_VREG(CPSR, 0);
-@@ -820,7 +820,7 @@ void amvdec_stop(void)
- 			break;
+ 		if (fec_sel == -1) {
+ 			dmx_cascade_set(dmx->id,dmx->source);
+@@ -3189,7 +3197,6 @@ static int dmx_enable(struct aml_dmx *dmx)
+ 			(dmx->id != dmx->source-AM_TS_SRC_DMX0))
+ 			dmx_cascade_set(dmx->id,dmx->source);
  	}
+-
+ 	return 0;
+ }
  
--	timeout = jiffies + HZ;
-+	timeout = jiffies + HZ/10;
- 	while (READ_VREG(LMEM_DMA_CTRL) & 0x8000) {
- 		if (time_after(jiffies, timeout))
- 			break;
-@@ -859,7 +859,7 @@ EXPORT_SYMBOL(amvdec_stop);
- void amvdec2_stop(void)
- {
- 	if (has_vdec2()) {
--		ulong timeout = jiffies + HZ;
-+		ulong timeout = jiffies + HZ/10;
+diff --git a/drivers/stream_input/parser/hw_demux/aml_dvb.c b/drivers/stream_input/parser/hw_demux/aml_dvb.c
+index 800c77e..1e5bcdf 100644
+--- a/drivers/stream_input/parser/hw_demux/aml_dvb.c
++++ b/drivers/stream_input/parser/hw_demux/aml_dvb.c
+@@ -890,10 +890,10 @@ static ssize_t stb_store_source(struct class *class,
+ 		src = DMX_SOURCE_FRONT2;
+ 	else if (!strncmp("ts3", buf, 3))
+ 		src = DMX_SOURCE_FRONT3;
+-	else if (!strncmp("hiu", buf, 3))
+-		src = DMX_SOURCE_DVR0;
+ 	else if (!strncmp("hiu1", buf, 4))
+ 		src = DMX_SOURCE_DVR1;
++	else if (!strncmp("hiu", buf, 3))
++		src = DMX_SOURCE_DVR0;
+ 	else if (!strncmp("dmx0", buf, 4))
+ 		src = DMX_SOURCE_FRONT0 + 100;
+ 	else if (!strncmp("dmx1", buf, 4))
+@@ -1150,10 +1150,10 @@ static ssize_t demux##i##_store_source(struct class *class,  \
+ 		src = DMX_SOURCE_FRONT1;\
+ 	} else if (!strncmp("ts2", buf, 3)) {\
+ 		src = DMX_SOURCE_FRONT2;\
++	} else if (!strncmp("hiu1", buf, 4)) {\
++		src = DMX_SOURCE_DVR1;\
+ 	} else if (!strncmp("hiu", buf, 3)) {\
+ 		src = DMX_SOURCE_DVR0;\
+-	} else if (!strncmp("hiu1", buf, 3)) {\
+-		src = DMX_SOURCE_DVR1;\
+ 	} else if (!strncmp("dmx0", buf, 4)) {\
+ 		src = DMX_SOURCE_FRONT0_OFFSET;\
+ 	} else if (!strncmp("dmx1", buf, 4)) {\
+diff --git a/drivers/stream_input/parser/hw_demux/c_stb_define.h b/drivers/stream_input/parser/hw_demux/c_stb_define.h
+index 5f7f4e3..6b815b6 100644
+--- a/drivers/stream_input/parser/hw_demux/c_stb_define.h
++++ b/drivers/stream_input/parser/hw_demux/c_stb_define.h
+@@ -758,8 +758,8 @@
+ #define BYPASS_ENDIAN              3
+ #define SECTION_ENDIAN             0
  
- 		WRITE_VREG(VDEC2_MPSR, 0);
- 		WRITE_VREG(VDEC2_CPSR, 0);
-@@ -889,7 +889,7 @@ EXPORT_SYMBOL(amhcodec_stop);
- void amhevc_stop(void)
- {
- 	if (has_hevc_vdec()) {
--		ulong timeout = jiffies + HZ;
-+		ulong timeout = jiffies + HZ/10;
+-/* Bit 15:8 -- last_burst_threshold*/
+-/* Bit 7 -- use hi_bsf interface*/
++/* Bit 10:9 -- PDTS_wr_sel: 0 select video_PDTS_wr_ptr; 1 select video_PDTS_wr_ptr_parser_B; */
++/* Bit 7:8 -- use hi_bsf interface*/
+ /* Bit 6:2 - fec_clk_div*/
+ /* Bit 1 ts_source_sel */
+ /* Bit 0 - Hiu TS generate enable */
+@@ -770,7 +770,8 @@
+ /*#define TS_HIU_CTL_3
+  * (STB_CBUS_BASE + DEMUX_3_OFFSET + 0x25)  // 0x16c5*/
+ /*----------- bit define -----------*/
+-#define LAST_BURST_THRESHOLD       8
++//#define LAST_BURST_THRESHOLD       8
++#define PDTS_WR_SEL			       9
+ #define USE_HI_BSF_INTERFACE       7
  
- 		WRITE_VREG(HEVC_MPSR, 0);
- 		WRITE_VREG(HEVC_CPSR, 0);
-@@ -899,7 +899,7 @@ void amhevc_stop(void)
- 				break;
- 		}
- 
--		timeout = jiffies + HZ;
-+		timeout = jiffies + HZ/10;
- 		while (READ_VREG(HEVC_LMEM_DMA_CTRL) & 0x8000) {
- 			if (time_after(jiffies, timeout))
- 				break;
+ /* bit 15:0 -- base address for section buffer start
