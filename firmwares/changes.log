@@ -1,79 +1,744 @@
-commit 48459a8ee59b4039bb19db0ab043a495a12c8b4b
-Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Thu Feb 28 14:16:45 2019 +0800
+commit d96f33e2a73b9a248d14ff36e10559ac4e193ce9
+Author: shihong.zheng <shihong.zheng@amlogic.com>
+Date:   Thu Feb 28 14:08:48 2019 +0800
 
-    vh264: wait for hw stop before reset when poor signal condition [1/1]
+    decoder: fix decode error when multi frames in one packet. [1/1]
     
-    PD#SWPL-5014
+    PD#SWPL-3593
     
     Problem:
-    decoder crash or bus locked when h264 poor signal
+    1. decoder error caused by multi frames in one packet.
+    2. constrain max_buf_num for decoder driver to avoid
+       memory usage overflow
     
     Solution:
-    wait for hw stop nefore local reset
+    1. add code the check empty after searching in hevc ucode,
+    2. constrain max_buf_num for decoder driver to avoid memory
+       usage overflow.
+    ucode gerrit id: 61972
     
     Verify:
-    X301
+    x301.
     
-    Change-Id: I7c4bfa29fdb52d8af83299cdd795f9394be7773e
-    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
+    Change-Id: I5c927cc91e5779e58087e06e19d29493f66245bf
+    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/h264/vh264.c b/drivers/frame_provider/decoder/h264/vh264.c
-index 74799ba..cb072ba 100644
---- a/drivers/frame_provider/decoder/h264/vh264.c
-+++ b/drivers/frame_provider/decoder/h264/vh264.c
-@@ -2838,9 +2838,27 @@ static int vh264_stop(int mode)
- 	return 0;
+diff --git a/drivers/frame_provider/decoder/avs2/vavs2.c b/drivers/frame_provider/decoder/avs2/vavs2.c
+index faf0cbb..d226a8b 100644
+--- a/drivers/frame_provider/decoder/avs2/vavs2.c
++++ b/drivers/frame_provider/decoder/avs2/vavs2.c
+@@ -60,6 +60,7 @@
+ #define I_ONLY_SUPPORT
+ #define MIX_STREAM_SUPPORT
+ #define G12A_BRINGUP_DEBUG
++#define CONSTRAIN_MAX_BUF_NUM
+ 
+ #include "vavs2.h"
+ #define HEVC_SHIFT_LENGTH_PROTECT                  0x313a
+@@ -926,6 +927,25 @@ int avs2_alloc_mmu(
+ 	int bit_depth_10 = (bit_depth == AVS2_BITS_10);
+ 	int picture_size;
+ 	int cur_mmu_4k_number, max_frame_num;
++#ifdef DYNAMIC_ALLOC_HEAD
++	unsigned long buf_addr;
++	struct avs2_frame_s *pic = dec->avs2_dec.hc.cur_pic;
++	if (pic->header_adr == 0) {
++		if (decoder_bmmu_box_alloc_buf_phy
++				(dec->bmmu_box,
++				HEADER_BUFFER_IDX(cur_buf_idx),
++				MMU_COMPRESS_HEADER_SIZE,
++				DRIVER_HEADER_NAME,
++				&buf_addr) < 0){
++			avs2_print(dec, 0,
++				"%s malloc compress header failed %d\n",
++				DRIVER_HEADER_NAME, cur_buf_idx);
++			dec->fatal_error |= DECODER_FATAL_ERROR_NO_MEM;
++			return -1;
++		} else
++			pic->header_adr = buf_addr;
++	}
++#endif
+ 
+ 	picture_size = compute_losless_comp_body_size(
+ 		dec, pic_width, pic_height,
+@@ -948,7 +968,8 @@ int avs2_alloc_mmu(
+ }
+ #endif
+ 
+-#ifndef MV_USE_FIXED_BUF
++#if 0
++/*ndef MV_USE_FIXED_BUF*/
+ static void dealloc_mv_bufs(struct AVS2Decoder_s *dec)
+ {
+ 	int i;
+@@ -1125,6 +1146,57 @@ static int get_free_buf_count(struct AVS2Decoder_s *dec)
+ 	return count;
  }
  
-+static void wait_vh264_search_done(void)
++#ifdef CONSTRAIN_MAX_BUF_NUM
++static int get_vf_ref_only_buf_count(struct AVS2Decoder_s *dec)
 +{
-+	u32 vld_rp = READ_VREG(VLD_MEM_VIFIFO_RP);
++	struct avs2_decoder *avs2_dec = &dec->avs2_dec;
++	int i;
 +	int count = 0;
-+	do {
-+		usleep_range(100, 500);
-+		if (vld_rp == READ_VREG(VLD_MEM_VIFIFO_RP))
-+			break;
-+		if (count > 2000) {
-+			pr_info("%s, timeout  count %d vld_rp 0x%x VLD_MEM_VIFIFO_RP 0x%x\n",
-+					__func__, count, vld_rp, READ_VREG(VLD_MEM_VIFIFO_RP));
-+			break;
-+		} else
-+			vld_rp = READ_VREG(VLD_MEM_VIFIFO_RP);
-+		count++;
-+	} while (1);
++	for (i = 0; i < avs2_dec->ref_maxbuffer; i++) {
++		if ((avs2_dec->fref[i]->imgcoi_ref < -256
++#if 0
++			|| abs(avs2_dec->fref[i]->
++				imgtr_fwRefDistance - img->tr) >= 128
++#endif
++				) && avs2_dec->fref[i]->is_output == -1
++				&& avs2_dec->fref[i]->bg_flag == 0
++#ifndef NO_DISPLAY
++				&& avs2_dec->fref[i]->vf_ref > 0
++				&& avs2_dec->fref[i]->to_prepare_disp == 0
++#endif
++				) {
++			count++;
++		}
++	}
++
++	return count;
 +}
 +
++static int get_used_buf_count(struct AVS2Decoder_s *dec)
++{
++	struct avs2_decoder *avs2_dec = &dec->avs2_dec;
++	int i;
++	int count = 0;
++	for (i = 0; i < avs2_dec->ref_maxbuffer; i++) {
++		if ((avs2_dec->fref[i]->imgcoi_ref >= -256
++#if 0
++			|| abs(avs2_dec->fref[i]->
++				imgtr_fwRefDistance - img->tr) >= 128
++#endif
++				) || avs2_dec->fref[i]->is_output != -1
++				|| avs2_dec->fref[i]->bg_flag != 0
++#ifndef NO_DISPLAY
++				|| avs2_dec->fref[i]->vf_ref != 0
++				|| avs2_dec->fref[i]->to_prepare_disp != 0
++#endif
++				) {
++			count++;
++		}
++	}
 +
- static void error_do_work(struct work_struct *work)
- {
--	mutex_lock(&vh264_mutex);
++	return count;
++}
++#endif
  
- 	/*
- 	 * we need to lock vh264_stop/vh264_init.
-@@ -2851,8 +2869,9 @@ static void error_do_work(struct work_struct *work)
- 	if (atomic_read(&vh264_active)) {
- 		amvdec_stop();
- 		do {
--			msleep(20);
-+			msleep(50);
- 		} while (vh264_stream_switching_state != SWITCHING_STATE_OFF);
-+		wait_vh264_search_done();
- 		vh264_reset  = 1;
- #ifdef CONFIG_AMLOGIC_POST_PROCESS_MANAGER
- 		vh264_ppmgr_reset();
-@@ -2863,14 +2882,10 @@ static void error_do_work(struct work_struct *work)
- 
- 		vf_reg_provider(&vh264_vf_prov);
+ int avs2_bufmgr_init(struct AVS2Decoder_s *dec, struct BuffInfo_s *buf_spec_i,
+ 		struct buff_s *mc_buf_i) {
+@@ -1215,6 +1287,14 @@ static u32 buf_alloc_width;
+ static u32 buf_alloc_height;
+ static u32 dynamic_buf_num_margin = 7;
  #endif
--		msleep(30);
- 		vh264_prot_init();
++#ifdef CONSTRAIN_MAX_BUF_NUM
++static u32 run_ready_max_vf_only_num;
++static u32 run_ready_display_q_num;
++	/*0: not check
++	  0xff: avs2_dec.ref_maxbuffer
++	  */
++static u32 run_ready_max_buf_num = 0xff;
++#endif
+ static u32 buf_alloc_depth = 10;
+ static u32 buf_alloc_size;
+ /*
+@@ -1798,7 +1878,8 @@ static void init_buff_spec(struct AVS2Decoder_s *dec,
+ 
+ static void uninit_mmu_buffers(struct AVS2Decoder_s *dec)
+ {
+-#ifndef MV_USE_FIXED_BUF
++#if 0
++/*ndef MV_USE_FIXED_BUF*/
+ 	dealloc_mv_bufs(dec);
+ #endif
+ 	decoder_mmu_box_free(dec->mmu_box);
+@@ -1992,12 +2073,14 @@ static int config_pic(struct AVS2Decoder_s *dec,
+ #endif
+ 
+ #ifdef AVS2_10B_MMU
++#ifndef DYNAMIC_ALLOC_HEAD
+ 	pic->header_adr = decoder_bmmu_box_get_phy_addr(
+ 			dec->bmmu_box, HEADER_BUFFER_IDX(pic->index));
+ 
+ 	avs2_print(dec, AVS2_DBG_BUFMGR_MORE,
+ 		"buf_size %d, MMU header_adr %d: %ld\n",
+ 		buf_size, pic->index, pic->header_adr);
++#endif
+ #endif
+ 
+ 	i = pic->index;
+@@ -2036,7 +2119,7 @@ static int config_pic(struct AVS2Decoder_s *dec,
+ 			dec->mc_buf->buf_end)
+ 			y_adr = dec->mc_buf->buf_start + i * buf_size;
+ 		else {*/
+-		if (buf_size > 0) {
++		if (buf_size > 0 && pic->cma_alloc_addr == 0) {
+ 			ret = decoder_bmmu_box_alloc_buf_phy(dec->bmmu_box,
+ 					VF_BUFFER_IDX(i),
+ 					buf_size, DRIVER_NAME,
+@@ -2172,7 +2255,7 @@ static void init_pic_list(struct AVS2Decoder_s *dec,
+ 			dec->fatal_error |= DECODER_FATAL_ERROR_NO_MEM;
+ 			return;
+ 		}
 -
- 		amvdec_start();
- 		vh264_reset  = 0;
++#ifndef DYNAMIC_ALLOC_HEAD
+ 	for (i = 0; i < dec->used_buf_num; i++) {
+ 		unsigned long buf_addr;
+ 		if (decoder_bmmu_box_alloc_buf_phy
+@@ -2187,6 +2270,7 @@ static void init_pic_list(struct AVS2Decoder_s *dec,
+ 			return;
+ 		}
  	}
++#endif
+ #endif
+ 	dec->frame_height = avs2_dec->img.height;
+ 	dec->frame_width = avs2_dec->img.width;
+@@ -3765,7 +3849,8 @@ static int avs2_local_init(struct AVS2Decoder_s *dec)
+ 		(dec->vavs2_amstream_dec_info.height ?
+ 		dec->vavs2_amstream_dec_info.height :
+ 		dec->work_space_buf->max_height);
+-#ifndef MV_USE_FIXED_BUF
++#if 0
++/*ndef MV_USE_FIXED_BUF*/
+ 	if (init_mv_buf_list(dec) < 0) {
+ 		pr_err("%s: init_mv_buf_list fail\n", __func__);
+ 		return -1;
+@@ -4778,12 +4863,9 @@ static irqreturn_t vavs2_isr_thread_fn(int irq, void *data)
+ 
+ 			avs2_prepare_display_buf(dec);
+ 			dec->avs2_dec.hc.cur_pic = NULL;
+-#ifdef AVS2_10B_MMU
+ 			for (ii = 0; ii < dec->avs2_dec.ref_maxbuffer;
+ 					ii++) {
+ 				if (dec->avs2_dec.fref[ii]->
+-					refered_by_others == 0 &&
+-					dec->avs2_dec.fref[ii]->
+ 					bg_flag == 0 &&
+ 					dec->avs2_dec.fref[ii]->
+ 					is_output == -1 &&
+@@ -4791,15 +4873,37 @@ static irqreturn_t vavs2_isr_thread_fn(int irq, void *data)
+ 					mmu_alloc_flag &&
+ 					dec->avs2_dec.fref[ii]->
+ 					vf_ref == 0) {
+-					dec->avs2_dec.fref[ii]->
+-					mmu_alloc_flag = 0;
+-					/*release_buffer_4k(
+-					dec->avs2_dec.fref[ii]->index);*/
+-					decoder_mmu_box_free_idx(dec->mmu_box,
+-						dec->avs2_dec.fref[ii]->index);
++					struct avs2_frame_s *pic =
++						dec->avs2_dec.fref[ii];
++					if (dec->avs2_dec.fref[ii]->
++						refered_by_others == 0) {
++#ifdef AVS2_10B_MMU
++						dec->avs2_dec.fref[ii]->
++						mmu_alloc_flag = 0;
++						/*release_buffer_4k(
++						dec->avs2_dec.fref[ii]->index);*/
++						decoder_mmu_box_free_idx(dec->mmu_box,
++							dec->avs2_dec.fref[ii]->index);
++#ifdef DYNAMIC_ALLOC_HEAD
++						decoder_bmmu_box_free_idx(
++							dec->bmmu_box,
++							HEADER_BUFFER_IDX(pic->index));
++						pic->header_adr = 0;
++#endif
++#endif
++#ifndef MV_USE_FIXED_BUF
++						decoder_bmmu_box_free_idx(
++							dec->bmmu_box,
++							MV_BUFFER_IDX(pic->index));
++						pic->mpred_mv_wr_start_addr = 0;
++#endif
++					}
++					decoder_bmmu_box_free_idx(
++						dec->bmmu_box,
++						VF_BUFFER_IDX(pic->index));
++					dec->cma_alloc_addr = 0;
+ 				}
+ 			}
+-#endif
+ 		}
+ 	}
+ 
+@@ -5052,6 +5156,29 @@ static irqreturn_t vavs2_isr_thread_fn(int irq, void *data)
+ 					ret);
+ 		}
+ #endif
++
++#ifndef MV_USE_FIXED_BUF
++		if (ret >= 0 &&
++			dec->avs2_dec.hc.cur_pic->
++			mpred_mv_wr_start_addr == 0) {
++			unsigned long buf_addr;
++			unsigned mv_buf_size = 0x120000;
++			int i = dec->avs2_dec.hc.cur_pic->index;
++			if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1)
++				mv_buf_size = 0x120000 * 4;
++			if (decoder_bmmu_box_alloc_buf_phy
++			(dec->bmmu_box,
++			MV_BUFFER_IDX(i),
++			mv_buf_size,
++			DRIVER_NAME,
++			&buf_addr) < 0)
++				ret = -1;
++			else
++				dec->avs2_dec.hc.cur_pic->
++				mpred_mv_wr_start_addr
++				= buf_addr;
++		}
++#endif
+ 		if (ret < 0) {
+ 			avs2_print(dec, AVS2_DBG_BUFMGR,
+ 				"avs2_bufmgr_process=> %d, AVS2_10B_DISCARD_NAL\r\n",
+@@ -6292,6 +6419,28 @@ static unsigned long run_ready(struct vdec_s *vdec, unsigned long mask)
+ 		get_free_buf_count(dec) >=
+ 		run_ready_min_buf_num)
+ 		ret = 1;
++#ifdef CONSTRAIN_MAX_BUF_NUM
++	if (dec->pic_list_init_flag) {
++		if (run_ready_max_vf_only_num > 0 &&
++			get_vf_ref_only_buf_count(dec) >=
++			run_ready_max_vf_only_num
++			)
++			ret = 0;
++		if (run_ready_display_q_num > 0 &&
++			kfifo_len(&dec->display_q) >=
++			run_ready_display_q_num)
++			ret = 0;
++
++		if (run_ready_max_buf_num == 0xff &&
++			get_used_buf_count(dec) >=
++			dec->avs2_dec.ref_maxbuffer)
++			ret = 0;
++		else if (run_ready_max_buf_num &&
++			get_used_buf_count(dec) >=
++			run_ready_max_buf_num)
++			ret = 0;
++	}
++#endif
+ 	if (ret)
+ 		not_run_ready[dec->index] = 0;
+ 	else
+@@ -7025,6 +7174,17 @@ MODULE_PARM_DESC(max_buf_num, "\n max_buf_num\n");
+ module_param(dynamic_buf_num_margin, uint, 0664);
+ MODULE_PARM_DESC(dynamic_buf_num_margin, "\n dynamic_buf_num_margin\n");
+ 
++#ifdef CONSTRAIN_MAX_BUF_NUM
++module_param(run_ready_max_vf_only_num, uint, 0664);
++MODULE_PARM_DESC(run_ready_max_vf_only_num, "\n run_ready_max_vf_only_num\n");
++
++module_param(run_ready_display_q_num, uint, 0664);
++MODULE_PARM_DESC(run_ready_display_q_num, "\n run_ready_display_q_num\n");
++
++module_param(run_ready_max_buf_num, uint, 0664);
++MODULE_PARM_DESC(run_ready_max_buf_num, "\n run_ready_max_buf_num\n");
++#endif
++
+ module_param(mv_buf_margin, uint, 0664);
+ MODULE_PARM_DESC(mv_buf_margin, "\n mv_buf_margin\n");
+ 
+diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+index bcb26a1..0f7dfee 100644
+--- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
++++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+@@ -111,6 +111,8 @@
+ 
+ #define H264_DEV_NUM        9
+ 
++#define CONSTRAIN_MAX_BUF_NUM
++
+ #define H264_MMU
+ #define VIDEO_SIGNAL_TYPE_AVAILABLE_MASK	0x20000000
+ static int mmu_enable;
+@@ -139,6 +141,15 @@ static unsigned int reorder_dpb_size_margin_dv = 16;
+ static unsigned int reorder_dpb_size_margin = 6;
+ static unsigned int reference_buf_margin = 4;
+ 
++#ifdef CONSTRAIN_MAX_BUF_NUM
++static u32 run_ready_max_vf_only_num;
++static u32 run_ready_display_q_num;
++	/*0: not check
++	  0xff: mDPB.size
++	  */
++static u32 run_ready_max_buf_num = 0xff;
++#endif
++
+ #define VDEC_ASSIST_CANVAS_BLK32		0x5
+ 
+ 
+@@ -278,8 +289,7 @@ static unsigned int fast_output_enable = H264_OUTPUT_MODE_NORMAL;
+ 
+ static unsigned int enable_itu_t35 = 1;
+ 
+-//static unsigned int frmbase_cont_bitlevel = 0x40;//DEBUG_TMP
+-static unsigned int frmbase_cont_bitlevel;
++static unsigned int frmbase_cont_bitlevel = 0x40;
+ 
+ static unsigned int frmbase_cont_bitlevel2 = 0x1;
+ 
+@@ -820,6 +830,7 @@ struct vdec_h264_hw_s {
+ 	struct mutex chunks_mutex;
+ 	int need_cache_size;
+ 	u64 sc_start_time;
++	u8 frmbase_cont_flag;
+ };
+ 
+ static u32 again_threshold = 0x40;
+@@ -864,9 +875,6 @@ static void h264_clear_dpb(struct vdec_h264_hw_s *hw);
+ #define           HEVC_CM_CORE_STATUS                      0x3640
+ #define		HEVC_ASSIST_MMU_MAP_ADDR	0x3009
+ 
 -
--	mutex_unlock(&vh264_mutex);
+-
+-
+ #define H265_DW_NO_SCALE
+ #define H265_MEM_MAP_MODE 0  /*0:linear 1:32x32 2:64x32*/
+ #define H265_LOSLESS_COMPRESS_MODE
+@@ -4387,6 +4395,32 @@ void bufmgr_force_recover(struct h264_dpb_stru *p_H264_Dpb)
+ 	hw->reset_bufmgr_flag = 1;
  }
  
- static void stream_switching_done(void)
++#ifdef CONSTRAIN_MAX_BUF_NUM
++static int get_vf_ref_only_buf_count(struct vdec_h264_hw_s *hw)
++{
++	int i;
++	int count = 0;
++	for (i = 0; i < BUFSPEC_POOL_SIZE; i++) {
++		if (is_buf_spec_in_disp_q(hw, i) &&
++			hw->buffer_spec[i].vf_ref > 0)
++			count++;
++	}
++	return count;
++}
++
++static int get_used_buf_count(struct vdec_h264_hw_s *hw)
++{
++	int i;
++	int count = 0;
++	for (i = 0; i < BUFSPEC_POOL_SIZE; i++) {
++		if (is_buf_spec_in_use(hw, i))
++			count++;
++	}
++	return count;
++}
++#endif
++
++
+ static bool is_buffer_available(struct vdec_s *vdec)
+ {
+ 	bool buffer_available = 1;
+@@ -4874,6 +4908,21 @@ static irqreturn_t vh264_isr_thread_fn(struct vdec_s *vdec, int irq)
+ 	} else if (dec_dpb_status == H264_PIC_DATA_DONE) {
+ pic_done_proc:
+ 		reset_process_time(hw);
++
++		if (input_frame_based(vdec) &&
++			frmbase_cont_bitlevel != 0 &&
++			READ_VREG(VIFF_BIT_CNT) >
++			frmbase_cont_bitlevel) {
++			/*handle the case: multi pictures in one packet*/
++			dpb_print(DECODE_ID(hw), PRINT_FLAG_VDEC_STATUS,
++			"%s H264_PIC_DATA_DONE decode slice count %d, continue (bitcnt 0x%x)\n",
++			__func__,
++			hw->decode_pic_count,
++			READ_VREG(VIFF_BIT_CNT));
++			hw->frmbase_cont_flag = 1;
++		} else
++			hw->frmbase_cont_flag = 0;
++
+ 		if (p_H264_Dpb->mVideo.dec_picture) {
+ #ifdef CONFIG_AMLOGIC_MEDIA_ENHANCEMENT_DOLBYVISION
+ 			DEL_EXIST(hw,
+@@ -4994,16 +5043,7 @@ pic_done_proc:
+ 				}
+ 			}
+ 		}
+-		if (input_frame_based(vdec) &&
+-			frmbase_cont_bitlevel != 0 &&
+-			READ_VREG(VIFF_BIT_CNT) >
+-			frmbase_cont_bitlevel) {
+-			/*handle the case: multi pictures in one packet*/
+-			dpb_print(DECODE_ID(hw), PRINT_FLAG_VDEC_STATUS,
+-			"%s H264_PIC_DATA_DONE decode slice count %d, continue (bitcnt 0x%x)\n",
+-			__func__,
+-			hw->decode_pic_count,
+-			READ_VREG(VIFF_BIT_CNT));
++		if (hw->frmbase_cont_flag) {
+ 			/*do not DEC_RESULT_GET_DATA*/
+ 			hw->get_data_count = 0x7fffffff;
+ 			WRITE_VREG(DPB_STATUS_REG, H264_ACTION_SEARCH_HEAD);
+@@ -5042,6 +5082,8 @@ pic_done_proc:
+ #endif
+ 		if (!hw->wait_for_udr_send) {
+ 			hw->dec_result = DEC_RESULT_DONE;
++			dpb_print(DECODE_ID(hw), PRINT_FLAG_VDEC_STATUS,
++				"%s wait_for_udr_send\n", __func__);
+ 			vdec_schedule_work(&hw->work);
+ 		}
+ #ifdef CONFIG_AMLOGIC_MEDIA_ENHANCEMENT_DOLBYVISION
+@@ -5091,6 +5133,8 @@ pic_done_proc:
+ 		hw->switch_dvlayer_flag = 0;
+ 		hw->got_valid_nal = 1;
+ #endif
++		dpb_print(DECODE_ID(hw), PRINT_FLAG_VDEC_STATUS,
++			"%s H264_AUX_DATA_READY\n", __func__);
+ 		hw->dec_result = DEC_RESULT_DONE;
+ 		vdec_schedule_work(&hw->work);
+ 	} else if (/*(dec_dpb_status == H264_DATA_REQUEST) ||*/
+@@ -6572,8 +6616,13 @@ static void user_data_ready_notify_work(struct work_struct *work)
+ 	}
+ 
+ 	hw->wait_for_udr_send = 0;
+-	hw->dec_result = DEC_RESULT_DONE;
+-	vdec_schedule_work(&hw->work);
++	if (!hw->frmbase_cont_flag) {
++		hw->dec_result = DEC_RESULT_DONE;
++		dpb_print(DECODE_ID(hw), PRINT_FLAG_VDEC_STATUS,
++			"%s\n", __func__);
++
++		vdec_schedule_work(&hw->work);
++	}
+ }
+ 
+ static int vmh264_user_data_read(struct vdec_s *vdec,
+@@ -7155,6 +7204,29 @@ static unsigned long run_ready(struct vdec_s *vdec, unsigned long mask)
+ 	} else
+ 		ret = is_buffer_available(vdec);
+ 
++#ifdef CONSTRAIN_MAX_BUF_NUM
++	if (hw->dpb.mDPB.size > 0) { /*make sure initilized*/
++		if (run_ready_max_vf_only_num > 0 &&
++			get_vf_ref_only_buf_count(hw) >=
++			run_ready_max_vf_only_num
++			)
++			ret = 0;
++		if (run_ready_display_q_num > 0 &&
++			kfifo_len(&hw->display_q) >=
++			run_ready_display_q_num)
++			ret = 0;
++		/*avoid more buffers consumed when
++		switching resolution*/
++		if (run_ready_max_buf_num == 0xff &&
++			get_used_buf_count(hw) >=
++			hw->dpb.mDPB.size)
++			ret = 0;
++		else if (run_ready_max_buf_num &&
++			get_used_buf_count(hw) >=
++			run_ready_max_buf_num)
++			ret = 0;
++	}
++#endif
+ 	if (ret)
+ 		not_run_ready[DECODE_ID(hw)] = 0;
+ 	else
+@@ -8091,6 +8163,17 @@ MODULE_PARM_DESC(reorder_dpb_size_margin_dv,
+ module_param(reference_buf_margin, uint, 0664);
+ MODULE_PARM_DESC(reference_buf_margin, "\n ammvdec_h264 reference_buf_margin\n");
+ 
++#ifdef CONSTRAIN_MAX_BUF_NUM
++module_param(run_ready_max_vf_only_num, uint, 0664);
++MODULE_PARM_DESC(run_ready_max_vf_only_num, "\n run_ready_max_vf_only_num\n");
++
++module_param(run_ready_display_q_num, uint, 0664);
++MODULE_PARM_DESC(run_ready_display_q_num, "\n run_ready_display_q_num\n");
++
++module_param(run_ready_max_buf_num, uint, 0664);
++MODULE_PARM_DESC(run_ready_max_buf_num, "\n run_ready_max_buf_num\n");
++#endif
++
+ module_param(radr, uint, 0664);
+ MODULE_PARM_DESC(radr, "\nradr\n");
+ 
+@@ -8160,7 +8243,7 @@ MODULE_PARM_DESC(frmbase_cont_bitlevel2,
+ 	"\n amvdec_h264 frmbase_cont_bitlevel\n");
+ 
+ module_param(udebug_flag, uint, 0664);
+-MODULE_PARM_DESC(udebug_flag, "\n amvdec_h265 udebug_flag\n");
++MODULE_PARM_DESC(udebug_flag, "\n amvdec_mh264 udebug_flag\n");
+ 
+ module_param(udebug_pause_pos, uint, 0664);
+ MODULE_PARM_DESC(udebug_pause_pos, "\n udebug_pause_pos\n");
+diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
+index 9653427..9de28a0 100644
+--- a/drivers/frame_provider/decoder/h265/vh265.c
++++ b/drivers/frame_provider/decoder/h265/vh265.c
+@@ -47,6 +47,8 @@
+ #include "../utils/firmware.h"
+ #include "../../../common/chips/decoder_cpu_ver_info.h"
+ 
++#define CONSTRAIN_MAX_BUF_NUM
++
+ #define SWAP_HEVC_UCODE
+ #define DETREFILL_ENABLE
+ 
+@@ -332,6 +334,15 @@ static uint slice_parse_begin;
+ static u32 step;
+ static bool is_reset;
+ 
++#ifdef CONSTRAIN_MAX_BUF_NUM
++static u32 run_ready_max_vf_only_num;
++static u32 run_ready_display_q_num;
++	/*0: not check
++	  0xff: work_pic_num
++	  */
++static u32 run_ready_max_buf_num = 0xff;
++#endif
++
+ static u32 dynamic_buf_num_margin = 7;
+ static u32 buf_alloc_width;
+ static u32 buf_alloc_height;
+@@ -1420,6 +1431,7 @@ struct hevc_state_s {
+ 	unsigned char eos;
+ 	int pic_decoded_lcu_idx;
+ 	u8 over_decode;
++	u8 empty_flag;
+ #endif
+ 	struct vframe_s vframe_dummy;
+ 	char *provider_name;
+@@ -8466,6 +8478,7 @@ static irqreturn_t vh265_isr_thread_fn(int irq, void *data)
+ 		if (hevc->m_ins_flag) {
+ 			read_decode_info(hevc);
+ 			if (vdec_frame_based(hw_to_vdec(hevc))) {
++				hevc->empty_flag = 1;
+ 				goto pic_done;
+ 			} else {
+ 				if (
+@@ -8491,6 +8504,7 @@ static irqreturn_t vh265_isr_thread_fn(int irq, void *data)
+ 			read_decode_info(hevc);
+ 			if (vdec_frame_based(hw_to_vdec(hevc))) {
+ 				/*hevc->dec_result = DEC_RESULT_GET_DATA;*/
++				hevc->empty_flag = 1;
+ 				goto pic_done;
+ 			} else {
+ 				hevc->dec_result = DEC_RESULT_AGAIN;
+@@ -8516,7 +8530,7 @@ static irqreturn_t vh265_isr_thread_fn(int irq, void *data)
+ 					hevc->delrefill_check = 2;
+ 			}
+ #endif
+-
++			hevc->empty_flag = 0;
+ pic_done:
+ 			if (input_frame_based(hw_to_vdec(hevc)) &&
+ 				frmbase_cont_bitlevel != 0 &&
+@@ -8524,7 +8538,7 @@ pic_done:
+ 				(hevc->decode_size - (READ_VREG(HEVC_SHIFT_BYTE_COUNT))
+ 				 >	frmbase_cont_bitlevel)) {
+ 				/*handle the case: multi pictures in one packet*/
+-				hevc_print(hevc, 0,
++				hevc_print(hevc, PRINT_FLAG_VDEC_STATUS,
+ 				"%s  has more data index= %d, size=0x%x shiftcnt=0x%x)\n",
+ 				__func__,
+ 				hevc->decode_idx, hevc->decode_size,
+@@ -10308,6 +10322,43 @@ static void timeout_process(struct hevc_state_s *hevc)
+ 	vdec_schedule_work(&hevc->work);
+ }
+ 
++#ifdef CONSTRAIN_MAX_BUF_NUM
++static int get_vf_ref_only_buf_count(struct hevc_state_s *hevc)
++{
++	struct PIC_s *pic;
++	int i;
++	int count = 0;
++	for (i = 0; i < MAX_REF_PIC_NUM; i++) {
++		pic = hevc->m_PIC[i];
++		if (pic == NULL || pic->index == -1)
++			continue;
++		if (pic->output_mark == 0 && pic->referenced == 0
++			&& pic->output_ready == 1)
++			count++;
++	}
++
++	return count;
++}
++
++static int get_used_buf_count(struct hevc_state_s *hevc)
++{
++	struct PIC_s *pic;
++	int i;
++	int count = 0;
++	for (i = 0; i < MAX_REF_PIC_NUM; i++) {
++		pic = hevc->m_PIC[i];
++		if (pic == NULL || pic->index == -1)
++			continue;
++		if (pic->output_mark != 0 || pic->referenced != 0
++			|| pic->output_ready != 0)
++			count++;
++	}
++
++	return count;
++}
++#endif
++
++
+ static unsigned char is_new_pic_available(struct hevc_state_s *hevc)
+ {
+ 	struct PIC_s *new_pic = NULL;
+@@ -10654,7 +10705,8 @@ static void vh265_work(struct work_struct *work)
+ 			READ_VREG(HEVC_PARSER_LCU_START)
+ 			& 0xffffff;
+ 
+-		if (vdec->master == NULL && vdec->slave == NULL) {
++		if (vdec->master == NULL && vdec->slave == NULL &&
++			hevc->empty_flag == 0) {
+ 			hevc->over_decode =
+ 				(READ_VREG(HEVC_SHIFT_STATUS) >> 15) & 0x1;
+ 			if (hevc->over_decode)
+@@ -10919,6 +10971,32 @@ static unsigned long run_ready(struct vdec_s *vdec, unsigned long mask)
+ 		PRINT_FLAG_VDEC_DETAIL, "%s=>%d\r\n",
+ 		__func__, ret);
+ 	}
++
++#ifdef CONSTRAIN_MAX_BUF_NUM
++	if (hevc->pic_list_init_flag == 3) {
++		if (run_ready_max_vf_only_num > 0 &&
++			get_vf_ref_only_buf_count(hevc) >=
++			run_ready_max_vf_only_num
++			)
++			ret = 0;
++		if (run_ready_display_q_num > 0 &&
++			kfifo_len(&hevc->display_q) >=
++			run_ready_display_q_num)
++			ret = 0;
++
++		/*avoid more buffers consumed when
++		switching resolution*/
++		if (run_ready_max_buf_num == 0xff &&
++			get_used_buf_count(hevc) >=
++			get_work_pic_num(hevc))
++			ret = 0;
++		else if (run_ready_max_buf_num &&
++			get_used_buf_count(hevc) >=
++			run_ready_max_buf_num)
++			ret = 0;
++	}
++#endif
++
+ 	if (ret)
+ 		not_run_ready[hevc->index] = 0;
+ 	else
+@@ -11959,6 +12037,17 @@ MODULE_PARM_DESC(max_buf_num, "\n max_buf_num\n");
+ module_param(buf_alloc_size, uint, 0664);
+ MODULE_PARM_DESC(buf_alloc_size, "\n buf_alloc_size\n");
+ 
++#ifdef CONSTRAIN_MAX_BUF_NUM
++module_param(run_ready_max_vf_only_num, uint, 0664);
++MODULE_PARM_DESC(run_ready_max_vf_only_num, "\n run_ready_max_vf_only_num\n");
++
++module_param(run_ready_display_q_num, uint, 0664);
++MODULE_PARM_DESC(run_ready_display_q_num, "\n run_ready_display_q_num\n");
++
++module_param(run_ready_max_buf_num, uint, 0664);
++MODULE_PARM_DESC(run_ready_max_buf_num, "\n run_ready_max_buf_num\n");
++#endif
++
+ #if 0
+ module_param(re_config_pic_flag, uint, 0664);
+ MODULE_PARM_DESC(re_config_pic_flag, "\n re_config_pic_flag\n");
+diff --git a/firmware/video_ucode.bin b/firmware/video_ucode.bin
+old mode 100755
+new mode 100644
+index f35e55d..8214c3d
+Binary files a/firmware/video_ucode.bin and b/firmware/video_ucode.bin differ
