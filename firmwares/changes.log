@@ -1,86 +1,65 @@
-commit 4c3eb8b21aefebf9ad79c90cc9d37c1a9e69d8ca
+commit b85dd03459445af9c870c4df084b7d26936e28b7
 Author: shihong.zheng <shihong.zheng@amlogic.com>
-Date:   Thu Oct 24 17:31:28 2019 +0800
+Date:   Fri Oct 25 11:30:13 2019 +0800
 
-    mh264: reload ucode when decode error. [1/1]
+    mpeg2: fix mosaics when set error_skip. [1/1]
     
-    PD#SWPL-14162
+    PD#SWPL-12375
     
     Problem:
-    h264 can not decode out frame when reboot or
-    hot plug signal cable.
-    pmem ucode may switch to swap code. and decode
-    timeout or other error, then amvdec_stop, the
-    pmem ucode cannot start decode when start next
-    frame, so need reload ucode.
+    mpeg2 mosaics after set error_frame_skip_level to 2.
+    a error p frame store to ref list, so have not set
+    error skip flag in error_skip(). the next mosaic b frame
+    display before p.
     
     Solution:
-    reload ucode to avoid the swap code in pmem when
-    start decode.
+    set b frame error when error p in ref list.
+    set error_frame_skip_level to 2 default.
     
     Verify:
-    x301
+    u212
     
-    Change-Id: Id55054599b90b2baab5d5a0ccff191e1186a03ad
+    Change-Id: Ide23f0cf8a5f6ef72e1a6a6e129a7f7f1ef658fa
     Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-index 0d86144..bd1cd1f 100644
---- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
-+++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-@@ -5513,6 +5513,7 @@ static irqreturn_t vh264_isr_thread_fn(struct vdec_s *vdec, int irq)
- 			if (!is_i_slice) {
- 				if (hw->has_i_frame == 0) {
- 					amvdec_stop();
-+					vdec->mc_loaded = 0;
- 					hw->dec_result = DEC_RESULT_DONE;
- 					vdec_schedule_work(&hw->work);
- 					dpb_print(DECODE_ID(hw),
-@@ -5659,8 +5660,8 @@ static irqreturn_t vh264_isr_thread_fn(struct vdec_s *vdec, int irq)
- 						hw->reset_bufmgr_flag = 1;
- 						hw->reflist_error_count =0;
- 						amvdec_stop();
--						hw->dec_result
--							= DEC_RESULT_DONE;
-+						vdec->mc_loaded = 0;
-+						hw->dec_result = DEC_RESULT_DONE;
- 						vdec_schedule_work(&hw->work);
- 						return IRQ_HANDLED;
- 					}
-@@ -5678,6 +5679,7 @@ static irqreturn_t vh264_isr_thread_fn(struct vdec_s *vdec, int irq)
- 					((hw->dec_flag & NODISP_FLAG) == 0)) {
- 					hw->reset_bufmgr_flag = 1;
- 					amvdec_stop();
-+					vdec->mc_loaded = 0;
- 					hw->dec_result = DEC_RESULT_DONE;
- 					vdec_schedule_work(&hw->work);
- 					return IRQ_HANDLED;
-@@ -5963,6 +5965,7 @@ empty_proc:
- 				goto send_again;
- 			}
- 			amvdec_stop();
-+			vdec->mc_loaded = 0;
- 			dpb_print(DECODE_ID(hw), PRINT_FLAG_VDEC_STATUS,
- 				"%s %s\n", __func__,
- 				(dec_dpb_status == H264_SEARCH_BUFEMPTY) ?
-@@ -5978,7 +5981,6 @@ empty_proc:
- 				hw->search_dataempty_num++;
- 			else if (dec_dpb_status == H264_DECODE_TIMEOUT) {
- 				hw->decode_timeout_num++;
--				amvdec_stop();
- 				if (error_proc_policy & 0x4000) {
- 					hw->data_flag |= ERROR_FLAG;
- 					if ((p_H264_Dpb->last_dpb_status == H264_DECODE_TIMEOUT) ||
-@@ -6205,9 +6207,12 @@ static irqreturn_t vh264_isr(struct vdec_s *vdec, int irq)
+diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
+index a6f25be..6f64b7c 100644
+--- a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
++++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
+@@ -106,7 +106,7 @@
+ static u32 buf_size = 32 * 1024 * 1024;
+ static int pre_decode_buf_level = 0x800;
+ static u32 dec_control;
+-static u32 error_frame_skip_level;
++static u32 error_frame_skip_level = 2;
+ static u32 stat;
+ static u32 udebug_flag;
+ static unsigned int radr;
+@@ -1409,6 +1409,15 @@ static int update_reference(struct vdec_mpeg12_hw_s *hw,
+ 	return index;
+ }
  
- static void timeout_process(struct vdec_h264_hw_s *hw)
- {
-+	struct vdec_s *vdec = hw_to_vdec(hw);
- 	struct h264_dpb_stru *p_H264_Dpb = &hw->dpb;
++static bool is_ref_error(struct vdec_mpeg12_hw_s *hw)
++{
++	if ((hw->pics[hw->refs[0]].buffer_info & PICINFO_ERROR) ||
++		(hw->pics[hw->refs[1]].buffer_info & PICINFO_ERROR))
++		return 1;
++	return 0;
++}
 +
- 	hw->timeout_num++;
- 	amvdec_stop();
-+	vdec->mc_loaded = 0;
- 	if (hw->mmu_enable) {
- 		hevc_set_frame_done(hw);
- 		hevc_sao_wait_done(hw);
++
+ static irqreturn_t vmpeg12_isr_thread_fn(struct vdec_s *vdec, int irq)
+ {
+ 	u32 reg, index, info, seqinfo, offset, pts, frame_size, tmp;
+@@ -1537,6 +1546,11 @@ static irqreturn_t vmpeg12_isr_thread_fn(struct vdec_s *vdec, int irq)
+ 			hw->frame_prog = 0;
+ 		force_interlace_check(hw);
+ 
++		if (is_ref_error(hw)) {
++			if ((info & PICINFO_TYPE_MASK) == PICINFO_TYPE_B)
++				new_pic->buffer_info |= PICINFO_ERROR;
++		}
++
+ 		if (((info & PICINFO_TYPE_MASK) == PICINFO_TYPE_I) ||
+ 			((info & PICINFO_TYPE_MASK) == PICINFO_TYPE_P)) {
+ 			index = update_reference(hw, index);
