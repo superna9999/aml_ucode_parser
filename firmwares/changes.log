@@ -1,180 +1,41 @@
-commit 66a4f5114c58e50c868123ad0eb9f2330a7fb7ad
-Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Thu Nov 29 20:28:58 2018 +0800
+commit 76a7f2988404658a28f0407b3a7330f152c4a4bb
+Author: shihong.zheng <shihong.zheng@amlogic.com>
+Date:   Wed Jan 9 10:59:03 2019 +0800
 
-    media_modules: vmh264 fast output optimization [1/1]
+    media_module: fixed buildroot build failed [1/1]
     
-    PD#SWPL-2682
+    PD#SWPL-1738
     
     Problem:
-    there is issue in fast output handle
+    buildroot build failed
     
     Solution:
-    optimaztion vmh264 dpb manangement to always output first decode I frame asap.
-    all frames that poc less than the I will be discard. it is helpful for  KPI
-    of projects
+    modify print point value force to ulong from u32
     
     Verify:
-    U212
+    p212
     
-    Change-Id: Ib9732602ec9c3947ef52d37ef3b5e69ba15593b4
-    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
+    Change-Id: I574fd6e8a080af02ae998c26a20d87986e7b08e7
+    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/h264_multi/h264_dpb.c b/drivers/frame_provider/decoder/h264_multi/h264_dpb.c
-index c26c354..fc217c1 100644
---- a/drivers/frame_provider/decoder/h264_multi/h264_dpb.c
-+++ b/drivers/frame_provider/decoder/h264_multi/h264_dpb.c
-@@ -2147,7 +2147,8 @@ static void get_smallest_poc(struct DecodedPictureBuffer *p_Dpb, int *poc,
- 		/* rain */
- 		if ((*poc > p_Dpb->fs[i]->poc) &&
- 			(!p_Dpb->fs[i]->is_output) &&
--			(!p_Dpb->fs[i]->pre_output)) {
-+			(!p_Dpb->fs[i]->pre_output) &&
-+			(p_Dpb->fs[i]->is_used == 3)) {
- #else
- 		if ((*poc > p_Dpb->fs[i]->poc) && (!p_Dpb->fs[i]->is_output)) {
- #endif
-@@ -2167,8 +2168,18 @@ int output_frames(struct h264_dpb_stru *p_H264_Dpb, unsigned char flush_flag)
- 	if (!flush_flag) {
- 		for (i = 0; i < p_Dpb->used_size; i++) {
- 			if ((!p_Dpb->fs[i]->is_output) &&
--				(!p_Dpb->fs[i]->pre_output)) {
-+				(!p_Dpb->fs[i]->pre_output) && (p_Dpb->fs[i]->is_used == 3)) {
- 				none_displayed_num++;
-+				if ((p_H264_Dpb->first_insert_frame == FirstInsertFrm_IDLE)
-+					&&  (p_Dpb->fs[i]->is_used == 3)
-+					&& (p_Dpb->last_output_poc == INT_MIN)) {
-+					p_H264_Dpb->first_insert_frame = FirstInsertFrm_OUT;
-+					p_H264_Dpb->first_output_poc = p_Dpb->fs[i]->poc;
-+					fast_output_flag = 1;
-+					dpb_print(p_H264_Dpb->decoder_index, PRINT_FLAG_DPB_DETAIL,
-+						"%s first insert frame i %d  poc %d frame_num %x\n",
-+						__func__, i, p_Dpb->fs[i]->poc,  p_Dpb->fs[i]->frame_num);
-+				}
- 				/*check poc even/odd*/
- 				if (p_H264_Dpb->poc_even_odd_flag == 0 &&
- 					p_H264_Dpb->decode_pic_count >= 3)
-@@ -2180,10 +2191,6 @@ int output_frames(struct h264_dpb_stru *p_H264_Dpb, unsigned char flush_flag)
- 				if ((p_H264_Dpb->fast_output_enable & 0x1) &&
- 					(p_Dpb->fs[i]->data_flag & IDR_FLAG))
- 					fast_output_flag = 1;
--				if (p_H264_Dpb->fast_output_enable & 0x6
--					&& p_H264_Dpb->poc_even_odd_flag
--					&& p_Dpb->last_output_poc == INT_MIN)
--					fast_output_flag = 1;
- 				if ((p_H264_Dpb->fast_output_enable & 0x2) &&
- 					((p_Dpb->fs[i]->poc -
- 						p_Dpb->last_output_poc)
-@@ -2191,6 +2198,7 @@ int output_frames(struct h264_dpb_stru *p_H264_Dpb, unsigned char flush_flag)
- 					fast_output_flag = 1;
- 				if ((p_H264_Dpb->fast_output_enable & 0x4) &&
- 					(p_H264_Dpb->poc_even_odd_flag == 2) &&
-+					 (p_Dpb->fs[i]->is_used == 3) &&
- 					((p_Dpb->fs[i]->poc -
- 						p_Dpb->last_output_poc)
- 					== 2))
-@@ -2212,6 +2220,19 @@ int output_frames(struct h264_dpb_stru *p_H264_Dpb, unsigned char flush_flag)
- 	if (is_used_for_reference(p_Dpb->fs[pos]))
- 		return 0;
- #endif
-+	if (p_H264_Dpb->first_insert_frame == FirstInsertFrm_OUT) {
-+		dpb_print(p_H264_Dpb->decoder_index, PRINT_FLAG_DPB_DETAIL,
-+			"%s pos %d pos->poc %d  first_output_poc %d \n",
-+			__func__, pos, p_Dpb->fs[pos]->poc, p_H264_Dpb->first_output_poc);
-+
-+		if (p_Dpb->fs[pos]->poc < p_H264_Dpb->first_output_poc)
-+			p_Dpb->fs[pos]->data_flag |= NODISP_FLAG;
-+		else if (p_Dpb->last_output_poc != INT_MIN)
-+			p_H264_Dpb->first_insert_frame = FirstInsertFrm_SKIPDONE;
-+
-+		dpb_print(p_H264_Dpb->decoder_index, PRINT_FLAG_DPB_DETAIL,
-+			"%s first_insert_frame %d \n", __func__, p_H264_Dpb->first_insert_frame);
-+	}
- 	if (prepare_display_buf(p_H264_Dpb->vdec, p_Dpb->fs[pos]) >= 0)
- 		p_Dpb->fs[pos]->pre_output = 1;
- 	else {
-@@ -3479,8 +3500,7 @@ int store_picture_in_dpb(struct h264_dpb_stru *p_H264_Dpb,
- 	while (remove_unused_frame_from_dpb(p_H264_Dpb))
- 		;
- 
--	while (output_frames(p_H264_Dpb,
--		(p_H264_Dpb->fast_output_enable == H264_OUTPUT_MODE_FAST)))
-+	while (output_frames(p_H264_Dpb, 0))
- 		;
- 
- 	/* check for duplicate frame number in short term reference buffer */
-@@ -3534,9 +3554,12 @@ int store_picture_in_dpb(struct h264_dpb_stru *p_H264_Dpb,
- 	update_ltref_list(p_Dpb);
- 
- 	check_num_ref(p_Dpb);
--
--	if (p_H264_Dpb->fast_output_enable == H264_OUTPUT_MODE_FAST) {
--		while (output_frames(p_H264_Dpb,	1))
-+	if (p_H264_Dpb->fast_output_enable == H264_OUTPUT_MODE_FAST)
-+		i = 1;
-+	else
-+		i = 0;
-+	if (i || (p_H264_Dpb->first_insert_frame < FirstInsertFrm_SKIPDONE)) {
-+		while (output_frames(p_H264_Dpb, i))
- 			;
- 	}
- 
-@@ -5775,6 +5798,9 @@ int dpb_check_ref_list_error(
- 	int i;
- 	/*int j;*/
- 	struct Slice *currSlice = &p_H264_Dpb->mSlice;
-+	/* in first output, ignore ref check */
-+	if (p_H264_Dpb->first_insert_frame < FirstInsertFrm_SKIPDONE)
-+		return 0;
- 	if ((currSlice->slice_type != I_SLICE) &&
- 		(currSlice->slice_type != SI_SLICE)) {
- 		for (i = 0; i < currSlice->listXsize[0]; i++) {
-diff --git a/drivers/frame_provider/decoder/h264_multi/h264_dpb.h b/drivers/frame_provider/decoder/h264_multi/h264_dpb.h
-index 33c75ac..54c82ad 100644
---- a/drivers/frame_provider/decoder/h264_multi/h264_dpb.h
-+++ b/drivers/frame_provider/decoder/h264_multi/h264_dpb.h
-@@ -436,6 +436,13 @@ enum ProfileIDC {
- 	STEREO_HIGH    = 128   /*!< YUV 4:2:0/8  "Stereo High"*/
- };
- 
-+enum FirstInsertFrm_State {
-+	FirstInsertFrm_IDLE = 0,
-+	FirstInsertFrm_OUT = 1,
-+	FirstInsertFrm_SKIPDONE = 2,
-+};
-+
-+
- struct SPSParameters {
- 	unsigned int profile_idc;
- 	int pic_order_cnt_type;
-@@ -837,6 +844,8 @@ struct h264_dpb_stru {
- 	unsigned int dec_dpb_status;
- 	unsigned char buf_alloc_fail;
- 	unsigned int dpb_error_flag;
-+	unsigned int first_insert_frame;
-+	int first_output_poc;
- };
- 
- 
-diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-index d4ad7e0..6255293 100644
---- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
-+++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-@@ -261,7 +261,7 @@ static unsigned int force_sliding_margin;
- 		bit[15:8]: the max count of skip frames after first I
- 	3, start playing from IDR
- */
--static unsigned int first_i_policy = (15 << 8) | 2;
-+static unsigned int first_i_policy = 1;
- 
- /*
- 	fast_output_enable:
-@@ -5822,6 +5822,8 @@ static void vh264_local_init(struct vdec_h264_hw_s *hw)
- 
- 	if (i_only_flag & 0x100)
- 		hw->i_only = i_only_flag & 0xff;
-+	if (hw->i_only)
-+		hw->dpb.first_insert_frame = FirstInsertFrm_SKIPDONE;
- 
- 	if ((unsigned long) hw->vh264_amstream_dec_info.param
- 		& 0x08)
+diff --git a/drivers/frame_provider/decoder/utils/frame_check.c b/drivers/frame_provider/decoder/utils/frame_check.c
+index 699ff7f..9fd8a82 100644
+--- a/drivers/frame_provider/decoder/utils/frame_check.c
++++ b/drivers/frame_provider/decoder/utils/frame_check.c
+@@ -651,11 +651,11 @@ static int fbc_check_prepare(struct pic_check_t *check,
+ 		(!check->fbc_planes[1]) ||
+ 		(!check->fbc_planes[2]) ||
+ 		(!check->fbc_planes[3])) {
+-		dbg_print(0, "vmalloc staicplanes failed %x %x %x %x\n",
+-			(u32)check->fbc_planes[0],
+-			(u32)check->fbc_planes[1],
+-			(u32)check->fbc_planes[2],
+-			(u32)check->fbc_planes[3]);
++		dbg_print(0, "vmalloc staicplanes failed %lx %lx %lx %lx\n",
++			(ulong)check->fbc_planes[0],
++			(ulong)check->fbc_planes[1],
++			(ulong)check->fbc_planes[2],
++			(ulong)check->fbc_planes[3]);
+ 		for (i = 0; i < ARRAY_SIZE(check->fbc_planes); i++) {
+ 			if (check->fbc_planes[i]) {
+ 				vfree(check->fbc_planes[i]);
