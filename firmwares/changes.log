@@ -1,40 +1,260 @@
-commit f12be6c77f65b666f942e9c0803a6f215390718c
-Author: Chuangcheng Peng <chuangcheng.peng@amlogic.com>
-Date:   Thu Jul 4 20:11:43 2019 +0800
+commit e3b2152eff4cea27079e16da70e9ab14c8f0ce7b
+Author: shihong.zheng <shihong.zheng@amlogic.com>
+Date:   Thu Jun 20 14:54:56 2019 +0800
 
-    dvb: fix compile error about stack size [1/1]
+    vdec: add keep last pic mem_handle for multi instance. [1/1]
     
-    PD#SWPL-10868
+    PD#IPTV-3280
     
     Problem:
-    compile error about stack size
+    flash green screen when change to noraml play from fast forward.
     
     Solution:
-    demux compile use 32bit
+    1. add mem_handle for keeper;
+    2. do not vmap cc phyaddr when tvp enable;
+    3. clear some debug code, optimize code.
     
     Verify:
-    verify at R311
+    S905L3
     
-    Change-Id: I8de7cf34e28136d7353014ffba2d8afa8800e59e
-    Signed-off-by: Chuangcheng Peng <chuangcheng.peng@amlogic.com>
+    Change-Id: I8d04c2859cb2b62588b5587494cd79c7c9c029ec
+    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
 
-diff --git a/drivers/stream_input/parser/demux/sw_demux/dvbcsa2/config.h b/drivers/stream_input/parser/demux/sw_demux/dvbcsa2/config.h
-index 619cc45..196c2b3 100644
---- a/drivers/stream_input/parser/demux/sw_demux/dvbcsa2/config.h
-+++ b/drivers/stream_input/parser/demux/sw_demux/dvbcsa2/config.h
-@@ -10,11 +10,13 @@
- /* Using SSE2 bitslice. */
- /* #undef DVBCSA_USE_SSE */
+diff --git a/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c b/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c
+index 79d7976..352baa5 100644
+--- a/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c
++++ b/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c
+@@ -303,6 +303,9 @@ static irqreturn_t vmjpeg_isr(struct vdec_s *vdec, int irq)
+ 	vf->orientation = 0;
+ 	hw->vfbuf_use[index]++;
  
-+#if __SIZEOF_POINTER__ == 4
- /* Using 32 bits integer bitslice. */
--/* #undef DVBCSA_USE_UINT32 */
++	vf->mem_handle =
++		decoder_bmmu_box_get_mem_handle(
++			hw->mm_blk_handle, index);
+ 	kfifo_put(&hw->display_q, (const struct vframe_s *)vf);
+ 	ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 	hw->frame_num++;
+diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
+index 4b48612..29757a0 100644
+--- a/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
++++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
+@@ -1754,7 +1754,7 @@ static int vmpeg12_canvas_init(void)
+ 				ccbuf_phyAddress_virt
+ 					= codec_mm_phys_to_virt(
+ 						ccbuf_phyAddress);
+-				if (!ccbuf_phyAddress_virt) {
++				if ((!ccbuf_phyAddress_virt) && (!tvp_flag)) {
+ 					ccbuf_phyAddress_virt
+ 						= codec_mm_vmap(
+ 							ccbuf_phyAddress,
+diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
+index aff4f1a..a57fe89 100644
+--- a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
++++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
+@@ -1329,6 +1329,9 @@ static int prepare_display_buf(struct vdec_mpeg12_hw_s *hw,
+ 			if (i == 0)
+ 				decoder_do_frame_check(hw_to_vdec(hw), vf);
+ 			vdec->vdec_fps_detec(vdec->id);
++			vf->mem_handle =
++				decoder_bmmu_box_get_mem_handle(
++				hw->mm_blk_handle, index);
+ 			kfifo_put(&hw->display_q,
+ 				(const struct vframe_s *)vf);
+ 			vf_notify_receiver(vdec->vf_provider_name,
+@@ -1855,7 +1858,7 @@ static void vmpeg12_canvas_init(struct vdec_mpeg12_hw_s *hw)
+ 			hw->ccbuf_phyAddress_virt
+ 				= codec_mm_phys_to_virt(
+ 					hw->ccbuf_phyAddress);
+-			if (!hw->ccbuf_phyAddress_virt) {
++			if ((!hw->ccbuf_phyAddress_virt) && (!hw->tvp_flag)) {
+ 				hw->ccbuf_phyAddress_virt
+ 					= codec_mm_vmap(
+ 						hw->ccbuf_phyAddress,
+diff --git a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
+index 05b2bec..929e6ec 100644
+--- a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
++++ b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
+@@ -517,6 +517,9 @@ static int prepare_display_buf(struct vdec_mpeg4_hw_s * hw,
+ 				(const struct vframe_s *)vf);
+ 			return 0;
+ 		} else {
++			vf->mem_handle =
++				decoder_bmmu_box_get_mem_handle(
++					hw->mm_blk_handle, index);
+ 			kfifo_put(&hw->display_q,
+ 				(const struct vframe_s *)vf);
+ 			ATRACE_COUNTER(MODULE_NAME, vf->pts);
+@@ -561,6 +564,9 @@ static int prepare_display_buf(struct vdec_mpeg4_hw_s * hw,
+ 			kfifo_put(&hw->newframe_q,
+ 				(const struct vframe_s *)vf);
+ 		} else {
++			vf->mem_handle =
++				decoder_bmmu_box_get_mem_handle(
++					hw->mm_blk_handle, index);
+ 			kfifo_put(&hw->display_q,
+ 				(const struct vframe_s *)vf);
+ 			ATRACE_COUNTER(MODULE_NAME, vf->pts);
+@@ -611,6 +617,9 @@ static int prepare_display_buf(struct vdec_mpeg4_hw_s * hw,
+ 			kfifo_put(&hw->newframe_q,
+ 				(const struct vframe_s *)vf);
+ 		} else {
++			vf->mem_handle =
++				decoder_bmmu_box_get_mem_handle(
++					hw->mm_blk_handle, index);
+ 			kfifo_put(&hw->display_q,
+ 				(const struct vframe_s *)vf);
+ 			ATRACE_COUNTER(MODULE_NAME, vf->pts);
+@@ -1014,6 +1023,7 @@ static irqreturn_t vmpeg4_isr_thread_fn(struct vdec_s *vdec, int irq)
+ 			hw->chunk_frame_count);
+ 		hw->last_pts = disp_pic->pts;
+ 		hw->last_pts64 = disp_pic->pts64;
++		hw->frame_dur = duration;
+ 		disp_pic->duration = duration;
+ 		disp_pic->repeat_cnt = repeat_cnt;
+ 
+@@ -1212,7 +1222,8 @@ static int  vmpeg_vf_states(struct vframe_states *states, void *op_arg)
+ 
+ static int dec_status(struct vdec_s *vdec, struct vdec_info *vstatus)
+ {
+-	struct vdec_mpeg4_hw_s *hw = (struct vdec_mpeg4_hw_s *)vdec->private;
++	struct vdec_mpeg4_hw_s *hw =
++		(struct vdec_mpeg4_hw_s *)vdec->private;
+ 
+ 	if (!hw)
+ 		return -1;
+@@ -1226,6 +1237,9 @@ static int dec_status(struct vdec_s *vdec, struct vdec_info *vstatus)
+ 		vstatus->frame_rate = DURATION_UNIT;
+ 	vstatus->error_count = READ_VREG(MP4_ERR_COUNT);
+ 	vstatus->status = hw->stat;
++	vstatus->frame_dur = hw->frame_dur;
++	snprintf(vstatus->vdec_name, sizeof(vstatus->vdec_name),
++			"%s", DRIVER_NAME);
+ 
+ 	return 0;
+ }
+diff --git a/drivers/frame_provider/decoder/utils/vdec_input.c b/drivers/frame_provider/decoder/utils/vdec_input.c
+index 9c7ed4c..d819885 100644
+--- a/drivers/frame_provider/decoder/utils/vdec_input.c
++++ b/drivers/frame_provider/decoder/utils/vdec_input.c
+@@ -746,11 +746,6 @@ static int	vdec_input_get_free_block(
+ 	return 0;
+ }
+ 
+-static void *virt_mem = NULL;
+-static u32 virt_mem_size = (SZ_1M * 2);
+-static u32 inoffset = 0;
+-static u32 trig_error_data = 0;
 -
-+#define DVBCSA_USE_UINT32  1
-+#else
- /* Using 64 bits integer bitslice. */
- #define DVBCSA_USE_UINT64 1
-+#endif
+ int vdec_input_add_chunk(struct vdec_input_s *input, const char *buf,
+ 		size_t count, u32 handle)
+ {
+@@ -758,7 +753,6 @@ int vdec_input_add_chunk(struct vdec_input_s *input, const char *buf,
+ 	struct vframe_chunk_s *chunk;
+ 	struct vdec_s *vdec = input->vdec;
+ 	struct vframe_block_list_s *block;
+-	int crc = 0;
  
- /* Define to 1 if you have the <assert.h> header file. */
- #ifdef __KERNEL__
+ 	int need_pading_size = MIN_FRAME_PADDING_SIZE;
+ 
+@@ -809,27 +803,6 @@ int vdec_input_add_chunk(struct vdec_input_s *input, const char *buf,
+ 		if (input_stream_based(input))
+ 			return -EINVAL;
+ 
+-		if (!virt_mem) {
+-			virt_mem = vmalloc(virt_mem_size);
+-			if (!virt_mem)
+-				pr_info("%s, vmalloc buffer failed\n", __func__);
+-		}
+-
+-		if (virt_mem) {
+-			if (count < virt_mem_size) {
+-				int r = copy_from_user(virt_mem, (void *)buf, count);
+-				if (r)
+-					pr_info("%s copy_from_user failed\n", __func__);
+-				inoffset += count;
+-				crc = 0;
+-				crc = crc32_le(crc, virt_mem, count);
+-				//pr_info("[INPUT] crc: %x, size: %zx, offset: %x\n", crc, count, inoffset);
+-			} else {
+-				pr_info("%s, count(%zx) > virt_mem_size(%x)\n", __func__, count, virt_mem_size);
+-			}
+-		}
+-		count -= trig_error_data;
+-
+ 		if (count < PAGE_SIZE) {
+ 			need_pading_size = PAGE_ALIGN(count + need_pading_size) -
+ 				count;
+@@ -949,7 +922,7 @@ int vdec_input_add_chunk(struct vdec_input_s *input, const char *buf,
+ 		input->total_wr_count += 38;
+ #endif
+ 
+-	return (count + trig_error_data);
++	return count;
+ }
+ 
+ int vdec_input_add_frame(struct vdec_input_s *input, const char *buf,
+diff --git a/drivers/frame_provider/decoder/vp9/vvp9.c b/drivers/frame_provider/decoder/vp9/vvp9.c
+index aeb7e6b..751aeae 100644
+--- a/drivers/frame_provider/decoder/vp9/vvp9.c
++++ b/drivers/frame_provider/decoder/vp9/vvp9.c
+@@ -6254,11 +6254,21 @@ static int vp9_local_init(struct VP9Decoder_s *pbi)
+ 		pbi->vvp9_amstream_dec_info.height :
+ 		pbi->work_space_buf->max_height));
+ 
++	/* video is not support unaligned with 64 in tl1
++	** vdec canvas mode will be linear when dump yuv is set
++	*/
+ 	if ((get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1) &&
+ 		(pbi->double_write_mode != 0) &&
+ 		(((pbi->max_pic_w % 64) != 0) ||
+-		(pbi->vvp9_amstream_dec_info.width % 64) != 0))
+-		mem_map_mode = 2;
++		(pbi->vvp9_amstream_dec_info.width % 64) != 0)) {
++		if (hw_to_vdec(pbi)->canvas_mode !=
++			CANVAS_BLKMODE_LINEAR)
++			mem_map_mode = 2;
++		else {
++			mem_map_mode = 0;
++			pr_info("vdec blkmod linear, force mem_map_mode 0\n");
++		}
++	}
+ 
+ #ifndef MV_USE_FIXED_BUF
+ 	if (init_mv_buf_list(pbi) < 0) {
+@@ -6923,22 +6933,22 @@ static int prepare_display_buf(struct VP9Decoder_s *pbi,
+ 		}
+ 		update_vf_memhandle(pbi, vf, pic_config);
+ 		if (!(pic_config->y_crop_width == 196
+-				&& pic_config->y_crop_height == 196
+-				&& (debug & VP9_DEBUG_NO_TRIGGER_FRAME) == 0
+-				)) {
+-		inc_vf_ref(pbi, pic_config->index);
+-		decoder_do_frame_check(hw_to_vdec(pbi), vf);
+-		kfifo_put(&pbi->display_q, (const struct vframe_s *)vf);
+-		ATRACE_COUNTER(MODULE_NAME, vf->pts);
+-		pbi->vf_pre_count++;
++		&& pic_config->y_crop_height == 196
++		&& (debug & VP9_DEBUG_NO_TRIGGER_FRAME) == 0
++		&& (get_cpu_major_id() < AM_MESON_CPU_MAJOR_ID_TXLX))) {
++			inc_vf_ref(pbi, pic_config->index);
++			decoder_do_frame_check(hw_to_vdec(pbi), vf);
++			kfifo_put(&pbi->display_q, (const struct vframe_s *)vf);
++			ATRACE_COUNTER(MODULE_NAME, vf->pts);
++			pbi->vf_pre_count++;
+ #ifndef CONFIG_AMLOGIC_MEDIA_MULTI_DEC
+-		/*count info*/
+-		gvs->frame_dur = pbi->frame_dur;
+-		vdec_count_info(gvs, 0, stream_offset);
++			/*count info*/
++			gvs->frame_dur = pbi->frame_dur;
++			vdec_count_info(gvs, 0, stream_offset);
+ #endif
+-		hw_to_vdec(pbi)->vdec_fps_detec(hw_to_vdec(pbi)->id);
+-		vf_notify_receiver(pbi->provider_name,
+-				VFRAME_EVENT_PROVIDER_VFRAME_READY, NULL);
++			hw_to_vdec(pbi)->vdec_fps_detec(hw_to_vdec(pbi)->id);
++			vf_notify_receiver(pbi->provider_name,
++					VFRAME_EVENT_PROVIDER_VFRAME_READY, NULL);
+ 		} else {
+ 			pbi->stat |= VP9_TRIGGER_FRAME_DONE;
+ 			hevc_source_changed(VFORMAT_VP9, 196, 196, 30);
