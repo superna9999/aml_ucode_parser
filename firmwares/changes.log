@@ -1,69 +1,53 @@
-commit 00890de05d686e5f0a094a2aba5a12e821a39e32
-Author: shihong.zheng <shihong.zheng@amlogic.com>
-Date:   Sat Aug 17 15:33:21 2019 +0800
+commit 4dac82134254e061cb40a23b856cd6896eea56c8
+Author: Hui Zhang <hui.zhang@amlogic.com>
+Date:   Sun Aug 18 16:34:13 2019 +0800
 
-    esparser: fix vp9 play abnormal. [1/1]
+    vh265: fix h265 playback stutter issue  [1/1]
     
-    PD#SWPL-12692
+    PD#SWPL-12773
     
     Problem:
-    vp9 play abnormal, data dropped at end
-    when threadrw workqueue wirte bitstream.
-    int type implicit convert to size_t when
-    compare with size_t type.
+    when play back to start in dvb, there is error in stream.
+    it caused poc issue and output is not in correct order
     
     Solution:
-    firstly check ret less than 0, avoid
-    complicit convert to size_t int 64bit
-    when compare with left which is size_t type.
+    add check for poc. once there is some errors. for ex:
+    new poc more less than pre poc. and it is idr pic.
+    decoder need to do a flush first. and start decoding
+    from new poc
     
     Verify:
-    p212
+    x301
     
-    Change-Id: I8942ea23c2e711d084971bbbde63e3374b4a9b6b
-    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
+    Change-Id: I5442f1b120b0c94aafed6078190a8dfc689b47b1
+    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
 
-diff --git a/drivers/stream_input/parser/thread_rw.c b/drivers/stream_input/parser/thread_rw.c
-index dd147a7..4e4864f 100644
---- a/drivers/stream_input/parser/thread_rw.c
-+++ b/drivers/stream_input/parser/thread_rw.c
-@@ -151,6 +151,7 @@ static ssize_t threadrw_write_in(
- {
- 	int ret = 0;
- 	int off = 0;
-+	/* int change to size_t for buffer overflow on OTT-5057 */
- 	size_t left = count;
- 	int wait_num = 0;
- 	unsigned long flags;
-@@ -159,14 +160,11 @@ static ssize_t threadrw_write_in(
- 		ret = threadrw_write_onece(task,
- 				task->file,
- 				stbuf, buf + off, left);
--		if (ret >= left) {
--			off = count;
--			left = 0;
--		} else if (ret > 0) {
--			off += ret;
--			left -= ret;
- 
--		} else if (ret < 0) {
-+		/* firstly check ret < 0, avoid the risk of -EAGAIN in ret
-+		 * implicit convert to size_t when compare with "size_t left".
-+		 */
-+		if (ret < 0) {
- 			if (off > 0) {
- 				break;	/*have write ok some data. */
- 			} else if (ret == -EAGAIN) {
-@@ -183,6 +181,12 @@ static ssize_t threadrw_write_in(
- 				break;
+diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
+index b6108ec..0419ae0 100644
+--- a/drivers/frame_provider/decoder/h265/vh265.c
++++ b/drivers/frame_provider/decoder/h265/vh265.c
+@@ -6513,6 +6513,16 @@ static int hevc_slice_segment_header_process(struct hevc_state_s *hevc,
+ 				iPOCmsb = 0;
  			}
- 			break;	/*to end */
-+		} else if (ret >= left) {
-+			off = count;
-+			left = 0;
-+		} else if (ret > 0) {
-+			off += ret;
-+			left -= ret;
+ 			hevc->curr_POC = (iPOCmsb + iPOClsb);
++			if (hevc->curr_POC != INVALID_POC && hevc->curr_POC) {
++				if (((hevc->i_only & 0x4)  == 0) && (hevc->m_nalUnitType != NAL_UNIT_CODED_SLICE_IDR
++					&& hevc->m_nalUnitType != NAL_UNIT_CODED_SLICE_IDR_N_LP)
++					&& ((hevc->curr_POC + hevc->sps_num_reorder_pics_0) < hevc->iPrevPOC)) {
++					hevc_print(hevc, 0,
++					"Flush  .. num_reorder_pic %d  pic->POC %d  hevc->iPrevPOC %d\n",
++					hevc->sps_num_reorder_pics_0,hevc->curr_POC,hevc->iPrevPOC);
++					flush_output(hevc, get_pic_by_POC(hevc, hevc->curr_POC));
++				}
++			}
+ 			if ((hevc->m_temporalId - 1) == 0)
+ 				hevc->iPrevTid0POC = hevc->curr_POC;
+ 			else {
+@@ -8149,6 +8159,7 @@ static int prepare_display_buf(struct hevc_state_s *hevc, struct PIC_s *pic)
+ 				__func__, vf->v4l_mem_handle);
  		}
- 	}
  
++
+ #ifdef MULTI_INSTANCE_SUPPORT
+ 		if (vdec_frame_based(hw_to_vdec(hevc))) {
+ 			vf->pts = pic->pts;
