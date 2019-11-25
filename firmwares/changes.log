@@ -1,39 +1,28 @@
-commit 1e7f2e11bf79e9f47ad8430c2b18277eb50e7658
+commit 00e6c04d4266372041e589be538ca72c434afe30
 Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Wed Aug 21 16:48:23 2019 +0800
+Date:   Wed Aug 21 18:35:02 2019 +0800
 
-    Revert "vh265: fix h265 playback stutter issue  [1/1]"
+    vh265: can't playback issue on R314  [1/1]
     
-    This reverts commit 4dac82134254e061cb40a23b856cd6896eea56c8.
+    PD#SWPL-13016
     
-    Change-Id: I60cf2f0f0ed7b3afa8f00a271e86dcd2318aaf6a
+    Problem:
+    h265 gxl based ucode size overflow, cause can't playback
+    caused by TV8081 commit
+    
+    Solution:
+    fix size over flow issue, remove some nop
+    
+    ucode gerrit: 83642
+    ucode change id : I22a4b
+    ucode commit id: 8263b2
+    
+    Verify:
+    R314
+    
+    Change-Id: I68e319c3326461bbf9f172012dfd24ba3834ba0f
+    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
-index 0419ae0..b6108ec 100644
---- a/drivers/frame_provider/decoder/h265/vh265.c
-+++ b/drivers/frame_provider/decoder/h265/vh265.c
-@@ -6513,16 +6513,6 @@ static int hevc_slice_segment_header_process(struct hevc_state_s *hevc,
- 				iPOCmsb = 0;
- 			}
- 			hevc->curr_POC = (iPOCmsb + iPOClsb);
--			if (hevc->curr_POC != INVALID_POC && hevc->curr_POC) {
--				if (((hevc->i_only & 0x4)  == 0) && (hevc->m_nalUnitType != NAL_UNIT_CODED_SLICE_IDR
--					&& hevc->m_nalUnitType != NAL_UNIT_CODED_SLICE_IDR_N_LP)
--					&& ((hevc->curr_POC + hevc->sps_num_reorder_pics_0) < hevc->iPrevPOC)) {
--					hevc_print(hevc, 0,
--					"Flush  .. num_reorder_pic %d  pic->POC %d  hevc->iPrevPOC %d\n",
--					hevc->sps_num_reorder_pics_0,hevc->curr_POC,hevc->iPrevPOC);
--					flush_output(hevc, get_pic_by_POC(hevc, hevc->curr_POC));
--				}
--			}
- 			if ((hevc->m_temporalId - 1) == 0)
- 				hevc->iPrevTid0POC = hevc->curr_POC;
- 			else {
-@@ -8159,7 +8149,6 @@ static int prepare_display_buf(struct hevc_state_s *hevc, struct PIC_s *pic)
- 				__func__, vf->v4l_mem_handle);
- 		}
- 
--
- #ifdef MULTI_INSTANCE_SUPPORT
- 		if (vdec_frame_based(hw_to_vdec(hevc))) {
- 			vf->pts = pic->pts;
+diff --git a/firmware/video_ucode.bin b/firmware/video_ucode.bin
+index 4b5d60e..cd6b03c 100755
+Binary files a/firmware/video_ucode.bin and b/firmware/video_ucode.bin differ
