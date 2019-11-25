@@ -1,176 +1,34 @@
-commit bbc7269fe5f7baf47e6143892ba9eeaaa46a6b6a
-Author: baoguo.chen <baoguo.chen@amlogic.com>
-Date:   Thu Jan 10 14:06:55 2019 +0800
+commit a15f7b833bffdd9d00fa9766463db9aa95acb057
+Author: Lei Qian <lei.qian@amlogic.com>
+Date:   Tue Jan 15 21:45:09 2019 -0800
 
-    media_module: fixed checkin pts error [1/1]
+    Revert "dvb: modify parser source setting algorithms [1/1]"
     
-    PD#SWPL-3477
+    This reverts commit 15d58dc9d68070e1210d71c2b72c6638fc390004.
     
-    Problem:
-    when checkinpts, data len will be repeatedly
-    calculated,causing droping frame.
-    
-    Solution:
-    after parsing date, update video_data_parsed and
-    task->buffered_data_size at the same time.
-    
-    Verify:
-    P215 Linux
-    
-    Change-Id: Ib07f434743e6b199a9961b3caa3e10bf6785b96c
-    Signed-off-by: baoguo.chen <baoguo.chen@amlogic.com>
+    Change-Id: I1e4a28e7da818d867fb352dfc6bedf84946cd57c
 
-diff --git a/drivers/stream_input/parser/esparser.c b/drivers/stream_input/parser/esparser.c
-index cdd7896..1cf8f02 100644
---- a/drivers/stream_input/parser/esparser.c
-+++ b/drivers/stream_input/parser/esparser.c
-@@ -154,7 +154,7 @@ static inline u32 buf_wp(u32 type)
- }
- 
- static ssize_t _esparser_write(const char __user *buf,
--		size_t count, u32 type, int isphybuf)
-+		size_t count, struct stream_buf_s *stbuf, int isphybuf)
- {
- 	size_t r = count;
- 	const char __user *p = buf;
-@@ -164,6 +164,7 @@ static ssize_t _esparser_write(const char __user *buf,
- 	int ret;
- 	u32 wp;
- 	dma_addr_t dma_addr = 0;
-+	u32 type = stbuf->type;
- 
- 	if (type == BUF_TYPE_HEVC)
- 		parser_type = PARSER_VIDEO;
-@@ -248,11 +249,12 @@ static ssize_t _esparser_write(const char __user *buf,
- 	else if (type == BUF_TYPE_AUDIO)
- 		audio_data_parsed += len;
- 
-+	threadrw_update_buffer_level(stbuf, len);
- 	return len;
- }
- 
- static ssize_t _esparser_write_s(const char __user *buf,
--			size_t count, u32 type)
-+			size_t count, struct stream_buf_s *stbuf)
- {
- 	size_t r = count;
- 	const char __user *p = buf;
-@@ -260,6 +262,7 @@ static ssize_t _esparser_write_s(const char __user *buf,
- 	int ret;
- 	u32 wp, buf_start, buf_end;
- 	dma_addr_t buf_wp_map;
-+	u32 type = stbuf->type;
- 
- 	if (type != BUF_TYPE_AUDIO)
- 		BUG();
-@@ -313,7 +316,10 @@ static ssize_t _esparser_write_s(const char __user *buf,
- 
- end_write:
- 	if (type == BUF_TYPE_AUDIO)
-+	{
- 		audio_data_parsed += len;
-+		threadrw_update_buffer_level(stbuf, len);
-+	}
- 
- 	return len;
- }
-@@ -350,7 +356,11 @@ s32 es_vpts_checkin(struct stream_buf_s *buf, u32 pts)
- 		return 0;
+diff --git a/drivers/stream_input/parser/hw_demux/aml_dmx.c b/drivers/stream_input/parser/hw_demux/aml_dmx.c
+index ac6747a..378d996 100644
+--- a/drivers/stream_input/parser/hw_demux/aml_dmx.c
++++ b/drivers/stream_input/parser/hw_demux/aml_dmx.c
+@@ -2774,16 +2774,10 @@ static int dmx_enable(struct aml_dmx *dmx)
+ 		break;
  	}
- #endif
--	u32 passed = video_data_parsed + threadrw_buffer_level(buf);
-+	u32 passed = 0;
-+
-+	mutex_lock(&esparser_mutex);
-+	passed = video_data_parsed + threadrw_buffer_level(buf);
-+	mutex_unlock(&esparser_mutex);
  
- 	return pts_checkin_offset(PTS_TYPE_VIDEO, passed, pts);
- 
-@@ -366,7 +376,10 @@ s32 es_apts_checkin(struct stream_buf_s *buf, u32 pts)
- 		return 0;
- 	}
- #endif
--	u32 passed = audio_data_parsed + threadrw_buffer_level(buf);
-+	u32 passed = 0;
-+	mutex_lock(&esparser_mutex);
-+	passed = audio_data_parsed + threadrw_buffer_level(buf);
-+	mutex_unlock(&esparser_mutex);
- 
- 	return pts_checkin_offset(PTS_TYPE_AUDIO, passed, pts);
- }
-@@ -806,12 +819,13 @@ ssize_t drm_write(struct file *file, struct stream_buf_s *stbuf,
- 
- 		if (stbuf->type != BUF_TYPE_AUDIO)
- 			r = _esparser_write((const char __user *)realbuf, len,
--					stbuf->type, isphybuf);
-+					stbuf, isphybuf);
- 		else
- 			r = _esparser_write_s((const char __user *)realbuf, len,
--					stbuf->type);
-+					stbuf);
- 		if (r < 0) {
- 			pr_info("drm_write _esparser_write failed [%d]\n", r);
-+			mutex_unlock(&esparser_mutex);
- 			return r;
- 		}
- 		havewritebytes += r;
-@@ -881,9 +895,9 @@ ssize_t esparser_write_ex(struct file *file,
- 	mutex_lock(&esparser_mutex);
- 
- 	if (stbuf->type == BUF_TYPE_AUDIO)
--		r = _esparser_write_s(buf, len, stbuf->type);
-+		r = _esparser_write_s(buf, len, stbuf);
- 	else
--		r = _esparser_write(buf, len, stbuf->type, flags & 1);
-+		r = _esparser_write(buf, len, stbuf, flags & 1);
- 
- 	mutex_unlock(&esparser_mutex);
- 
-diff --git a/drivers/stream_input/parser/thread_rw.c b/drivers/stream_input/parser/thread_rw.c
-index 04e5a2c..6fe6cd8 100644
---- a/drivers/stream_input/parser/thread_rw.c
-+++ b/drivers/stream_input/parser/thread_rw.c
-@@ -254,7 +254,6 @@ static int do_write_work_in(struct threadrw_write_task *task)
- 	if (write_len > 0) {
- 		spin_lock_irqsave(&task->lock, flags);
- 		task->passed_data_len += write_len;
--		task->buffered_data_size -= write_len;
- 		spin_unlock_irqrestore(&task->lock, flags);
- 	}
- 	return need_re_write;
-@@ -445,6 +444,22 @@ err1:
-  *fifo data size;
-  */
- 
-+void threadrw_update_buffer_level(struct stream_buf_s *stbuf,
-+	int parsed_size)
-+{
-+	struct threadrw_write_task *task = stbuf->write_thread;
-+	unsigned long flags;
-+
-+	if (task)
-+	{
-+		spin_lock_irqsave(&task->lock, flags);
-+		task->buffered_data_size -= parsed_size;
-+		spin_unlock_irqrestore(&task->lock, flags);
-+	}
-+
-+}
-+EXPORT_SYMBOL(threadrw_update_buffer_level);
-+
- int threadrw_buffer_level(struct stream_buf_s *stbuf)
- {
- 	struct threadrw_write_task *task = stbuf->write_thread;
-diff --git a/drivers/stream_input/parser/thread_rw.h b/drivers/stream_input/parser/thread_rw.h
-index c6283f0..a91b004 100644
---- a/drivers/stream_input/parser/thread_rw.h
-+++ b/drivers/stream_input/parser/thread_rw.h
-@@ -48,5 +48,6 @@ int threadrw_alloc_more_buffer_size(
- 	struct stream_buf_s *stbuf,
- 	int size);
- int threadrw_support_more_buffers(struct stream_buf_s *stbuf);
 -
-+void threadrw_update_buffer_level(struct stream_buf_s *stbuf,
-+	int parsed_size);
- #endif
+-	hi_bsf = 0;
+-	if (dmx->id == 0 && dvb->stb_source == AM_TS_SRC_DMX0)
+-		hi_bsf = 1;
+-
+-	if (dmx->id == 1 && dvb->stb_source == AM_TS_SRC_DMX1)
+-		hi_bsf = 1;
+-
+-	if (dmx->id == 2 && dvb->stb_source == AM_TS_SRC_DMX2)
++	if (dmx->channel[0].used || dmx->channel[1].used)
+ 		hi_bsf = 1;
++	else
++		hi_bsf = 0;
+ 
+ 	if ((dvb->dsc[0].dst != -1)
+ 	    && ((dvb->dsc[0].dst - AM_TS_SRC_DMX0) == dmx->id))
