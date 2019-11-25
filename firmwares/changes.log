@@ -1,46 +1,106 @@
-commit 15d58dc9d68070e1210d71c2b72c6638fc390004
-Author: Rui Wang <rui.wang@amlogic.com>
-Date:   Fri Jan 11 11:15:27 2019 +0800
+commit be862a73b0146eac96fe4d40ea09e4e1b834f306
+Author: Hui Zhang <hui.zhang@amlogic.com>
+Date:   Tue Jan 15 13:10:35 2019 +0800
 
-    dvb: modify parser source setting algorithms [1/1]
+    media_module: fix 264 mmu stream mode playback issue [1/1]
     
-    PD#TV-2151
+    PD#SWPL-4203
     
     Problem:
-    the ts stream cannot be played after
-    switch channel
+    in h264 mmu mode, some 264 4k stream playback failed in stream mode.
+    (frame mode is ok)
     
     Solution:
-    setting parser source according to
-    stb_source and demux id
+    1) add extif sw reset in mmu mode for each run
+    2) remove some vdec can debug printk (no related with 264 mmu)
     
     Verify:
-    Verify android p at x301
+    U212
     
-    Change-Id: I63438acdcbee37eb5825b0b5c7eb506894fe0526
-    Signed-off-by: Rui Wang <rui.wang@amlogic.com>
+    Change-Id: Ic030f23f1b5c2fa1329dced5a7bf64dd9a16c5ae
+    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
 
-diff --git a/drivers/stream_input/parser/hw_demux/aml_dmx.c b/drivers/stream_input/parser/hw_demux/aml_dmx.c
-index 378d996..ac6747a 100644
---- a/drivers/stream_input/parser/hw_demux/aml_dmx.c
-+++ b/drivers/stream_input/parser/hw_demux/aml_dmx.c
-@@ -2774,10 +2774,16 @@ static int dmx_enable(struct aml_dmx *dmx)
- 		break;
+diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+index 694f9cd..cb6e3d2 100644
+--- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
++++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+@@ -114,7 +114,7 @@
+ #define H264_MMU
+ #define VIDEO_SIGNAL_TYPE_AVAILABLE_MASK	0x20000000
+ static int mmu_enable;
+-static int force_enable_mmu;
++static int force_enable_mmu = 1;
+ unsigned int h264_debug_flag; /* 0xa0000000; */
+ unsigned int h264_debug_mask = 0xff;
+ 	/*
+@@ -5665,7 +5665,9 @@ static int vh264_hw_ctx_restore(struct vdec_h264_hw_s *hw)
+ 	CLEAR_VREG_MASK(MDEC_PIC_DC_CTRL, 1 << 31);
+ 	if (hw->mmu_enable) {
+ 		SET_VREG_MASK(MDEC_PIC_DC_MUX_CTRL, 1<<31);
+-		WRITE_VREG(MDEC_EXTIF_CFG1, 0x80000000);
++		/* sw reset to extif hardware */
++		SET_VREG_MASK(MDEC_EXTIF_CFG1, 1<<30);
++		CLEAR_VREG_MASK(MDEC_EXTIF_CFG1, 1<<30);
+ 	} else {
+ 		CLEAR_VREG_MASK(MDEC_PIC_DC_MUX_CTRL, 1 << 31);
+ 		WRITE_VREG(MDEC_EXTIF_CFG1, 0);
+diff --git a/drivers/frame_provider/decoder/utils/vdec.c b/drivers/frame_provider/decoder/utils/vdec.c
+index 218a32a..a58988b 100644
+--- a/drivers/frame_provider/decoder/utils/vdec.c
++++ b/drivers/frame_provider/decoder/utils/vdec.c
+@@ -85,6 +85,7 @@ static unsigned int clk_config;
+ /*
+    &1: sched_priority to MAX_RT_PRIO -1.
+    &2: always reload firmware.
++   &4: vdec canvas debug enable
+   */
+ static unsigned int debug;
+ 
+@@ -271,7 +272,8 @@ static int get_canvas_ex(int type, int id)
+ 			(canvas_stat[i].id & (1 << id)) == 0) {
+ 			canvas_stat[i].canvas_used_flag++;
+ 			canvas_stat[i].id |= (1 << id);
+-			pr_debug("get used canvas %d\n", i);
++			if (debug & 4)
++				pr_debug("get used canvas %d\n", i);
+ 			vdec_canvas_unlock(vdec_core, flags);
+ 			if (i < AMVDEC_CANVAS_MAX2 + 1)
+ 				return i;
+@@ -288,11 +290,13 @@ static int get_canvas_ex(int type, int id)
+ 			canvas_stat[i].type = type;
+ 			canvas_stat[i].canvas_used_flag = 1;
+ 			canvas_stat[i].id = (1 << id);
+-			pr_debug("get canvas %d\n", i);
+-			pr_debug("canvas_used_flag %d\n",
+-				canvas_stat[i].canvas_used_flag);
+-			pr_debug("canvas_stat[i].id %d\n",
+-				canvas_stat[i].id);
++			if (debug & 4) {
++				pr_debug("get canvas %d\n", i);
++				pr_debug("canvas_used_flag %d\n",
++					canvas_stat[i].canvas_used_flag);
++				pr_debug("canvas_stat[i].id %d\n",
++					canvas_stat[i].id);
++			}
+ 			vdec_canvas_unlock(vdec_core, flags);
+ 			if (i < AMVDEC_CANVAS_MAX2 + 1)
+ 				return i;
+@@ -332,11 +336,13 @@ static void free_canvas_ex(int index, int id)
+ 			canvas_stat[offset].type = 0;
+ 			canvas_stat[offset].id = 0;
+ 		}
+-		pr_debug("free index %d used_flag %d, type = %d, id = %d\n",
+-			offset,
+-			canvas_stat[offset].canvas_used_flag,
+-			canvas_stat[offset].type,
+-			canvas_stat[offset].id);
++		if (debug & 4) {
++			pr_debug("free index %d used_flag %d, type = %d, id = %d\n",
++				offset,
++				canvas_stat[offset].canvas_used_flag,
++				canvas_stat[offset].type,
++				canvas_stat[offset].id);
++		}
  	}
+ 	vdec_canvas_unlock(vdec_core, flags);
  
--	if (dmx->channel[0].used || dmx->channel[1].used)
-+
-+	hi_bsf = 0;
-+	if (dmx->id == 0 && dvb->stb_source == AM_TS_SRC_DMX0)
-+		hi_bsf = 1;
-+
-+	if (dmx->id == 1 && dvb->stb_source == AM_TS_SRC_DMX1)
-+		hi_bsf = 1;
-+
-+	if (dmx->id == 2 && dvb->stb_source == AM_TS_SRC_DMX2)
- 		hi_bsf = 1;
--	else
--		hi_bsf = 0;
- 
- 	if ((dvb->dsc[0].dst != -1)
- 	    && ((dvb->dsc[0].dst - AM_TS_SRC_DMX0) == dmx->id))
