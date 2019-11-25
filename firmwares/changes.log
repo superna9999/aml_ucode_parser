@@ -1,50 +1,56 @@
-commit 9d6acddf70a0b780f0d33dd32c60dcde6038ea7f
+commit 7330800776b693f277829f5f085488690463d6ad
 Author: Peng Yixin <yixin.peng@amlogic.com>
-Date:   Tue May 28 20:55:57 2019 +0800
+Date:   Thu May 30 17:32:50 2019 +0800
 
-    media_module: CTS Test fail,wrong number of frames decode expect [1/1]
+    module: fixed play 1080p video,seek operation lead to system crash [1/1]
     
-    PD#SWPL-9187
+    PD#SWPL-9190
     
     Problem:
-    CTS decoder Test fail, wrong number of frames decode expected
-    300, but was 297.
+    play 1080p video,seek operation lead to system crash
     
     Solution:
-    the last three frames are not displayed because no decoding
-    scheduling after sending eos instruction. The problem is
-    solved by perform a decoding schedule after the eos
-    instruction is sent.
+    The code incorrectly called DEC_RESULT_DONE,
+    caused a problem with the decoding schedule and panic.
     
     Verify:
-    verified on u212
+    verified on x301
     
-    Change-Id: I25ebec8b62eb9d9e314cdc1b1b4b7c131214c0db
+    Change-Id: Ibf897891bf090cf89326083c13c06bcd31f79e30
     Signed-off-by: Peng Yixin <yixin.peng@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/utils/vdec.c b/drivers/frame_provider/decoder/utils/vdec.c
-index 25c5b6f..00acd13 100644
---- a/drivers/frame_provider/decoder/utils/vdec.c
-+++ b/drivers/frame_provider/decoder/utils/vdec.c
-@@ -615,7 +615,7 @@ static void vdec_update_buff_status(void)
- 	list_for_each_entry(vdec, &core->connected_vdec_list, list) {
- 		struct vdec_input_s *input = &vdec->input;
- 		if (input_frame_based(input)) {
--			if (input->have_frame_num)
-+			if (input->have_frame_num || input->eos)
- 				core->buff_flag |= vdec->core_mask;
- 		} else if (input_stream_based(input)) {
- 			core->stream_buff_flag |= vdec->core_mask;
-@@ -1464,10 +1464,12 @@ EXPORT_SYMBOL(vdec_set_flag);
+diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+index ebace1a..3159647 100644
+--- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
++++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+@@ -5794,12 +5794,10 @@ pic_done_proc:
+ 			hw->got_valid_nal = 1;
+ 		}
+ #endif
+-		if (!hw->wait_for_udr_send) {
+-			hw->dec_result = DEC_RESULT_DONE;
+-			dpb_print(DECODE_ID(hw), PRINT_FLAG_VDEC_STATUS,
+-				"%s wait_for_udr_send\n", __func__);
+-			vdec_schedule_work(&hw->work);
+-		}
++
++		hw->dec_result = DEC_RESULT_DONE;
++		vdec_schedule_work(&hw->work);
++
+ #ifdef CONFIG_AMLOGIC_MEDIA_ENHANCEMENT_DOLBYVISION
+ 	} else if (
+ 			(dec_dpb_status == H264_FIND_NEXT_PIC_NAL) ||
+@@ -7419,13 +7417,6 @@ static void user_data_ready_notify_work(struct work_struct *work)
+ 	vdec_wakeup_userdata_poll(hw_to_vdec(hw));
  
- void vdec_set_eos(struct vdec_s *vdec, bool eos)
- {
-+	struct vdec_core_s *core = vdec_core;
- 	vdec->input.eos = eos;
- 
- 	if (vdec->slave)
- 		vdec->slave->input.eos = eos;
-+	up(&core->sem);
+ 	hw->wait_for_udr_send = 0;
+-	if (!hw->frmbase_cont_flag) {
+-		hw->dec_result = DEC_RESULT_DONE;
+-		dpb_print(DECODE_ID(hw), PRINT_FLAG_VDEC_STATUS,
+-			"%s\n", __func__);
+-
+-		vdec_schedule_work(&hw->work);
+-	}
  }
- EXPORT_SYMBOL(vdec_set_eos);
  
+ static int vmh264_user_data_read(struct vdec_s *vdec,
