@@ -1,99 +1,158 @@
-commit 3419fd24338b9c6f132a18672db0ffbd5554f9b3
-Author: shihong.zheng <shihong.zheng@amlogic.com>
-Date:   Mon Mar 25 17:15:00 2019 +0800
+commit a65ca8a2593d2633620c8fee0e34885421af06aa
+Author: kunpeng.tang <kunpeng.tang@amlogic.com>
+Date:   Wed Mar 27 11:23:59 2019 +0800
 
-    vc1: fix vc1 error reset crash. [1/1]
+    H.265: fix vpu resume issue [1/1]
     
-    PD#SWPL-6287
+    PD#SWPL-5533
     
     Problem:
-    vc1 crash in error reset code.
+    system crashed in vpu resume
     
     Solution:
-    add a work queue schedule for error reset.
+    Only vpu open_ref_count more than zero,do resume
     
     Verify:
-    x301
+    g12b_w400
     
-    Change-Id: I61a91d3bb0a004d242b11dd6d50eea80822ef332
-    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
+    Change-Id: I9c2cd6242482293499ffddfea5309e5072014eba
+    Signed-off-by: kunpeng.tang <kunpeng.tang@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/vc1/vvc1.c b/drivers/frame_provider/decoder/vc1/vvc1.c
-index d5bbfe7..8782f3d 100644
---- a/drivers/frame_provider/decoder/vc1/vvc1.c
-+++ b/drivers/frame_provider/decoder/vc1/vvc1.c
-@@ -42,7 +42,7 @@
- #include <linux/amlogic/media/codec_mm/configs.h>
- #include "../utils/firmware.h"
- #include <linux/amlogic/tee.h>
+diff --git a/drivers/frame_sink/encoder/h265/vpu.c b/drivers/frame_sink/encoder/h265/vpu.c
+index 4739b21..bddf33d 100644
+--- a/drivers/frame_sink/encoder/h265/vpu.c
++++ b/drivers/frame_sink/encoder/h265/vpu.c
+@@ -1871,72 +1871,73 @@ static s32 vpu_resume(struct platform_device *pdev)
+ 	enc_pr(LOG_DEBUG, "vpu_resume\n");
+ 
+ 	vpu_clk_config(1);
++	if (s_vpu_open_ref_count > 0) {
++		for (core = 0; core < MAX_NUM_VPU_CORE; core++) {
++			if (s_bit_firmware_info[core].size == 0)
++				continue;
++			code_base = s_common_memory.phys_addr;
++			/* ALIGN TO 4KB */
++			code_size = (s_common_memory.size & ~0xfff);
++			if (code_size < s_bit_firmware_info[core].size * 2)
++				goto DONE_WAKEUP;
+ 
+-	for (core = 0; core < MAX_NUM_VPU_CORE; core++) {
+-		if (s_bit_firmware_info[core].size == 0)
+-			continue;
+-		code_base = s_common_memory.phys_addr;
+-		/* ALIGN TO 4KB */
+-		code_size = (s_common_memory.size & ~0xfff);
+-		if (code_size < s_bit_firmware_info[core].size * 2)
+-			goto DONE_WAKEUP;
 -
-+#include <linux/delay.h>
- #include <trace/events/meson_atrace.h>
+-		/*---- LOAD BOOT CODE */
+-		for (i = 0; i < 512; i += 2) {
+-			val = s_bit_firmware_info[core].bit_code[i];
+-			val |= (s_bit_firmware_info[core].bit_code[i+1] << 16);
+-			WriteVpu(code_base+(i*2), val);
+-		}
++			/*---- LOAD BOOT CODE */
++			for (i = 0; i < 512; i += 2) {
++				val = s_bit_firmware_info[core].bit_code[i];
++				val |= (s_bit_firmware_info[core].bit_code[i+1] << 16);
++				WriteVpu(code_base+(i*2), val);
++			}
  
+-		regVal = 0;
+-		WriteVpuRegister(W4_PO_CONF, regVal);
++			regVal = 0;
++			WriteVpuRegister(W4_PO_CONF, regVal);
  
-@@ -142,6 +142,7 @@ static u32 next_pts;
- static u64 next_pts_us64;
- static bool is_reset;
- static struct work_struct set_clk_work;
-+static struct work_struct error_wd_work;
+-		/* Reset All blocks */
+-		regVal = 0x7ffffff;
+-		WriteVpuRegister(W4_VPU_RESET_REQ, regVal);
++			/* Reset All blocks */
++			regVal = 0x7ffffff;
++			WriteVpuRegister(W4_VPU_RESET_REQ, regVal);
  
- #ifdef DEBUG_PTS
- static u32 pts_hit, pts_missed, pts_i_hit, pts_i_missed;
-@@ -999,13 +1000,10 @@ static void vvc1_set_clk(struct work_struct *work)
- 	}
- }
+-		/* Waiting reset done */
+-		while (ReadVpuRegister(W4_VPU_RESET_STATUS)) {
+-			if (time_after(jiffies, timeout))
+-				goto DONE_WAKEUP;
+-		}
++			/* Waiting reset done */
++			while (ReadVpuRegister(W4_VPU_RESET_STATUS)) {
++				if (time_after(jiffies, timeout))
++					goto DONE_WAKEUP;
++			}
  
--static void vvc1_put_timer_func(unsigned long arg)
-+static void error_do_work(struct work_struct *work)
- {
--	struct timer_list *timer = (struct timer_list *)arg;
+-		WriteVpuRegister(W4_VPU_RESET_REQ, 0);
 -
--#if 1
--	if (READ_VREG(VC1_SOS_COUNT) > 10) {
- 		amvdec_stop();
-+		msleep(20);
- #ifdef CONFIG_AMLOGIC_POST_PROCESS_MANAGER
- 		vvc1_ppmgr_reset();
- #else
-@@ -1015,8 +1013,15 @@ static void vvc1_put_timer_func(unsigned long arg)
- #endif
- 		vvc1_prot_init();
- 		amvdec_start();
--	}
--#endif
-+}
+-		/* remap page size */
+-		remap_size = (code_size >> 12) & 0x1ff;
+-		regVal = 0x80000000 | (W4_REMAP_CODE_INDEX<<12)
+-			| (0 << 16) | (1<<11) | remap_size;
+-		WriteVpuRegister(W4_VPU_REMAP_CTRL, regVal);
+-		/* DO NOT CHANGE! */
+-		WriteVpuRegister(W4_VPU_REMAP_VADDR, 0x00000000);
+-		WriteVpuRegister(W4_VPU_REMAP_PADDR, code_base);
+-		WriteVpuRegister(W4_ADDR_CODE_BASE, code_base);
+-		WriteVpuRegister(W4_CODE_SIZE, code_size);
+-		WriteVpuRegister(W4_CODE_PARAM, 0);
+-		WriteVpuRegister(W4_INIT_VPU_TIME_OUT_CNT, timeout);
+-		WriteVpuRegister(W4_HW_OPTION, hwOption);
+-
+-		/* Interrupt */
+-		regVal = (1 << W4_INT_DEC_PIC_HDR);
+-		regVal |= (1 << W4_INT_DEC_PIC);
+-		regVal |= (1 << W4_INT_QUERY_DEC);
+-		regVal |= (1 << W4_INT_SLEEP_VPU);
+-		regVal |= (1 << W4_INT_BSBUF_EMPTY);
+-		regVal = 0xfffffefe;
+-		WriteVpuRegister(W4_VPU_VINT_ENABLE, regVal);
+-		Wave4BitIssueCommand(core, W4_CMD_INIT_VPU);
+-		WriteVpuRegister(W4_VPU_REMAP_CORE_START, 1);
+-		while (ReadVpuRegister(W4_VPU_BUSY_STATUS)) {
+-			if (time_after(jiffies, timeout))
+-				goto DONE_WAKEUP;
+-		}
++			WriteVpuRegister(W4_VPU_RESET_REQ, 0);
 +
++			/* remap page size */
++			remap_size = (code_size >> 12) & 0x1ff;
++			regVal = 0x80000000 | (W4_REMAP_CODE_INDEX<<12)
++				| (0 << 16) | (1<<11) | remap_size;
++			WriteVpuRegister(W4_VPU_REMAP_CTRL, regVal);
++			/* DO NOT CHANGE! */
++			WriteVpuRegister(W4_VPU_REMAP_VADDR, 0x00000000);
++			WriteVpuRegister(W4_VPU_REMAP_PADDR, code_base);
++			WriteVpuRegister(W4_ADDR_CODE_BASE, code_base);
++			WriteVpuRegister(W4_CODE_SIZE, code_size);
++			WriteVpuRegister(W4_CODE_PARAM, 0);
++			WriteVpuRegister(W4_INIT_VPU_TIME_OUT_CNT, timeout);
++			WriteVpuRegister(W4_HW_OPTION, hwOption);
 +
-+static void vvc1_put_timer_func(unsigned long arg)
-+{
-+	struct timer_list *timer = (struct timer_list *)arg;
-+
-+	if (READ_VREG(VC1_SOS_COUNT) > 10)
-+		schedule_work(&error_wd_work);
++			/* Interrupt */
++			regVal = (1 << W4_INT_DEC_PIC_HDR);
++			regVal |= (1 << W4_INT_DEC_PIC);
++			regVal |= (1 << W4_INT_QUERY_DEC);
++			regVal |= (1 << W4_INT_SLEEP_VPU);
++			regVal |= (1 << W4_INT_BSBUF_EMPTY);
++			regVal = 0xfffffefe;
++			WriteVpuRegister(W4_VPU_VINT_ENABLE, regVal);
++			Wave4BitIssueCommand(core, W4_CMD_INIT_VPU);
++			WriteVpuRegister(W4_VPU_REMAP_CORE_START, 1);
++			while (ReadVpuRegister(W4_VPU_BUSY_STATUS)) {
++				if (time_after(jiffies, timeout))
++					goto DONE_WAKEUP;
++			}
  
- 	while (!kfifo_is_empty(&recycle_q) && (READ_VREG(VC1_BUFFERIN) == 0)) {
- 		struct vframe_s *vf;
-@@ -1163,6 +1168,8 @@ static int amvdec_vc1_probe(struct platform_device *pdev)
- 
- 	vvc1_vdec_info_init();
- 
-+	INIT_WORK(&error_wd_work, error_do_work);
-+	INIT_WORK(&set_clk_work, vvc1_set_clk);
- 	if (vvc1_init() < 0) {
- 		pr_info("amvdec_vc1 init failed.\n");
- 		kfree(gvs);
-@@ -1170,12 +1177,13 @@ static int amvdec_vc1_probe(struct platform_device *pdev)
- 		pdata->dec_status = NULL;
- 		return -ENODEV;
+-		if (ReadVpuRegister(W4_RET_SUCCESS) == 0) {
+-			enc_pr(LOG_ERROR,
+-				"WAKEUP_VPU failed [0x%x]",
+-				ReadVpuRegister(W4_RET_FAIL_REASON));
+-			goto DONE_WAKEUP;
++			if (ReadVpuRegister(W4_RET_SUCCESS) == 0) {
++				enc_pr(LOG_ERROR,
++					"WAKEUP_VPU failed [0x%x]",
++					ReadVpuRegister(W4_RET_FAIL_REASON));
++				goto DONE_WAKEUP;
++			}
+ 		}
  	}
--	INIT_WORK(&set_clk_work, vvc1_set_clk);
-+
- 	return 0;
- }
  
- static int amvdec_vc1_remove(struct platform_device *pdev)
- {
-+	cancel_work_sync(&error_wd_work);
- 	cancel_work_sync(&set_clk_work);
- 	if (stat & STAT_VDEC_RUN) {
- 		amvdec_stop();
