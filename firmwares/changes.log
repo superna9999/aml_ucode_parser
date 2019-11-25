@@ -1,97 +1,83 @@
-commit 5b8114b1f51401c4262b3633a58f94da24183841
-Author: Chuanzhi Wang <chuanzhi.wang@amlogic.com>
-Date:   Tue Feb 26 10:17:05 2019 +0800
+commit 3aa4502f6b3fe152e9131e8219de804680c0bbbb
+Author: Yinming Ding <yinming.ding@amlogic.com>
+Date:   Thu Feb 14 14:10:01 2019 +0800
 
-    dvb_ci: Fix compilation errors for Linux. [1\1]
+    device: amlogic: Add config for dtv tuner si2169 [3/3]
     
-    PD#SWPL-5118
+    PD#SWPL-2763
     
     Problem:
-    Compilation errors for Linux
+    Add config for dtv tuner si2169
     
     Solution:
-    Fix compilation errors for Linux.
+    Add config for dtv tuner si2169
     
     Verify:
-    verified by p212
+    Verified by R314
     
-    Change-Id: If33cea2af81ee017d8c54c550e7d56fb5fc07a46
+    Change-Id: Ib196414949456281c1c1b87140f432f6a56b913b
+    Signed-off-by: Yinming Ding <yinming.ding@amlogic.com>
 
-diff --git a/drivers/stream_input/parser/hw_demux/dvb_ci/Makefile b/drivers/stream_input/parser/hw_demux/dvb_ci/Makefile
-index 6fd6fe6..bbfbdd4 100644
---- a/drivers/stream_input/parser/hw_demux/dvb_ci/Makefile
-+++ b/drivers/stream_input/parser/hw_demux/dvb_ci/Makefile
-@@ -12,8 +12,4 @@ ccflags-y += -I$(srctree)/
- ccflags-y += -I$(srctree)/include
- ccflags-y += -I$(srctree)/drivers/gpio
- ccflags-y += -I$(srctree)/drivers/media/dvb-core
--ccflags-y += -I$(srctree)/../hardware/amlogic/media_modules/drivers/stream_input/parser/hw_demux/
--ccflags-y += -I$(srctree)/../hardware/amlogic/media_modules/drivers/stream_input/parser/hw_demux/dvb_ci/
--ccflags-y += -I$(srctree)/../hardware/amlogic/media_modules/drivers/stream_input/parser/hw_demux/dvb_ci/cimax/
--ccflags-y += -I$(srctree)/../hardware/amlogic/media_modules/drivers/stream_input/parser/hw_demux/dvb_ci/cimax/usb/SRC
+diff --git a/drivers/stream_input/parser/hw_demux/aml_demod_gt.h b/drivers/stream_input/parser/hw_demux/aml_demod_gt.h
+index 1df0914..3a5b3b0 100644
+--- a/drivers/stream_input/parser/hw_demux/aml_demod_gt.h
++++ b/drivers/stream_input/parser/hw_demux/aml_demod_gt.h
+@@ -81,4 +81,9 @@ static inline struct dvb_frontend* atbm8881_attach (const struct amlfe_demod_con
+ 	return NULL;
+ }
  
-diff --git a/drivers/stream_input/parser/hw_demux/dvb_ci/aml_ci.h b/drivers/stream_input/parser/hw_demux/dvb_ci/aml_ci.h
-index bbaae03..3e34417 100644
---- a/drivers/stream_input/parser/hw_demux/dvb_ci/aml_ci.h
-+++ b/drivers/stream_input/parser/hw_demux/dvb_ci/aml_ci.h
-@@ -23,7 +23,7 @@
++static inline struct dvb_frontend* si2168_attach (const struct amlfe_demod_config *config)
++{
++	return NULL;
++}
++
+ #endif	/*__AML_DEMOD_GT_H__*/
+diff --git a/drivers/stream_input/parser/hw_demux/aml_dvb.c b/drivers/stream_input/parser/hw_demux/aml_dvb.c
+index ee903f5..1c85409 100644
+--- a/drivers/stream_input/parser/hw_demux/aml_dvb.c
++++ b/drivers/stream_input/parser/hw_demux/aml_dvb.c
+@@ -63,6 +63,7 @@ typedef enum __demod_type
+ 	DEMOD_INVALID,
+ 	DEMOD_INTERNAL,
+ 	DEMOD_ATBM8881,
++	DEMOD_SI2168,
+ 	DEMOD_MAX_NUM
+ }demod_type;
  
- #include "drivers/media/dvb-core/dvb_ca_en50221.h"
- #include "cimax/dvb_ca_en50221_cimax.h"
--#include "aml_dvb.h"
-+#include "../aml_dvb.h"
- 
- enum aml_dvb_io_type_e {
- 	AML_DVB_IO_TYPE_IOBUS = 0,
-diff --git a/drivers/stream_input/parser/hw_demux/dvb_ci/cimax/aml_cimax.c b/drivers/stream_input/parser/hw_demux/dvb_ci/cimax/aml_cimax.c
-index cb13ce4..9346b8d 100644
---- a/drivers/stream_input/parser/hw_demux/dvb_ci/cimax/aml_cimax.c
-+++ b/drivers/stream_input/parser/hw_demux/dvb_ci/cimax/aml_cimax.c
-@@ -18,7 +18,7 @@
- #include <linux/slab.h>
- #include <linux/kthread.h>
- //#include <linux/switch.h>
--#include "aml_ci.h"
-+#include "../aml_ci.h"
- #include "aml_cimax.h"
- #include "aml_cimax_spi.h"
- #include "aml_cimax_usb.h"
-diff --git a/drivers/stream_input/parser/hw_demux/dvb_ci/cimax/aml_cimax.h b/drivers/stream_input/parser/hw_demux/dvb_ci/cimax/aml_cimax.h
-index ca547ac..17c62fa 100644
---- a/drivers/stream_input/parser/hw_demux/dvb_ci/cimax/aml_cimax.h
-+++ b/drivers/stream_input/parser/hw_demux/dvb_ci/cimax/aml_cimax.h
-@@ -11,7 +11,7 @@
- #ifndef __AML_CIMAX_H_
- #define __AML_CIMAX_H_
- 
--#include "aml_ci.h"
-+#include "../aml_ci.h"
- #include "dvb_ca_en50221_cimax.h"
- 
- struct aml_cimax;
-diff --git a/drivers/stream_input/parser/hw_demux/dvb_ci/cimax/aml_cimax_usb.c b/drivers/stream_input/parser/hw_demux/dvb_ci/cimax/aml_cimax_usb.c
-index 381b4b2..b74b34a 100644
---- a/drivers/stream_input/parser/hw_demux/dvb_ci/cimax/aml_cimax_usb.c
-+++ b/drivers/stream_input/parser/hw_demux/dvb_ci/cimax/aml_cimax_usb.c
-@@ -27,7 +27,7 @@
- //#include <linux/switch.h>
- 
- #include "aml_cimax.h"
--#include "cimax+usb-driver.h"
-+#include "./usb/SRC/cimax+usb-driver.h"
- 
- #define MOD_NAME       "aml_cimax_usb"
- 
-diff --git a/drivers/stream_input/parser/hw_demux/dvb_ci/cimax/usb/SRC/cimax+usb-driver.c b/drivers/stream_input/parser/hw_demux/dvb_ci/cimax/usb/SRC/cimax+usb-driver.c
-index a0047f8..43cdcde 100644
---- a/drivers/stream_input/parser/hw_demux/dvb_ci/cimax/usb/SRC/cimax+usb-driver.c
-+++ b/drivers/stream_input/parser/hw_demux/dvb_ci/cimax/usb/SRC/cimax+usb-driver.c
-@@ -48,7 +48,7 @@
- #ifdef TIMESTAMP
- #include "cimax+usb_time.h"
- #endif
--#include "aml_cimax_usb_priv.h"
-+#include "../../aml_cimax_usb_priv.h"
- 
- /******************************************************************************
-  * Defines
+@@ -2201,6 +2202,16 @@ static int aml_dvb_probe(struct platform_device *pdev)
+ 						s_demod_type[i] = DEMOD_ATBM8881;
+ 					}
+ 				}
++				if (!strcmp(name,"Si2168")) {
++					frontend[i] = dvb_attach(si2168_attach,&config);
++					if (frontend[i] == NULL) {
++						pr_error("dvb attach demod error\n");
++						goto error_fe;
++					} else {
++						pr_inf("dtvdemod attatch sucess\n");
++						s_demod_type[i] = DEMOD_SI2168;
++					}
++				}
+ 				if (frontend[i]) {
+ 					ret = dvb_register_frontend(&advb->dvb_adapter, frontend[i]);
+ 					if (ret) {
+@@ -2221,6 +2232,10 @@ error_fe:
+ 				dvb_detach(atbm8881_attach);
+ 				frontend[i] = NULL;
+ 				s_demod_type[i] = DEMOD_INVALID;
++			}else if (s_demod_type[i] == DEMOD_SI2168) {
++				dvb_detach(si2168_attach);
++				frontend[i] = NULL;
++				s_demod_type[i] = DEMOD_INVALID;
+ 			}
+ 			if (s_tuner_type[i] == TUNER_SI2151) {
+ 				dvb_detach(si2151_attach);
+@@ -2272,6 +2287,8 @@ static int aml_dvb_remove(struct platform_device *pdev)
+ 			dvb_detach(aml_dtvdm_attach);
+ 		}else if (s_demod_type[i] == DEMOD_ATBM8881) {
+ 			dvb_detach(atbm8881_attach);
++		}else if (s_demod_type[i] == DEMOD_SI2168) {
++			dvb_detach(si2168_attach);
+ 		}
+ 		if (s_tuner_type[i] == TUNER_SI2151) {
+ 			dvb_detach(si2151_attach);
