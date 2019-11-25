@@ -1,38 +1,40 @@
-commit a58ffb61974a29579ebb36d2f80921faddca3921
-Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Wed Jul 3 10:10:53 2019 +0800
+commit f12be6c77f65b666f942e9c0803a6f215390718c
+Author: Chuangcheng Peng <chuangcheng.peng@amlogic.com>
+Date:   Thu Jul 4 20:11:43 2019 +0800
 
-    vmh264: fixed playback not smooth issue. [1/1]
+    dvb: fix compile error about stack size [1/1]
     
-    PD#SWPL-7105
+    PD#SWPL-10868
     
     Problem:
-    this stream pts not smooth which lead playback not smooth
+    compile error about stack size
     
     Solution:
-    when pts is 0 and slice is B frame in one field. we use
-    duration to calulate a new pts
+    demux compile use 32bit
     
     Verify:
-    x301
+    verify at R311
     
-    Change-Id: I4a5c947c762b9a3c5cbf68298b870290200391f2
-    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
+    Change-Id: I8de7cf34e28136d7353014ffba2d8afa8800e59e
+    Signed-off-by: Chuangcheng Peng <chuangcheng.peng@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/h264_multi/h264_dpb.c b/drivers/frame_provider/decoder/h264_multi/h264_dpb.c
-index 845541e..a1715eb 100644
---- a/drivers/frame_provider/decoder/h264_multi/h264_dpb.c
-+++ b/drivers/frame_provider/decoder/h264_multi/h264_dpb.c
-@@ -1568,6 +1568,12 @@ static void dpb_combine_field(struct h264_dpb_stru *p_H264_Dpb,
- 	if (fs->top_field->poc < fs->bottom_field->poc) {
- 		fs->pts = fs->top_field->pts;
- 		fs->pts64 = fs->top_field->pts64;
-+		/*SWPL-7105 fix */
-+		if ((fs->frame->slice_type == B_SLICE)
-+			&& (!fs->bottom_field->pts) &&(!fs->bottom_field->pts64)) {
-+			fs->pts =  0;
-+			fs->pts64 = 0;
-+		}
- 		fs->offset_delimiter = fs->top_field->offset_delimiter;
- 	} else {
- 		fs->pts = fs->bottom_field->pts;
+diff --git a/drivers/stream_input/parser/demux/sw_demux/dvbcsa2/config.h b/drivers/stream_input/parser/demux/sw_demux/dvbcsa2/config.h
+index 619cc45..196c2b3 100644
+--- a/drivers/stream_input/parser/demux/sw_demux/dvbcsa2/config.h
++++ b/drivers/stream_input/parser/demux/sw_demux/dvbcsa2/config.h
+@@ -10,11 +10,13 @@
+ /* Using SSE2 bitslice. */
+ /* #undef DVBCSA_USE_SSE */
+ 
++#if __SIZEOF_POINTER__ == 4
+ /* Using 32 bits integer bitslice. */
+-/* #undef DVBCSA_USE_UINT32 */
+-
++#define DVBCSA_USE_UINT32  1
++#else
+ /* Using 64 bits integer bitslice. */
+ #define DVBCSA_USE_UINT64 1
++#endif
+ 
+ /* Define to 1 if you have the <assert.h> header file. */
+ #ifdef __KERNEL__
