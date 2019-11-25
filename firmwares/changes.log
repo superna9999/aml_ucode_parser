@@ -1,52 +1,123 @@
-commit dcf9502ced24f5057599f9d61c6bdd0b03931739
-Author: shihong.zheng <shihong.zheng@amlogic.com>
-Date:   Mon Jun 10 14:02:37 2019 +0800
+commit db74b5174ff068a0d848dde9f293d986177d3a14
+Author: Zhiqiang Han <zhiqiang.han@amlogic.com>
+Date:   Fri May 17 10:48:09 2019 +0800
 
-    vh265: fix repeatly print no mem for amvdec_h265. [1/1]
+    ci: incorrect code sequence [1/1]
     
-    PD#SWPL-8803
+    PD#SWPL-8317
     
     Problem:
-    repeatly print no mem error cause system block.
+    incorrect code sequence introduced NULL pointer
     
     Solution:
-    set no mem error, return from repeatly alloc.
+    set target 1st, then arm the operater
+    cut the func_p off when exit, because the thread not stopped
+    fixed conflict status value
     
     Verify:
-    x301
+    Patchbuild on R314
     
-    Change-Id: Ib978f6bf72a968c7bd0e08bbcfa5109a8a6f4393
-    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
+    Change-Id: I9c88e244baa9f2f91eddb1753550a7e310333c44
+    Signed-off-by: Zhiqiang Han <zhiqiang.han@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
-index f21cf63..e7a4830 100644
---- a/drivers/frame_provider/decoder/h265/vh265.c
-+++ b/drivers/frame_provider/decoder/h265/vh265.c
-@@ -2940,6 +2940,9 @@ static int alloc_buf(struct hevc_state_s *hevc)
- 	int buf_size = cal_current_buf_size(hevc, NULL);
- 	struct vdec_fb *fb = NULL;
+diff --git a/drivers/stream_input/parser/dvb_ci/aml_ci.c b/drivers/stream_input/parser/dvb_ci/aml_ci.c
+index 227eea2..1462e2d 100644
+--- a/drivers/stream_input/parser/dvb_ci/aml_ci.c
++++ b/drivers/stream_input/parser/dvb_ci/aml_ci.c
+@@ -216,11 +216,10 @@ static int aml_ci_slot_status(struct dvb_ca_en50221 *en50221,
+ 	if (ci->ci_poll_slot_status != NULL) {
+ 		return ci->ci_poll_slot_status(ci, slot, open);
+ 	} else {
+-		pr_error("ci_poll_slot_status is null %s\r\n", __func__);
+-		return -EINVAL;
++		/*pr_error("ci_poll_slot_status is null %s\r\n", __func__);*/
+ 	}
  
-+	if (hevc->fatal_error & DECODER_FATAL_ERROR_NO_MEM)
-+		return ret;
+-	return -EINVAL;
++	return 0;
+ }
+ static int aml_ci_cimax_slot_reset(struct dvb_ca_en50221_cimax *en50221,
+ 		int slot)
+@@ -276,8 +275,8 @@ static int aml_ci_cimax_ts_control(struct dvb_ca_en50221_cimax *en50221,
+ 	}
+ 	return 0;
+ }
+-/**\brief aml_ci_slot_status:get slot status
+- * \param en50221: en50221 obj,used this data to get dvb_ci obj
++/**\brief aml_ci_cimax_slot_status:get slot status
++ * \param en50221: en50221_cimax obj,used this data to get dvb_ci obj
+  * \param slot: slot index
+  * \param open: no used
+  * \return
+@@ -294,11 +293,10 @@ static int aml_ci_cimax_slot_status(
+ 	if (ci->ci_poll_slot_status != NULL) {
+ 		return ci->ci_poll_slot_status(ci, slot, open);
+ 	} else {
+-		pr_error("ci_poll_slot_status is null %s\r\n", __func__);
+-		return -EINVAL;
++		/*pr_error("ci_poll_slot_status is null %s\r\n", __func__);*/
+ 	}
+ 
+-	return -EINVAL;
++	return 0;
+ }
+ 
+ /**\brief aml_ci_read_cis: read cis
+@@ -472,14 +470,14 @@ static int aml_ci_get_capbility(struct dvb_ca_en50221_cimax *en50221, int slot)
+ 
+ 	if (slot != 0) {
+ 		pr_error("slot !=0 %s :%d\r\n", __func__, slot);
+-		return -EINVAL;
++		return 0;
+ 	}
+ 
+ 	if (ci->ci_get_capbility != NULL)
+ 		return ci->ci_get_capbility(ci, slot);
+ 
+ 	pr_error("ci_get_capbility is null %s\r\n", __func__);
+-	return -EINVAL;
++	return 0;
+ }
+ 
+ 
+diff --git a/drivers/stream_input/parser/dvb_ci/cimax/aml_cimax.c b/drivers/stream_input/parser/dvb_ci/cimax/aml_cimax.c
+index d6565a0..a462d88 100644
+--- a/drivers/stream_input/parser/dvb_ci/cimax/aml_cimax.c
++++ b/drivers/stream_input/parser/dvb_ci/cimax/aml_cimax.c
+@@ -212,6 +212,8 @@ int aml_cimax_init(struct platform_device *pdev, struct aml_ci *ci)
+ 	if (ret != 0)
+ 		return ret;
+ 
++	ci->data = cimax;
 +
- 	for (i = 0; i < BUF_POOL_SIZE; i++) {
- 		if (hevc->m_BUF[i].start_adr == 0)
- 			break;
-@@ -2972,8 +2975,16 @@ static int alloc_buf(struct hevc_state_s *hevc)
- 					VF_BUFFER_IDX(i), buf_size,
- 					DRIVER_NAME,
- 					&hevc->m_BUF[i].start_adr);
--				if (ret < 0)
-+				if (ret < 0) {
- 					hevc->m_BUF[i].start_adr = 0;
-+					if (i <= 8) {
-+						hevc->fatal_error |=
-+							DECODER_FATAL_ERROR_NO_MEM;
-+						hevc_print(hevc, PRINT_FLAG_ERROR,
-+							"%s[%d], size: %d, no mem fatal err\n",
-+							__func__, i, buf_size);
-+					}
-+				}
- 			}
+ 	ci->ci_read_cis = aml_cimax_read_cis;
+ 	ci->ci_write_cor = aml_cimax_write_cor;
+ 	ci->ci_negotiate = aml_cimax_negotiate;
+@@ -225,7 +227,6 @@ int aml_cimax_init(struct platform_device *pdev, struct aml_ci *ci)
+ 	ci->ci_slot_ts_enable = aml_cimax_slot_ts_enable;
+ 	ci->ci_poll_slot_status = aml_cimax_slot_status;
  
- 			if (ret >= 0) {
+-	ci->data = cimax;
+ 	return 0;
+ }
+ EXPORT_SYMBOL(aml_cimax_init);
+@@ -234,6 +235,19 @@ int aml_cimax_exit(struct aml_ci *ci)
+ {
+ 	struct aml_cimax *cimax = ci->data;
+ 
++	ci->ci_read_cis         = NULL;
++	ci->ci_write_cor        = NULL;
++	ci->ci_negotiate        = NULL;
++	ci->ci_read_lpdu        = NULL;
++	ci->ci_write_lpdu       = NULL;
++	ci->ci_read_cam_status  = NULL;
++	ci->ci_cam_reset        = NULL;
++	ci->ci_get_capbility    = NULL;
++	ci->ci_slot_reset       = NULL;
++	ci->ci_slot_shutdown    = NULL;
++	ci->ci_slot_ts_enable   = NULL;
++	ci->ci_poll_slot_status = NULL;
++
+ 	aml_cimax_stop(cimax);
+ 
+ 	if (cimax->io_type == IO_TYPE_SPI) {
