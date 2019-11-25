@@ -1,53 +1,35 @@
-commit 4dac82134254e061cb40a23b856cd6896eea56c8
-Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Sun Aug 18 16:34:13 2019 +0800
+commit 1bb2a1c97b0b6de8a7b063ea468e073680614ee1
+Author: Nanxin Qin <nanxin.qin@amlogic.com>
+Date:   Mon Aug 12 17:51:06 2019 +0800
 
-    vh265: fix h265 playback stutter issue  [1/1]
+    vmh264: avoid the used_size becoming negative. [1/1]
     
-    PD#SWPL-12773
+    PD#SWPL-9472
     
     Problem:
-    when play back to start in dvb, there is error in stream.
-    it caused poc issue and output is not in correct order
+    h264 ANR issue when DTV weak signal
     
     Solution:
-    add check for poc. once there is some errors. for ex:
-    new poc more less than pre poc. and it is idr pic.
-    decoder need to do a flush first. and start decoding
-    from new poc
+    avoid the used_size becoming negative.
     
     Verify:
     x301
     
-    Change-Id: I5442f1b120b0c94aafed6078190a8dfc689b47b1
-    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
+    Change-Id: Ib61d1dc942faa7f60e6548f0134ecc86e3944dbc
+    Signed-off-by: Nanxin Qin <nanxin.qin@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
-index b6108ec..0419ae0 100644
---- a/drivers/frame_provider/decoder/h265/vh265.c
-+++ b/drivers/frame_provider/decoder/h265/vh265.c
-@@ -6513,6 +6513,16 @@ static int hevc_slice_segment_header_process(struct hevc_state_s *hevc,
- 				iPOCmsb = 0;
- 			}
- 			hevc->curr_POC = (iPOCmsb + iPOClsb);
-+			if (hevc->curr_POC != INVALID_POC && hevc->curr_POC) {
-+				if (((hevc->i_only & 0x4)  == 0) && (hevc->m_nalUnitType != NAL_UNIT_CODED_SLICE_IDR
-+					&& hevc->m_nalUnitType != NAL_UNIT_CODED_SLICE_IDR_N_LP)
-+					&& ((hevc->curr_POC + hevc->sps_num_reorder_pics_0) < hevc->iPrevPOC)) {
-+					hevc_print(hevc, 0,
-+					"Flush  .. num_reorder_pic %d  pic->POC %d  hevc->iPrevPOC %d\n",
-+					hevc->sps_num_reorder_pics_0,hevc->curr_POC,hevc->iPrevPOC);
-+					flush_output(hevc, get_pic_by_POC(hevc, hevc->curr_POC));
-+				}
-+			}
- 			if ((hevc->m_temporalId - 1) == 0)
- 				hevc->iPrevTid0POC = hevc->curr_POC;
- 			else {
-@@ -8149,6 +8159,7 @@ static int prepare_display_buf(struct hevc_state_s *hevc, struct PIC_s *pic)
- 				__func__, vf->v4l_mem_handle);
- 		}
- 
+diff --git a/drivers/frame_provider/decoder/h264_multi/h264_dpb.c b/drivers/frame_provider/decoder/h264_multi/h264_dpb.c
+index a1715eb..2b9a920 100644
+--- a/drivers/frame_provider/decoder/h264_multi/h264_dpb.c
++++ b/drivers/frame_provider/decoder/h264_multi/h264_dpb.c
+@@ -2033,7 +2033,9 @@ static void remove_frame_from_dpb(struct h264_dpb_stru *p_H264_Dpb, int pos)
+ 	for (i = pos; i < p_Dpb->used_size - 1; i++)
+ 		p_Dpb->fs[i] = p_Dpb->fs[i + 1];
+ 	p_Dpb->fs[p_Dpb->used_size - 1] = tmp;
+-	p_Dpb->used_size--;
 +
- #ifdef MULTI_INSTANCE_SUPPORT
- 		if (vdec_frame_based(hw_to_vdec(hevc))) {
- 			vf->pts = pic->pts;
++	if (p_Dpb->used_size)
++		p_Dpb->used_size--;
+ }
+ 
+ static int is_used_for_reference(struct FrameStore *fs)
