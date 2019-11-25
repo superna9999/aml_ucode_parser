@@ -1,39 +1,312 @@
-commit e1549785b2c35c5a385984305787e7ee3068a655
-Author: nengwen.chen <nengwen.chen@amlogic.com>
-Date:   Thu Apr 18 14:38:19 2019 +0800
+commit 95375c2503fe4ce9b62caf3786c617f5c8f2ebd7
+Author: Conglin Guo <conglin.guo@amlogic.com>
+Date:   Wed Apr 17 10:47:57 2019 +0800
 
-    hardware_dmx: Remove unused code can cause memory corruption [1/1]
+    media_modules: single_mode play video crash [1/1]
     
-    PD#SWPL-7378
+    PD#SWPL-7077
     
     Problem:
-    Removing unused code can cause memory corruption.
+    single_mode play video  crash
     
     Solution:
-    Removing unused code can cause memory corruption.
+    1 timer stop after cancel_work_sync.
+    2 Conditions established schedule_work.
     
     Verify:
-    verified by x301
+    T962X2
     
-    Change-Id: Ie50472998247a19337c5bacd16606a0bfa45aef0
+    Change-Id: Id092f27edf14a17684b8142073318c8ac91b0dcf
+    Signed-off-by: Conglin Guo <conglin.guo@amlogic.com>
 
-diff --git a/drivers/stream_input/parser/hw_demux/aml_dvb.c b/drivers/stream_input/parser/hw_demux/aml_dvb.c
-index 1e5bcdf..b3ffbb7 100644
---- a/drivers/stream_input/parser/hw_demux/aml_dvb.c
-+++ b/drivers/stream_input/parser/hw_demux/aml_dvb.c
-@@ -2214,7 +2214,6 @@ static int aml_dvb_probe(struct platform_device *pdev)
- 		struct device_node *node_tuner = NULL;
- 		struct device_node *node_i2c = NULL;
- 		u32 i2c_addr = 0xFFFFFFFF;
--		struct tuner_config *cfg = NULL;
- 		u32 value = 0;
- 		int j = 0;
+diff --git a/drivers/frame_provider/decoder/avs/avs.c b/drivers/frame_provider/decoder/avs/avs.c
+index 5a7937a..ae50ec2 100644
+--- a/drivers/frame_provider/decoder/avs/avs.c
++++ b/drivers/frame_provider/decoder/avs/avs.c
+@@ -1307,8 +1307,6 @@ static void vavs_notify_work(struct work_struct *work)
  
-@@ -2237,7 +2236,6 @@ static int aml_dvb_probe(struct platform_device *pdev)
- 					s_demod_type[i] = DEMOD_INTERNAL;
- 				}
+ static void avs_set_clk(struct work_struct *work)
+ {
+-	if (frame_dur > 0 && saved_resolution !=
+-		frame_width * frame_height * (96000 / frame_dur)) {
+ 		int fps = 96000 / frame_dur;
  
--				memset(&cfg, 0, sizeof(struct tuner_config));
- 				memset(buf, 0, 32);
- 				snprintf(buf, sizeof(buf), "fe%d_tuner",i);
- 				node_tuner = of_parse_phandle(pdev->dev.of_node, buf, 0);
+ 		saved_resolution = frame_width * frame_height * fps;
+@@ -1320,8 +1318,6 @@ static void avs_set_clk(struct work_struct *work)
+ 			vdec_source_changed(VFORMAT_AVS,
+ 			frame_width, frame_height, fps);
+ 		}
+-
+-	}
+ }
+ 
+ static void vavs_put_timer_func(unsigned long arg)
+@@ -1414,7 +1410,9 @@ static void vavs_put_timer_func(unsigned long arg)
+ 
+ 	}
+ 
+-	schedule_work(&set_clk_work);
++	if (frame_dur > 0 && saved_resolution !=
++		frame_width * frame_height * (96000 / frame_dur))
++		schedule_work(&set_clk_work);
+ 
+ 	timer->expires = jiffies + PUT_INTERVAL;
+ 
+@@ -1731,7 +1729,6 @@ static int amvdec_avs_remove(struct platform_device *pdev)
+ 	cancel_work_sync(&userdata_push_work);
+ 
+ 	cancel_work_sync(&notify_work);
+-	cancel_work_sync(&set_clk_work);
+ 	if (stat & STAT_VDEC_RUN) {
+ 		amvdec_stop();
+ 		stat &= ~STAT_VDEC_RUN;
+@@ -1820,6 +1817,7 @@ static int amvdec_avs_remove(struct platform_device *pdev)
+ 	kfree(gvs);
+ 	gvs = NULL;
+ 
++	cancel_work_sync(&set_clk_work);
+ 	return 0;
+ }
+ 
+diff --git a/drivers/frame_provider/decoder/h264/vh264.c b/drivers/frame_provider/decoder/h264/vh264.c
+index e7a8430..3e95690 100644
+--- a/drivers/frame_provider/decoder/h264/vh264.c
++++ b/drivers/frame_provider/decoder/h264/vh264.c
+@@ -3285,10 +3285,6 @@ static void vh264_isr(void)
+ 
+ static void vh264_set_clk(struct work_struct *work)
+ {
+-	if (ucode_type != UCODE_IP_ONLY_PARAM &&
+-		(clk_adj_frame_count > VDEC_CLOCK_ADJUST_FRAME) &&
+-		frame_dur > 0 && saved_resolution !=
+-		frame_width * frame_height * (96000 / frame_dur)) {
+ 		int fps = 96000 / frame_dur;
+ 
+ 		if (frame_dur < 10) /*dur is too small ,think it errors fps*/
+@@ -3296,7 +3292,6 @@ static void vh264_set_clk(struct work_struct *work)
+ 		saved_resolution = frame_width * frame_height * fps;
+ 		vdec_source_changed(VFORMAT_H264,
+ 			frame_width, frame_height, fps);
+-	}
+ }
+ 
+ static void vh264_put_timer_func(unsigned long arg)
+@@ -3424,7 +3419,11 @@ static void vh264_put_timer_func(unsigned long arg)
+ 			stream_switching_done();
+ 	}
+ 
+-	schedule_work(&set_clk_work);
++	if (ucode_type != UCODE_IP_ONLY_PARAM &&
++		(clk_adj_frame_count > VDEC_CLOCK_ADJUST_FRAME) &&
++		frame_dur > 0 && saved_resolution !=
++		frame_width * frame_height * (96000 / frame_dur))
++		schedule_work(&set_clk_work);
+ 
+ exit:
+ 	timer->expires = jiffies + PUT_INTERVAL;
+@@ -4303,7 +4302,6 @@ static int amvdec_h264_remove(struct platform_device *pdev)
+ 	cancel_work_sync(&error_wd_work);
+ 	cancel_work_sync(&stream_switching_work);
+ 	cancel_work_sync(&notify_work);
+-	cancel_work_sync(&set_clk_work);
+ 	cancel_work_sync(&userdata_push_work);
+ 	cancel_work_sync(&qos_work);
+ 
+@@ -4325,6 +4323,7 @@ static int amvdec_h264_remove(struct platform_device *pdev)
+ #endif
+ 	kfree(gvs);
+ 	gvs = NULL;
++	cancel_work_sync(&set_clk_work);
+ 	mutex_unlock(&vh264_mutex);
+ 	return 0;
+ }
+diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
+index d202e01..371d3df 100644
+--- a/drivers/frame_provider/decoder/h265/vh265.c
++++ b/drivers/frame_provider/decoder/h265/vh265.c
+@@ -9914,18 +9914,12 @@ static void vh265_set_clk(struct work_struct *work)
+ 	struct hevc_state_s *hevc = container_of(work,
+ 		struct hevc_state_s, work);
+ 
+-	if (hevc->m_ins_flag == 0 &&
+-		hevc->get_frame_dur && hevc->show_frame_num > 60 &&
+-		hevc->frame_dur > 0 && hevc->saved_resolution !=
+-		hevc->frame_width * hevc->frame_height *
+-			(96000 / hevc->frame_dur)) {
+ 		int fps = 96000 / hevc->frame_dur;
+ 
+ 		if (hevc_source_changed(VFORMAT_HEVC,
+ 			hevc->frame_width, hevc->frame_height, fps) > 0)
+ 			hevc->saved_resolution = hevc->frame_width *
+ 			hevc->frame_height * fps;
+-	}
+ }
+ 
+ static void vh265_check_timer_func(unsigned long arg)
+@@ -10141,7 +10135,11 @@ static void vh265_check_timer_func(unsigned long arg)
+ 		dbg_cmd = 0;
+ 	}
+ 	/*don't changed at start.*/
+-	if (hevc->m_ins_flag == 0)
++	if (hevc->m_ins_flag == 0 &&
++		hevc->get_frame_dur && hevc->show_frame_num > 60 &&
++		hevc->frame_dur > 0 && hevc->saved_resolution !=
++		hevc->frame_width * hevc->frame_height *
++			(96000 / hevc->frame_dur))
+ 		schedule_work(&hevc->set_clk_work);
+ 
+ 	mod_timer(timer, jiffies + PUT_INTERVAL);
+diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
+index b111549..ab54188 100644
+--- a/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
++++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
+@@ -1300,8 +1300,7 @@ static void reset_do_work(struct work_struct *work)
+ 
+ static void vmpeg12_set_clk(struct work_struct *work)
+ {
+-	if (frame_dur > 0 && saved_resolution !=
+-		frame_width * frame_height * (96000 / frame_dur)) {
++	 {
+ 		int fps = 96000 / frame_dur;
+ 
+ 		saved_resolution = frame_width * frame_height * fps;
+@@ -1365,7 +1364,9 @@ static void vmpeg_put_timer_func(unsigned long arg)
+ 		}
+ 	}
+ 
+-	schedule_work(&set_clk_work);
++	if (frame_dur > 0 && saved_resolution !=
++		frame_width * frame_height * (96000 / frame_dur))
++		schedule_work(&set_clk_work);
+ 
+ 	timer->expires = jiffies + PUT_INTERVAL;
+ 
+@@ -2098,7 +2099,6 @@ static int amvdec_mpeg12_remove(struct platform_device *pdev)
+ 	cancel_work_sync(&userdata_push_work);
+ 	cancel_work_sync(&notify_work);
+ 	cancel_work_sync(&reset_work);
+-	cancel_work_sync(&set_clk_work);
+ 
+ 	if (stat & STAT_VDEC_RUN) {
+ 		amvdec_stop();
+@@ -2115,6 +2115,7 @@ static int amvdec_mpeg12_remove(struct platform_device *pdev)
+ 		stat &= ~STAT_TIMER_ARM;
+ 	}
+ 
++	cancel_work_sync(&set_clk_work);
+ 	if (stat & STAT_VF_HOOK) {
+ 		if (fr_hint_status == VDEC_HINTED)
+ 			vf_notify_receiver(PROVIDER_NAME,
+diff --git a/drivers/frame_provider/decoder/mpeg4/vmpeg4.c b/drivers/frame_provider/decoder/mpeg4/vmpeg4.c
+index dd9c089..0d8d407 100644
+--- a/drivers/frame_provider/decoder/mpeg4/vmpeg4.c
++++ b/drivers/frame_provider/decoder/mpeg4/vmpeg4.c
+@@ -708,14 +708,11 @@ static void reset_do_work(struct work_struct *work)
+ 
+ static void vmpeg4_set_clk(struct work_struct *work)
+ {
+-	if (frame_dur > 0 && saved_resolution !=
+-		frame_width * frame_height * (96000 / frame_dur)) {
+ 		int fps = 96000 / frame_dur;
+ 
+ 		saved_resolution = frame_width * frame_height * fps;
+ 		vdec_source_changed(VFORMAT_MPEG4,
+ 			frame_width, frame_height, fps);
+-	}
+ }
+ 
+ static void vmpeg_put_timer_func(unsigned long arg)
+@@ -735,7 +732,9 @@ static void vmpeg_put_timer_func(unsigned long arg)
+ 		}
+ 	}
+ 
+-	schedule_work(&set_clk_work);
++	if (frame_dur > 0 && saved_resolution !=
++		frame_width * frame_height * (96000 / frame_dur))
++		schedule_work(&set_clk_work);
+ 
+ 	if (READ_VREG(AV_SCRATCH_L)) {
+ 		pr_info("mpeg4 fatal error happened,need reset    !!\n");
+diff --git a/drivers/frame_provider/decoder/vc1/vvc1.c b/drivers/frame_provider/decoder/vc1/vvc1.c
+index d20f318..d9cb53c 100644
+--- a/drivers/frame_provider/decoder/vc1/vvc1.c
++++ b/drivers/frame_provider/decoder/vc1/vvc1.c
+@@ -992,14 +992,12 @@ static void vvc1_ppmgr_reset(void)
+ 
+ static void vvc1_set_clk(struct work_struct *work)
+ {
+-	if (frame_dur > 0 && saved_resolution !=
+-		frame_width * frame_height * (96000 / frame_dur)) {
+ 		int fps = 96000 / frame_dur;
+ 
+ 		saved_resolution = frame_width * frame_height * fps;
+ 		vdec_source_changed(VFORMAT_VC1,
+ 			frame_width, frame_height, fps);
+-	}
++
+ }
+ 
+ static void error_do_work(struct work_struct *work)
+@@ -1038,7 +1036,10 @@ static void vvc1_put_timer_func(unsigned long arg)
+ 			kfifo_put(&newframe_q, (const struct vframe_s *)vf);
+ 		}
+ 	}
+-	schedule_work(&set_clk_work);
++
++	if (frame_dur > 0 && saved_resolution !=
++		frame_width * frame_height * (96000 / frame_dur))
++		schedule_work(&set_clk_work);
+ 	timer->expires = jiffies + PUT_INTERVAL;
+ 
+ 	add_timer(timer);
+@@ -1186,7 +1187,6 @@ static int amvdec_vc1_probe(struct platform_device *pdev)
+ static int amvdec_vc1_remove(struct platform_device *pdev)
+ {
+ 	cancel_work_sync(&error_wd_work);
+-	cancel_work_sync(&set_clk_work);
+ 	if (stat & STAT_VDEC_RUN) {
+ 		amvdec_stop();
+ 		stat &= ~STAT_VDEC_RUN;
+@@ -1202,6 +1202,7 @@ static int amvdec_vc1_remove(struct platform_device *pdev)
+ 		stat &= ~STAT_TIMER_ARM;
+ 	}
+ 
++	cancel_work_sync(&set_clk_work);
+ 	if (stat & STAT_VF_HOOK) {
+ 		if (!is_reset)
+ 			vf_notify_receiver(PROVIDER_NAME,
+diff --git a/drivers/frame_provider/decoder/vp9/vvp9.c b/drivers/frame_provider/decoder/vp9/vvp9.c
+index 1f25ab6..cc83d60 100644
+--- a/drivers/frame_provider/decoder/vp9/vvp9.c
++++ b/drivers/frame_provider/decoder/vp9/vvp9.c
+@@ -7574,17 +7574,12 @@ static void vp9_set_clk(struct work_struct *work)
+ 	struct VP9Decoder_s *pbi = container_of(work,
+ 		struct VP9Decoder_s, work);
+ 
+-	if (pbi->get_frame_dur && pbi->show_frame_num > 60 &&
+-		pbi->frame_dur > 0 && pbi->saved_resolution !=
+-		frame_width * frame_height *
+-			(96000 / pbi->frame_dur)) {
+ 		int fps = 96000 / pbi->frame_dur;
+ 
+ 		if (hevc_source_changed(VFORMAT_VP9,
+ 			frame_width, frame_height, fps) > 0)
+ 			pbi->saved_resolution = frame_width *
+ 			frame_height * fps;
+-	}
+ }
+ 
+ static void vvp9_put_timer_func(unsigned long arg)
+@@ -7791,7 +7786,11 @@ static void vvp9_put_timer_func(unsigned long arg)
+ 		dbg_cmd = 0;
+ 	}
+ 	/*don't changed at start.*/
+-	schedule_work(&pbi->set_clk_work);
++	if (pbi->get_frame_dur && pbi->show_frame_num > 60 &&
++		pbi->frame_dur > 0 && pbi->saved_resolution !=
++		frame_width * frame_height *
++			(96000 / pbi->frame_dur))
++		schedule_work(&pbi->set_clk_work);
+ 
+ 	timer->expires = jiffies + PUT_INTERVAL;
+ 	add_timer(timer);
