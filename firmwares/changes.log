@@ -1,111 +1,200 @@
-commit fb781840e714ef3f519383fa8c0121f8c4e5b8a9
-Author: Zhao Yi <zhao.yi@amlogic.com>
-Date:   Thu May 2 16:13:08 2019 +0800
+commit 8c8439b6b6ae0a080b13b4c930925f91484409ad
+Author: Zhiqiang Han <zhiqiang.han@amlogic.com>
+Date:   Mon May 6 10:47:37 2019 +0800
 
-    mepg4_mutil: Calculate pts from duration [1/3]
+    ci: added LPDU Packet read [1/8]
     
-    PD#SWPL-6741
+    PD#SWPL-7746
     
     Problem:
-    Calulate pts error for special avi file.
+    insufficient lpdu process in driver
     
     Solution:
-    Calulate out pts by in pts and duration.
+    send out lpdu packet directly
+    more fixes from obs
     
     Verify:
-    T962X_R311
+    Local build on R314
     
-    Change-Id: Ifb9707df18e697b9fdfaee6be2d03cbce556470b
-    Signed-off-by: Zhao Yi <zhao.yi@amlogic.com>
+    Change-Id: Ie6f29760d84b196e6a51efbb32b555b740ba7488
+    Signed-off-by: Zhiqiang Han <zhiqiang.han@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
-index 585242d..efc2639 100644
---- a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
-+++ b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
-@@ -187,6 +187,7 @@ struct pic_info_t {
- 	bool pts_valid;
- 	u32 duration;
- 	u32 repeat_cnt;
-+	u32 pts_jumped_count;
- };
+diff --git a/drivers/stream_input/parser/hw_demux/dvb_ci/cimax/dvb_ca_en50221_cimax.c b/drivers/stream_input/parser/hw_demux/dvb_ci/cimax/dvb_ca_en50221_cimax.c
+index e8fb0ee..0f09799 100644
+--- a/drivers/stream_input/parser/hw_demux/dvb_ci/cimax/dvb_ca_en50221_cimax.c
++++ b/drivers/stream_input/parser/hw_demux/dvb_ci/cimax/dvb_ca_en50221_cimax.c
+@@ -32,6 +32,8 @@
+ #include "dvb_ca_en50221_cimax.h"
+ #include "dvb_ringbuffer.h"
  
- struct vdec_mpeg4_hw_s {
-@@ -274,6 +275,8 @@ struct vdec_mpeg4_hw_s {
- 	u32 get_num;
- 	u32 first_i_frame_ready;
- 	u32 drop_frame_count;
-+	u32 unstable_pts;
-+	u32 last_decoded_pts;
++#define READ_LPDU_PKT
++
+ static int dvb_ca_en50221_debug = 1;
  
- 	struct firmware_s *fw;
- 	u32 blkmode;
-@@ -700,6 +703,10 @@ static irqreturn_t vmpeg4_isr_thread_fn(struct vdec_s *vdec, int irq)
+ module_param_named(cam_debug, dvb_ca_en50221_debug, int, 0644);
+@@ -43,6 +45,9 @@ static int dvb_ca_en50221_link_size = HOST_LINK_BUF_SIZE;
+ module_param_named(link_size, dvb_ca_en50221_link_size, int, 0644);
+ MODULE_PARM_DESC(link_size, "debug only, no more than 0x1000");
+ 
++static int dvb_ca_en50221_buffer_free;
++module_param_named(buffer_free, dvb_ca_en50221_buffer_free, int, 0644);
++MODULE_PARM_DESC(buffer_free, "debug only");
+ 
+ #define dprintk(args...)\
+ 	do {\
+@@ -115,6 +120,12 @@ struct dvb_ca_slot {
+ 	/* if 1, the CAM supports DA IRQs */
+ 	u8 da_irq_supported:1;
+ 
++#ifdef READ_LPDU_PKT
++	/* Offset into current ringbuffer when user buffer was not big enough
++	   to return entire pkt */
++	int rx_offset;
++#endif
++
+ 	/* size of the buffer to use when talking to the CAM */
+ 	int link_buf_size;
+ 
+@@ -269,7 +280,9 @@ static int dvb_ca_en50221_link_init(struct dvb_ca_private *ca, int slot)
+ 
+ 	/* we'll be determining these during this function */
+ 	ca->slot_info[slot].da_irq_supported = 0;
+-
++#ifdef READ_LPDU_PKT
++	ca->slot_info[slot].rx_offset = 0;
++#endif
+ 	/* set the host link buffer size temporarily.
+ 	   it will be overwritten with the real negotiated size later. */
+ 	ca->slot_info[slot].link_buf_size = dvb_ca_en50221_link_size;
+@@ -605,6 +618,7 @@ static int dvb_ca_en50221_read_data(struct dvb_ca_private *ca,
+ 			goto exit;
  		}
- 		hw->dec_result = DEC_RESULT_DONE;
- 		dec_pic = &hw->pic[index];
-+		dec_pic->pts_jumped_count = 0;
-+		dec_pic->pts_valid = false;
-+		dec_pic->pts = 0;
-+		dec_pic->pts64 = 0;
- 		mmpeg4_debug_print(DECODE_ID(hw), PRINT_FLAG_BUFFER_DETAIL,
- 			"new pic: index=%d, used=%d, repeat=%d, time_inc=%d\n",
- 			index, hw->vfbuf_use[index], repeat_cnt, vop_time_inc);
-@@ -744,8 +751,23 @@ static irqreturn_t vmpeg4_isr_thread_fn(struct vdec_s *vdec, int irq)
- 				   READ_VREG(MP4_RATE), vop_time_inc);
- #endif
+ 		buf_free = dvb_ringbuffer_free(&ca->slot_info[slot].rx_buffer);
++		dvb_ca_en50221_buffer_free = buf_free;
+ 
+ 		if (buf_free < (ca->slot_info[slot].link_buf_size
+ 				+ DVB_RINGBUFFER_PKTHDRSIZE)) {
+@@ -681,8 +695,10 @@ static int dvb_ca_en50221_read_data(struct dvb_ca_private *ca,
+ 		memcpy(ebuf, buf, bytes_read);
+ 	}
+ 
++#ifndef READ_LPDU_PKT
+ 	/* wake up readers when a last_fragment is received */
+ 	if ((buf[1] & 0x80) == 0x00)
++#endif
+ 		wake_up_interruptible(&ca->wait_queue);
+ 	status = bytes_read;
+ 
+@@ -1487,7 +1503,12 @@ static int dvb_ca_en50221_io_read_condition(struct dvb_ca_private *ca,
+ 
+ 		if (ca->slot_info[slot].rx_buffer.data == NULL)
+ 			return 0;
+-
++#ifdef READ_LPDU_PKT
++		if (ca->slot_info[slot].rx_offset != 0) {
++			*_slot = slot;
++			return 1;
++		}
++#endif
+ 		idx = dvb_ringbuffer_pkt_next(&ca->slot_info[slot].rx_buffer,
+ 				-1, &fraglen);
+ 		while (idx != -1) {
+@@ -1496,7 +1517,10 @@ static int dvb_ca_en50221_io_read_condition(struct dvb_ca_private *ca,
+ 			if (connection_id == -1)
+ 				connection_id = hdr[0];
+ 			if ((hdr[0] == connection_id)
+-				&& ((hdr[1] & 0x80) == 0)) {
++#ifndef READ_LPDU_PKT
++				&& ((hdr[1] & 0x80) == 0)
++#endif
++			) {
+ 				*_slot = slot;
+ 				found = 1;
+ 				break;
+@@ -1544,6 +1568,11 @@ static ssize_t dvb_ca_en50221_io_read(struct file *file, char __user *buf,
+ 	int pktlen;
+ 	int dispose = 0;
+ 
++#ifdef READ_LPDU_PKT
++	int offset;
++	u8 flag = 0;
++#endif
++
+ 	/* dprintk("%s\n", __func__); */
+ 
+ 	/* Outgoing packet has a 2 byte header.
+@@ -1581,11 +1610,46 @@ static ssize_t dvb_ca_en50221_io_read(struct file *file, char __user *buf,
+ 			status = -EIO;
+ 			goto exit;
  		}
 -
--		if ((I_PICTURE == picture_type) ||
-+		if (hw->unstable_pts && hw->chunk) {// frame mode, and , unstable pts
-+			if (I_PICTURE == picture_type) {
-+				dec_pic->pts_valid = hw->chunk->pts_valid;
-+				dec_pic->pts = hw->chunk->pts;
-+				dec_pic->pts64 = hw->chunk->pts64;
-+			} else {
-+				if (hw->last_decoded_pts >= 0) {
-+					u32 fcnt = (hw->chunk->pts -
-+						hw->last_decoded_pts)*10/duration;
-+					dec_pic->pts_jumped_count = (fcnt+5)/10;//rounding
-+				 } else {
-+					dec_pic->pts_jumped_count = 1;
-+				 }
++#ifdef READ_LPDU_PKT
++		offset = 2 + ca->slot_info[slot].rx_offset;
++#endif
+ 		dvb_ringbuffer_pkt_read(&ca->slot_info[slot].rx_buffer,
+ 				idx, 0, hdr, 2);
+ 		if (connection_id == -1)
+ 			connection_id = hdr[0];
++#ifdef READ_LPDU_PKT
++		flag = hdr[1];
++		if (hdr[0] == connection_id) {
++			if (pktlen < count) {
++				if ((pktlen + fraglen - offset) > (count - 2)) {
++					fraglen = (count - 2) - pktlen;
++					ca->slot_info[slot].rx_offset +=
++									fraglen;
++					/* more data for user,
++					   but cannot send,
++					   so force return to user,
++					   rather than dispose of it */
++					flag |= 0x80;
++				} else {
++					ca->slot_info[slot].rx_offset = 0;
++					fraglen -= offset;
++					dispose = 1;
++				}
++
++				status = dvb_ringbuffer_pkt_read_user(
++					&ca->slot_info[slot].rx_buffer,
++					idx,
++					offset,
++					buf + pktlen + 2,
++					fraglen);
++				if (status < 0)
++					goto exit;
++				pktlen += fraglen;
 +			}
-+			hw->last_decoded_pts = hw->chunk->pts;
++
++			last_fragment = 1;
 +		}
-+		else if ((I_PICTURE == picture_type) ||
- 			(P_PICTURE == picture_type)) {
- 			offset = READ_VREG(MP4_OFFSET_REG);
- 			if (hw->chunk) {
-@@ -865,6 +887,21 @@ static irqreturn_t vmpeg4_isr_thread_fn(struct vdec_s *vdec, int irq)
- 				}
- 			}
++#else
+ 		if (hdr[0] == connection_id) {
+ 			if (pktlen < count) {
+ 				if ((pktlen + fraglen - 2) > count)
+@@ -1608,7 +1672,7 @@ static ssize_t dvb_ca_en50221_io_read(struct file *file, char __user *buf,
+ 				last_fragment = 1;
+ 			dispose = 1;
  		}
-+		else if (hw->unstable_pts && hw->chunk) {
-+			hw->frame_num_since_last_anch += disp_pic->pts_jumped_count;
-+			disp_pic->pts = hw->last_anch_pts +
-+				DUR2PTS(hw->frame_num_since_last_anch *
-+				duration);
-+			disp_pic->pts64 = hw->last_anch_pts_us64 +
-+				DUR2PTS(hw->frame_num_since_last_anch *
-+				duration) * 100 / 9;
-+			if (hw->frame_num_since_last_anch > (1 << 15)) {
-+				/* avoid overflow */
-+				hw->last_anch_pts = disp_pic->pts;
-+				hw->last_anch_pts_us64 = disp_pic->pts64;
-+				hw->frame_num_since_last_anch = 0;
-+			}
-+		}
- 		disp_pic->duration = duration;
- 		disp_pic->repeat_cnt = repeat_cnt;
- 		prepare_display_buf(hw, disp_pic);
-@@ -1473,6 +1510,10 @@ static void vmpeg4_local_init(struct vdec_mpeg4_hw_s *hw)
- 		(((unsigned long)hw->vmpeg4_amstream_dec_info.param) >> 16) & 0xffff;
- 	hw->sys_mp4_rate = hw->vmpeg4_amstream_dec_info.rate;
- 	hw->frame_width = hw->frame_height = hw->frame_dur = hw->frame_prog = 0;
-+	hw->unstable_pts =
-+	   (((unsigned long) hw->vmpeg4_amstream_dec_info.param & 0x40)
-+	   >> 6);
-+	hw->last_decoded_pts = -1;
+-
++#endif
+ 		idx2 = dvb_ringbuffer_pkt_next(&ca->slot_info[slot].rx_buffer,
+ 				idx, &fraglen);
+ 		if (dispose)
+@@ -1627,6 +1691,17 @@ static ssize_t dvb_ca_en50221_io_read(struct file *file, char __user *buf,
+ 	}
+ 	status = pktlen;
  
- 	hw->total_frame = 0;
- 
++#ifdef READ_LPDU_PKT
++	hdr[0] = flag;
++	hdr[1] = 0;
++
++	status = copy_to_user(buf + 2, hdr, 2);
++	if (status) {
++		status = -EFAULT;
++		goto exit;
++	}
++	status = pktlen + 2;
++#endif
+ exit:
+ 	return status;
+ }
