@@ -1,24 +1,35 @@
-commit dda6b4f0430b5b4a767dd5bd14d7d311dcbeebaa
+commit a7727e5c0ac1a4f3299209ed0351a10a3e3138ca
 Author: shihong.zheng <shihong.zheng@amlogic.com>
-Date:   Fri Jul 27 10:08:40 2018 +0800
+Date:   Fri Jun 14 10:30:51 2019 +0800
 
-    vh265: open hevc_pic_struct_support for hevc interlace
+    vmpeg12: fix interlace vf type bug. [1/1]
     
-    PD#170104: vh265: hevc support interlace, open the macro defined
+    PD#SWPL-9780
     
-    Change-Id: I78ebf95d6af9fcaaf57f1e730d089e7ca472d424
+    Problem:
+    pq test display sawtooth.
+    
+    Solution:
+    fix the second vf type error.
+    
+    Verify:
+    x301
+    
+    Change-Id: I2c0ae1578ab5b319c9700a91edbe47a48b478fdd
     Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
-index fef9ccc..4aa226d 100644
---- a/drivers/frame_provider/decoder/h265/vh265.c
-+++ b/drivers/frame_provider/decoder/h265/vh265.c
-@@ -55,7 +55,7 @@
- 
- #define AGAIN_HAS_THRESHOLD
- /*#define TEST_NO_BUF*/
--/*#define HEVC_PIC_STRUCT_SUPPORT*/
-+#define HEVC_PIC_STRUCT_SUPPORT
- #define MULTI_INSTANCE_SUPPORT
- #define USE_UNINIT_SEMA
- 
+diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
+index 668b134..731c645 100644
+--- a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
++++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
+@@ -1274,7 +1274,9 @@ static int prepare_display_buf(struct vdec_mpeg12_hw_s *hw,
+ 			vf->duration = vf->duration / field_num;
+ 			vf->duration_pulldown = (field_num == 3) ?
+ 				(vf->duration >> 1):0;
+-			if (i == 1)
++			if (i > 0)
++				type = VIDTYPE_VIU_NV21;
++			if (i == 1) /* second field*/
+ 				type |= (first_field_type == VIDTYPE_INTERLACE_TOP) ?
+ 					VIDTYPE_INTERLACE_BOTTOM : VIDTYPE_INTERLACE_TOP;
+ 			else
