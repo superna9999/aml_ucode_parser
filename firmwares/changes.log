@@ -1,50 +1,108 @@
-commit cf0bf849bc58122b3533b777c3bd1e0259632f98
-Author: Hanjie Lin <hanjie.lin@amlogic.com>
-Date:   Mon Jun 10 16:49:43 2019 +0800
+commit 6851bed001ef243bb854dc9099925366f2271e76
+Author: shihong.zheng <shihong.zheng@amlogic.com>
+Date:   Thu May 30 17:38:32 2019 +0800
 
-    firmware_drv: should not use AMSTREAM_MAJOR [1/1]
+    media_modules: fix mpeg4 display abnormal when multi play. [1/1]
     
-    PD#SWPL-9538
+    PD#SWPL-9168
     
     Problem:
-    firmware_drv and amstream shouldn't use the same AMSTREAM_MAJOR
+    only config canvas but not alloc bmmu everytime.
     
     Solution:
-    use FIRMWARE_MAJOR for firmware_drv
-    vdec compile error
+    alloc bmmu once and config canvas everytime.
     
     Verify:
-    ac200
+    x301
     
-    Change-Id: I0c13c8658477c7e7b39f08ed0e2d09293b678fff
-    Signed-off-by: Hanjie Lin <hanjie.lin@amlogic.com>
+    Change-Id: Ia446b4d5452c9bf51a6cfd9f85510345ccb832d6
+    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
 
-diff --git a/drivers/common/firmware/firmware_drv.c b/drivers/common/firmware/firmware_drv.c
-index f1ea445..86988dd 100644
---- a/drivers/common/firmware/firmware_drv.c
-+++ b/drivers/common/firmware/firmware_drv.c
-@@ -57,6 +57,10 @@
- #define PACK ('P' << 24 | 'A' << 16 | 'C' << 8 | 'K')
- #define CODE ('C' << 24 | 'O' << 16 | 'D' << 8 | 'E')
+diff --git a/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c b/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c
+index cf7dac4..1eaf641 100644
+--- a/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c
++++ b/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c
+@@ -424,8 +424,6 @@ static void vmjpeg_canvas_init(struct vdec_s *vdec)
+ 	for (i = 0; i < DECODE_BUFFER_NUM_MAX; i++) {
+ 		int canvas;
  
-+#ifndef FIRMWARE_MAJOR
-+#define FIRMWARE_MAJOR AMSTREAM_MAJOR
-+#endif
-+
- static DEFINE_MUTEX(mutex);
+-
+-
+ 		ret = decoder_bmmu_box_alloc_buf_phy(hw->mm_blk_handle, i,
+ 				decbuf_size, DRIVER_NAME, &buf_start);
+ 		if (ret < 0) {
+@@ -779,11 +777,25 @@ static void vmjpeg_hw_ctx_restore(struct vdec_s *vdec, int index)
+ {
+ 	struct vdec_mjpeg_hw_s *hw =
+ 		(struct vdec_mjpeg_hw_s *)vdec->private;
++	struct buffer_spec_s *buff_spec;
++	u32 i;
  
- static  struct ucode_file_info_s ucode_info[] = {
-@@ -851,11 +855,11 @@ static int fw_driver_init(void)
- 	if (IS_ERR_OR_NULL(g_dev))
- 		return -ENOMEM;
+ 	WRITE_VREG(DOS_SW_RESET0, (1 << 7) | (1 << 6));
+ 	WRITE_VREG(DOS_SW_RESET0, 0);
  
--	g_dev->dev_no = MKDEV(AMSTREAM_MAJOR, 100);
-+	g_dev->dev_no = MKDEV(FIRMWARE_MAJOR, 100);
+-	vmjpeg_canvas_init(vdec);
++	if (!hw->init_flag) {
++		vmjpeg_canvas_init(vdec);
++	} else {
++		for (i = 0; i < DECODE_BUFFER_NUM_MAX; i++) {
++			buff_spec = &hw->buffer_spec[i];
++			canvas_config_config(buff_spec->y_canvas_index,
++						&buff_spec->canvas_config[0]);
++			canvas_config_config(buff_spec->u_canvas_index,
++						&buff_spec->canvas_config[1]);
++			canvas_config_config(buff_spec->v_canvas_index,
++						&buff_spec->canvas_config[2]);
++		}
++	}
  
- 	ret = register_chrdev_region(g_dev->dev_no, 1, DEV_NAME);
- 	if (ret < 0) {
--		pr_info("Can't get major number %d.\n", AMSTREAM_MAJOR);
-+		pr_info("Can't get major number %d.\n", FIRMWARE_MAJOR);
- 		goto err;
+ 	/* find next decode buffer index */
+ 	WRITE_VREG(AV_SCRATCH_4, spec2canvas(&hw->buffer_spec[index]));
+diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
+index 1b772f6..668b134 100644
+--- a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
++++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
+@@ -1902,7 +1902,7 @@ static void vmpeg12_canvas_init(struct vdec_mpeg12_hw_s *hw)
+ 			hw->canvas_config[i][1].width = canvas_width;
+ 			hw->canvas_config[i][1].height = canvas_height / 2;
+ 			hw->canvas_config[i][1].block_mode = hw->canvas_mode;
+-			hw->canvas_config[i][0].endian =
++			hw->canvas_config[i][1].endian =
+ 				(hw->canvas_mode == CANVAS_BLKMODE_LINEAR)?7:0;
+ 
+ 			canvas_config_config(canvas_u(canvas),
+@@ -2101,6 +2101,7 @@ static int vmpeg12_hw_ctx_restore(struct vdec_mpeg12_hw_s *hw)
+ 	if (!hw->init_flag)
+ 		vmpeg12_canvas_init(hw);
+ 	else {
++		WRITE_VREG(MREG_CO_MV_START, hw->buf_start);
+ 		for (i = 0; i < DECODE_BUFFER_NUM_MAX; i++) {
+ 			canvas_config_config(canvas_y(hw->canvas_spec[i]),
+ 				&hw->canvas_config[i][0]);
+diff --git a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
+index 44df052..ccaa67f 100644
+--- a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
++++ b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
+@@ -1404,7 +1404,7 @@ static void check_timer_func(unsigned long arg)
+ 
+ static int vmpeg4_hw_ctx_restore(struct vdec_mpeg4_hw_s *hw)
+ {
+-	int index;
++	int index, i;
+ 
+ 	index = find_buffer(hw);
+ 	if (index < 0)
+@@ -1413,6 +1413,13 @@ static int vmpeg4_hw_ctx_restore(struct vdec_mpeg4_hw_s *hw)
+ 	if (!hw->init_flag) {
+ 		if (vmpeg4_canvas_init(hw) < 0)
+ 			return -1;
++	} else {
++		for (i = 0; i < DECODE_BUFFER_NUM_MAX; i++) {
++			canvas_config_config(canvas_y(hw->canvas_spec[i]),
++						&hw->canvas_config[i][0]);
++			canvas_config_config(canvas_u(hw->canvas_spec[i]),
++						&hw->canvas_config[i][1]);
++		}
  	}
- 
+ 	/* prepare REF0 & REF1
+ 	 * points to the past two IP buffers
