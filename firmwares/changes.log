@@ -1,106 +1,176 @@
-commit be862a73b0146eac96fe4d40ea09e4e1b834f306
-Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Tue Jan 15 13:10:35 2019 +0800
+commit bbc7269fe5f7baf47e6143892ba9eeaaa46a6b6a
+Author: baoguo.chen <baoguo.chen@amlogic.com>
+Date:   Thu Jan 10 14:06:55 2019 +0800
 
-    media_module: fix 264 mmu stream mode playback issue [1/1]
+    media_module: fixed checkin pts error [1/1]
     
-    PD#SWPL-4203
+    PD#SWPL-3477
     
     Problem:
-    in h264 mmu mode, some 264 4k stream playback failed in stream mode.
-    (frame mode is ok)
+    when checkinpts, data len will be repeatedly
+    calculated,causing droping frame.
     
     Solution:
-    1) add extif sw reset in mmu mode for each run
-    2) remove some vdec can debug printk (no related with 264 mmu)
+    after parsing date, update video_data_parsed and
+    task->buffered_data_size at the same time.
     
     Verify:
-    U212
+    P215 Linux
     
-    Change-Id: Ic030f23f1b5c2fa1329dced5a7bf64dd9a16c5ae
-    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
+    Change-Id: Ib07f434743e6b199a9961b3caa3e10bf6785b96c
+    Signed-off-by: baoguo.chen <baoguo.chen@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-index 694f9cd..cb6e3d2 100644
---- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
-+++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-@@ -114,7 +114,7 @@
- #define H264_MMU
- #define VIDEO_SIGNAL_TYPE_AVAILABLE_MASK	0x20000000
- static int mmu_enable;
--static int force_enable_mmu;
-+static int force_enable_mmu = 1;
- unsigned int h264_debug_flag; /* 0xa0000000; */
- unsigned int h264_debug_mask = 0xff;
- 	/*
-@@ -5665,7 +5665,9 @@ static int vh264_hw_ctx_restore(struct vdec_h264_hw_s *hw)
- 	CLEAR_VREG_MASK(MDEC_PIC_DC_CTRL, 1 << 31);
- 	if (hw->mmu_enable) {
- 		SET_VREG_MASK(MDEC_PIC_DC_MUX_CTRL, 1<<31);
--		WRITE_VREG(MDEC_EXTIF_CFG1, 0x80000000);
-+		/* sw reset to extif hardware */
-+		SET_VREG_MASK(MDEC_EXTIF_CFG1, 1<<30);
-+		CLEAR_VREG_MASK(MDEC_EXTIF_CFG1, 1<<30);
- 	} else {
- 		CLEAR_VREG_MASK(MDEC_PIC_DC_MUX_CTRL, 1 << 31);
- 		WRITE_VREG(MDEC_EXTIF_CFG1, 0);
-diff --git a/drivers/frame_provider/decoder/utils/vdec.c b/drivers/frame_provider/decoder/utils/vdec.c
-index 218a32a..a58988b 100644
---- a/drivers/frame_provider/decoder/utils/vdec.c
-+++ b/drivers/frame_provider/decoder/utils/vdec.c
-@@ -85,6 +85,7 @@ static unsigned int clk_config;
- /*
-    &1: sched_priority to MAX_RT_PRIO -1.
-    &2: always reload firmware.
-+   &4: vdec canvas debug enable
-   */
- static unsigned int debug;
+diff --git a/drivers/stream_input/parser/esparser.c b/drivers/stream_input/parser/esparser.c
+index cdd7896..1cf8f02 100644
+--- a/drivers/stream_input/parser/esparser.c
++++ b/drivers/stream_input/parser/esparser.c
+@@ -154,7 +154,7 @@ static inline u32 buf_wp(u32 type)
+ }
  
-@@ -271,7 +272,8 @@ static int get_canvas_ex(int type, int id)
- 			(canvas_stat[i].id & (1 << id)) == 0) {
- 			canvas_stat[i].canvas_used_flag++;
- 			canvas_stat[i].id |= (1 << id);
--			pr_debug("get used canvas %d\n", i);
-+			if (debug & 4)
-+				pr_debug("get used canvas %d\n", i);
- 			vdec_canvas_unlock(vdec_core, flags);
- 			if (i < AMVDEC_CANVAS_MAX2 + 1)
- 				return i;
-@@ -288,11 +290,13 @@ static int get_canvas_ex(int type, int id)
- 			canvas_stat[i].type = type;
- 			canvas_stat[i].canvas_used_flag = 1;
- 			canvas_stat[i].id = (1 << id);
--			pr_debug("get canvas %d\n", i);
--			pr_debug("canvas_used_flag %d\n",
--				canvas_stat[i].canvas_used_flag);
--			pr_debug("canvas_stat[i].id %d\n",
--				canvas_stat[i].id);
-+			if (debug & 4) {
-+				pr_debug("get canvas %d\n", i);
-+				pr_debug("canvas_used_flag %d\n",
-+					canvas_stat[i].canvas_used_flag);
-+				pr_debug("canvas_stat[i].id %d\n",
-+					canvas_stat[i].id);
-+			}
- 			vdec_canvas_unlock(vdec_core, flags);
- 			if (i < AMVDEC_CANVAS_MAX2 + 1)
- 				return i;
-@@ -332,11 +336,13 @@ static void free_canvas_ex(int index, int id)
- 			canvas_stat[offset].type = 0;
- 			canvas_stat[offset].id = 0;
- 		}
--		pr_debug("free index %d used_flag %d, type = %d, id = %d\n",
--			offset,
--			canvas_stat[offset].canvas_used_flag,
--			canvas_stat[offset].type,
--			canvas_stat[offset].id);
-+		if (debug & 4) {
-+			pr_debug("free index %d used_flag %d, type = %d, id = %d\n",
-+				offset,
-+				canvas_stat[offset].canvas_used_flag,
-+				canvas_stat[offset].type,
-+				canvas_stat[offset].id);
-+		}
+ static ssize_t _esparser_write(const char __user *buf,
+-		size_t count, u32 type, int isphybuf)
++		size_t count, struct stream_buf_s *stbuf, int isphybuf)
+ {
+ 	size_t r = count;
+ 	const char __user *p = buf;
+@@ -164,6 +164,7 @@ static ssize_t _esparser_write(const char __user *buf,
+ 	int ret;
+ 	u32 wp;
+ 	dma_addr_t dma_addr = 0;
++	u32 type = stbuf->type;
+ 
+ 	if (type == BUF_TYPE_HEVC)
+ 		parser_type = PARSER_VIDEO;
+@@ -248,11 +249,12 @@ static ssize_t _esparser_write(const char __user *buf,
+ 	else if (type == BUF_TYPE_AUDIO)
+ 		audio_data_parsed += len;
+ 
++	threadrw_update_buffer_level(stbuf, len);
+ 	return len;
+ }
+ 
+ static ssize_t _esparser_write_s(const char __user *buf,
+-			size_t count, u32 type)
++			size_t count, struct stream_buf_s *stbuf)
+ {
+ 	size_t r = count;
+ 	const char __user *p = buf;
+@@ -260,6 +262,7 @@ static ssize_t _esparser_write_s(const char __user *buf,
+ 	int ret;
+ 	u32 wp, buf_start, buf_end;
+ 	dma_addr_t buf_wp_map;
++	u32 type = stbuf->type;
+ 
+ 	if (type != BUF_TYPE_AUDIO)
+ 		BUG();
+@@ -313,7 +316,10 @@ static ssize_t _esparser_write_s(const char __user *buf,
+ 
+ end_write:
+ 	if (type == BUF_TYPE_AUDIO)
++	{
+ 		audio_data_parsed += len;
++		threadrw_update_buffer_level(stbuf, len);
++	}
+ 
+ 	return len;
+ }
+@@ -350,7 +356,11 @@ s32 es_vpts_checkin(struct stream_buf_s *buf, u32 pts)
+ 		return 0;
  	}
- 	vdec_canvas_unlock(vdec_core, flags);
+ #endif
+-	u32 passed = video_data_parsed + threadrw_buffer_level(buf);
++	u32 passed = 0;
++
++	mutex_lock(&esparser_mutex);
++	passed = video_data_parsed + threadrw_buffer_level(buf);
++	mutex_unlock(&esparser_mutex);
  
+ 	return pts_checkin_offset(PTS_TYPE_VIDEO, passed, pts);
+ 
+@@ -366,7 +376,10 @@ s32 es_apts_checkin(struct stream_buf_s *buf, u32 pts)
+ 		return 0;
+ 	}
+ #endif
+-	u32 passed = audio_data_parsed + threadrw_buffer_level(buf);
++	u32 passed = 0;
++	mutex_lock(&esparser_mutex);
++	passed = audio_data_parsed + threadrw_buffer_level(buf);
++	mutex_unlock(&esparser_mutex);
+ 
+ 	return pts_checkin_offset(PTS_TYPE_AUDIO, passed, pts);
+ }
+@@ -806,12 +819,13 @@ ssize_t drm_write(struct file *file, struct stream_buf_s *stbuf,
+ 
+ 		if (stbuf->type != BUF_TYPE_AUDIO)
+ 			r = _esparser_write((const char __user *)realbuf, len,
+-					stbuf->type, isphybuf);
++					stbuf, isphybuf);
+ 		else
+ 			r = _esparser_write_s((const char __user *)realbuf, len,
+-					stbuf->type);
++					stbuf);
+ 		if (r < 0) {
+ 			pr_info("drm_write _esparser_write failed [%d]\n", r);
++			mutex_unlock(&esparser_mutex);
+ 			return r;
+ 		}
+ 		havewritebytes += r;
+@@ -881,9 +895,9 @@ ssize_t esparser_write_ex(struct file *file,
+ 	mutex_lock(&esparser_mutex);
+ 
+ 	if (stbuf->type == BUF_TYPE_AUDIO)
+-		r = _esparser_write_s(buf, len, stbuf->type);
++		r = _esparser_write_s(buf, len, stbuf);
+ 	else
+-		r = _esparser_write(buf, len, stbuf->type, flags & 1);
++		r = _esparser_write(buf, len, stbuf, flags & 1);
+ 
+ 	mutex_unlock(&esparser_mutex);
+ 
+diff --git a/drivers/stream_input/parser/thread_rw.c b/drivers/stream_input/parser/thread_rw.c
+index 04e5a2c..6fe6cd8 100644
+--- a/drivers/stream_input/parser/thread_rw.c
++++ b/drivers/stream_input/parser/thread_rw.c
+@@ -254,7 +254,6 @@ static int do_write_work_in(struct threadrw_write_task *task)
+ 	if (write_len > 0) {
+ 		spin_lock_irqsave(&task->lock, flags);
+ 		task->passed_data_len += write_len;
+-		task->buffered_data_size -= write_len;
+ 		spin_unlock_irqrestore(&task->lock, flags);
+ 	}
+ 	return need_re_write;
+@@ -445,6 +444,22 @@ err1:
+  *fifo data size;
+  */
+ 
++void threadrw_update_buffer_level(struct stream_buf_s *stbuf,
++	int parsed_size)
++{
++	struct threadrw_write_task *task = stbuf->write_thread;
++	unsigned long flags;
++
++	if (task)
++	{
++		spin_lock_irqsave(&task->lock, flags);
++		task->buffered_data_size -= parsed_size;
++		spin_unlock_irqrestore(&task->lock, flags);
++	}
++
++}
++EXPORT_SYMBOL(threadrw_update_buffer_level);
++
+ int threadrw_buffer_level(struct stream_buf_s *stbuf)
+ {
+ 	struct threadrw_write_task *task = stbuf->write_thread;
+diff --git a/drivers/stream_input/parser/thread_rw.h b/drivers/stream_input/parser/thread_rw.h
+index c6283f0..a91b004 100644
+--- a/drivers/stream_input/parser/thread_rw.h
++++ b/drivers/stream_input/parser/thread_rw.h
+@@ -48,5 +48,6 @@ int threadrw_alloc_more_buffer_size(
+ 	struct stream_buf_s *stbuf,
+ 	int size);
+ int threadrw_support_more_buffers(struct stream_buf_s *stbuf);
+-
++void threadrw_update_buffer_level(struct stream_buf_s *stbuf,
++	int parsed_size);
+ #endif
