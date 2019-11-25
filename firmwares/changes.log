@@ -1,66 +1,26 @@
-commit 28492380922fd4c02b93366505d7c6200cdef114
-Author: Conglin Guo <conglin.guo@amlogic.com>
-Date:   Tue Apr 9 11:06:55 2019 +0800
+commit edfb5d510f7285328c01db5e443e353b1506536f
+Author: Hui Zhang <hui.zhang@amlogic.com>
+Date:   Wed Apr 10 16:04:14 2019 +0800
 
-    vmh264: fix channel switching system hangup issue in vmh264 remove  [1/1]
+    media_module: remove mpeg12_multi run ready debug print
     
-    PD#SWPL-6729
-    
-    Problem:
-    hw bus dead lock in vmh264 remove.
-    
-    Solution:
-    wait for decoder hw stopped completely before vmh264 remove
-    
-    Verify:
-    X301
-    
-    Change-Id: I1f41bf40630d7b56a6722cdb93d63df48dc29c63
-    Signed-off-by: Conglin Guo <conglin.guo@amlogic.com>
+    Change-Id: Idef7f92a0536da08aa3f71bb21db392a4bf8f3f4
+    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-index 701f244..02c0489 100644
---- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
-+++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-@@ -6902,6 +6902,25 @@ static int vh264_stop(struct vdec_h264_hw_s *hw)
- 	return 0;
- }
- 
-+static void wait_vmh264_search_done(struct vdec_h264_hw_s *hw)
-+{
-+	u32 vld_rp = READ_VREG(VLD_MEM_VIFIFO_RP);
-+	int count = 0;
-+	do {
-+		usleep_range(100, 500);
-+		if (vld_rp == READ_VREG(VLD_MEM_VIFIFO_RP))
-+			break;
-+		if (count > 2000) {
-+			dpb_print(DECODE_ID(hw),
-+			PRINT_FLAG_ERROR, "%s timeout count %d vld_rp 0x%x VLD_MEM_VIFIFO_RP 0x%x\n",
-+			 __func__, count, vld_rp, READ_VREG(VLD_MEM_VIFIFO_RP));
-+			break;
-+		} else
-+			vld_rp = READ_VREG(VLD_MEM_VIFIFO_RP);
-+		count++;
-+	} while (1);
-+}
-+
- static void vh264_notify_work(struct work_struct *work)
- {
- 	struct vdec_h264_hw_s *hw = container_of(work,
-@@ -7705,7 +7724,6 @@ result_done:
+diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
+index 7c6c3cb..73f97ce 100644
+--- a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
++++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
+@@ -2425,9 +2425,9 @@ static unsigned long run_ready(struct vdec_s *vdec, unsigned long mask)
+ 				(parser_wr_ptr - hw->pre_parser_wr_ptr) <
+ 				again_threshold) {
+ 				int r = vdec_sync_input(vdec);
+-				debug_print(DECODE_ID(hw), PRINT_FLAG_ERROR,
+-		"%s buf lelvel%x\n",
+-		__func__, r);
++				debug_print(DECODE_ID(hw), PRINT_FLAG_RUN_FLOW,
++				"%s buf level%x\n",
++				__func__, r);
+ 				return 0;
  			}
- 		decode_frame_count[DECODE_ID(hw)]++;
- 		amvdec_stop();
--
- 		if (!vdec_is_support_4k()) {
- 			if (clk_adj_frame_count < VDEC_CLOCK_ADJUST_FRAME) {
- 				clk_adj_frame_count++;
-@@ -7769,6 +7787,7 @@ result_done:
- 	del_timer_sync(&hw->check_timer);
- 	hw->stat &= ~STAT_TIMER_ARM;
- 
-+	wait_vmh264_search_done(hw);
- 	/* mark itself has all HW resource released and input released */
- 
- #ifdef CONFIG_AMLOGIC_MEDIA_ENHANCEMENT_DOLBYVISION
+ 		}
