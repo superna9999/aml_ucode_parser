@@ -1,26 +1,216 @@
-commit edfb5d510f7285328c01db5e443e353b1506536f
+commit bd39fead612e8268dfd6652d0660c417f68d0801
 Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Wed Apr 10 16:04:14 2019 +0800
+Date:   Tue Apr 9 19:09:38 2019 +0800
 
-    media_module: remove mpeg12_multi run ready debug print
+    media_module: fix kasan check issue [1/2]
     
-    Change-Id: Idef7f92a0536da08aa3f71bb21db392a4bf8f3f4
-    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
+    PD#SWPL-6847
+    
+    Problem:
+    1) mpeg2/mjpeg multi instance alloc issue
+    2) mpeg2/mpeg4/mjpeg multi-instance kasan check failed
+    
+    Solution:
+    1) use valloc instead of kzalloc
+    2) fix kasan check issue
+    
+    Verify:
+    x301
+    
+    Change-Id: I1bd207f46b87f081269514cacd994e805f5248d3
 
+diff --git a/drivers/frame_provider/decoder/h264/vh264.c b/drivers/frame_provider/decoder/h264/vh264.c
+old mode 100755
+new mode 100644
+index 1b69288..e7a8430
+--- a/drivers/frame_provider/decoder/h264/vh264.c
++++ b/drivers/frame_provider/decoder/h264/vh264.c
+@@ -4307,10 +4307,9 @@ static int amvdec_h264_remove(struct platform_device *pdev)
+ 	cancel_work_sync(&userdata_push_work);
+ 	cancel_work_sync(&qos_work);
+ 
+-	mutex_lock(&vh264_mutex);
++
+ 	vh264_stop(MODE_FULL);
+ 	wait_vh264_search_done();
+-	mutex_lock(&vh264_mutex);
+ 	vdec_source_changed(VFORMAT_H264, 0, 0, 0);
+ #ifdef DUMP_USER_DATA
+ 	vh264_dump_userdata();
+diff --git a/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c b/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c
+index 4c5de2a..38c08e1 100644
+--- a/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c
++++ b/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c
+@@ -1039,6 +1039,7 @@ static void vmjpeg_work(struct work_struct *work)
+ 			kfifo_len(&hw->display_q));
+ 	if (hw->dec_result == DEC_RESULT_DONE) {
+ 		vdec_vframe_dirty(hw_to_vdec(hw), hw->chunk);
++		hw->chunk = NULL;
+ 	} else if (hw->dec_result == DEC_RESULT_AGAIN) {
+ 		/*
+ 			stream base: stream buf empty or timeout
+@@ -1068,6 +1069,7 @@ static void vmjpeg_work(struct work_struct *work)
+ 		}
+ 		hw->eos = 1;
+ 		vdec_vframe_dirty(hw_to_vdec(hw), hw->chunk);
++		hw->chunk = NULL;
+ 		vdec_clean_input(hw_to_vdec(hw));
+ 	}
+ 	if (hw->stat & STAT_VDEC_RUN) {
+@@ -1136,6 +1138,7 @@ static int ammvdec_mjpeg_probe(struct platform_device *pdev)
+ 
+ 	hw = (struct vdec_mjpeg_hw_s *)devm_kzalloc(&pdev->dev,
+ 		sizeof(struct vdec_mjpeg_hw_s), GFP_KERNEL);
++	hw =  vzalloc(sizeof(struct vdec_mjpeg_hw_s));
+ 	if (hw == NULL) {
+ 		pr_info("\nammvdec_mjpeg device data allocation failed\n");
+ 		return -ENOMEM;
+@@ -1179,7 +1182,10 @@ static int ammvdec_mjpeg_probe(struct platform_device *pdev)
+ 			1920, 1080, 60);
+ 	if (vmjpeg_init(pdata) < 0) {
+ 		pr_info("ammvdec_mjpeg init failed.\n");
+-		devm_kfree(&pdev->dev, (void *)hw);
++		if (hw) {
++			vfree(hw);
++			hw = NULL;
++		}
+ 		pdata->dec_status = NULL;
+ 		return -ENODEV;
+ 	}
+@@ -1215,7 +1221,10 @@ static int ammvdec_mjpeg_remove(struct platform_device *pdev)
+ 			vdec->free_canvas_ex(hw->buffer_spec[i].v_canvas_index, vdec->id);
+ 		}
+ 	}
+-
++	if (hw) {
++		vfree(hw);
++		hw = NULL;
++	}
+ 	pr_info("%s\n", __func__);
+ 	return 0;
+ }
 diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-index 7c6c3cb..73f97ce 100644
+index 73f97ce..249e6ff 100644
 --- a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
 +++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-@@ -2425,9 +2425,9 @@ static unsigned long run_ready(struct vdec_s *vdec, unsigned long mask)
- 				(parser_wr_ptr - hw->pre_parser_wr_ptr) <
- 				again_threshold) {
- 				int r = vdec_sync_input(vdec);
--				debug_print(DECODE_ID(hw), PRINT_FLAG_ERROR,
--		"%s buf lelvel%x\n",
--		__func__, r);
-+				debug_print(DECODE_ID(hw), PRINT_FLAG_RUN_FLOW,
-+				"%s buf level%x\n",
-+				__func__, r);
- 				return 0;
- 			}
+@@ -260,8 +260,6 @@ struct vdec_mpeg12_hw_s {
+ 	u32 pre_parser_wr_ptr;
+ 	u8 next_again_flag;
+ #endif
+-
+-
+ 	struct work_struct userdata_push_work;
+ 	struct mutex userdata_mutex;
+ 	struct mmpeg2_userdata_info_t userdata_info;
+@@ -1287,7 +1285,6 @@ static irqreturn_t vmpeg12_isr_thread_fn(struct vdec_s *vdec, int irq)
+ 				hw->pts_valid[index] = hw->chunk->pts_valid;
+ 				hw->pts[index] = hw->chunk->pts;
+ 				hw->pts64[index] = hw->chunk->pts64;
+-
+ 		debug_print(DECODE_ID(hw), PRINT_FLAG_TIMEINFO,
+ 		"!!!cpts=%d,pts64=%lld,size=%d,offset=%d\n",
+ 			hw->pts[index], hw->pts64[index],
+@@ -1731,8 +1728,8 @@ static void vmpeg12_work(struct work_struct *work)
+ 	if (hw->dec_result == DEC_RESULT_DONE) {
+ 		if (!hw->ctx_valid)
+ 			hw->ctx_valid = 1;
+-
+ 		vdec_vframe_dirty(hw_to_vdec(hw), hw->chunk);
++		hw->chunk = NULL;
+ 	} else if (hw->dec_result == DEC_RESULT_AGAIN
+ 	&& (hw_to_vdec(hw)->next_status !=
+ 		VDEC_STATUS_DISCONNECTED)) {
+@@ -1764,6 +1761,7 @@ static void vmpeg12_work(struct work_struct *work)
+ 		READ_VREG(VLD_MEM_VIFIFO_WP),
+ 		READ_VREG(VLD_MEM_VIFIFO_RP));
+ 		vdec_vframe_dirty(hw_to_vdec(hw), hw->chunk);
++		hw->chunk = NULL;
+ 		vdec_clean_input(hw_to_vdec(hw));
+ 		return;
+ 	} else if (hw->dec_result == DEC_RESULT_FORCE_EXIT) {
+@@ -1784,6 +1782,7 @@ static void vmpeg12_work(struct work_struct *work)
  		}
+ 		hw->eos = 1;
+ 		vdec_vframe_dirty(hw_to_vdec(hw), hw->chunk);
++		hw->chunk = NULL;
+ 		vdec_clean_input(hw_to_vdec(hw));
+ 	}
+ 	if (hw->stat & STAT_VDEC_RUN) {
+@@ -2267,7 +2266,6 @@ static int vmpeg12_hw_ctx_restore(struct vdec_mpeg12_hw_s *hw)
+ #ifdef NV21
+ 	SET_VREG_MASK(MDEC_PIC_DC_CTRL, 1<<17);
+ #endif
+-
+ 	if (hw->chunk) {
+ 		/*frame based input*/
+ 		WRITE_VREG(MREG_INPUT,
+@@ -2276,7 +2274,6 @@ static int vmpeg12_hw_ctx_restore(struct vdec_mpeg12_hw_s *hw)
+ 		/*stream based input*/
+ 		WRITE_VREG(MREG_INPUT, (hw->ctx_valid<<6));
+ 	}
+-
+ 	return 0;
+ }
+ 
+@@ -2375,7 +2372,6 @@ static s32 vmpeg12_init(struct vdec_mpeg12_hw_s *hw)
+ 			USER_DATA_SIZE);
+ 
+ 	amvdec_enable();
+-
+ 	init_timer(&hw->check_timer);
+ 	hw->check_timer.data = (unsigned long)hw;
+ 	hw->check_timer.function = check_timer_func;
+@@ -2614,8 +2610,7 @@ static int ammvdec_mpeg12_probe(struct platform_device *pdev)
+ 		return -EFAULT;
+ 	}
+ 
+-	hw = (struct vdec_mpeg12_hw_s *)devm_kzalloc(&pdev->dev,
+-		sizeof(struct vdec_mpeg12_hw_s), GFP_KERNEL);
++	hw = vzalloc(sizeof(struct vdec_mpeg12_hw_s));
+ 	if (hw == NULL) {
+ 		pr_info("\nammvdec_mpeg12 decoder driver alloc failed\n");
+ 		return -ENOMEM;
+@@ -2659,7 +2654,10 @@ static int ammvdec_mpeg12_probe(struct platform_device *pdev)
+ 
+ 	if (vmpeg12_init(hw) < 0) {
+ 		pr_info("ammvdec_mpeg12 init failed.\n");
+-		devm_kfree(&pdev->dev, (void *)hw);
++		if (hw) {
++			vfree(hw);
++			hw = NULL;
++		}
+ 		pdata->dec_status = NULL;
+ 		return -ENODEV;
+ 	}
+@@ -2742,7 +2740,10 @@ static int ammvdec_mpeg12_remove(struct platform_device *pdev)
+ 		vfree(hw->fw);
+ 		hw->fw = NULL;
+ 	}
+-
++	if (hw) {
++		vfree(hw);
++		hw = NULL;
++	}
+ 	pr_info("ammvdec_mpeg12 removed.\n");
+ 	memset(&gvs, 0x0, sizeof(gvs));
+ 
+diff --git a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
+index 1c96f22..84a8d38 100644
+--- a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
++++ b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
+@@ -934,6 +934,7 @@ static void vmpeg4_work(struct work_struct *work)
+ 			hw->ctx_valid = 1;
+ 
+ 		vdec_vframe_dirty(hw_to_vdec(hw), hw->chunk);
++		hw->chunk = NULL;
+ 	} else if (hw->dec_result == DEC_RESULT_AGAIN
+ 	&& (hw_to_vdec(hw)->next_status !=
+ 		VDEC_STATUS_DISCONNECTED)) {
+@@ -967,6 +968,7 @@ static void vmpeg4_work(struct work_struct *work)
+ 			hw->stat &= ~STAT_VDEC_RUN;
+ 		}
+ 		vdec_vframe_dirty(hw_to_vdec(hw), hw->chunk);
++		hw->chunk = NULL;
+ 		vdec_clean_input(hw_to_vdec(hw));
+ 	}
+ 	if (hw->stat & STAT_VDEC_RUN) {
