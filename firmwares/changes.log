@@ -1,57 +1,42 @@
-commit 68b3857a1adccaa82c51fea26a7b9c70edc0dbc9
-Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Thu Mar 21 15:48:50 2019 +0800
+commit 5739dda4f95dcb3ba242419b0368eb47a1091441
+Author: shihong.zheng <shihong.zheng@amlogic.com>
+Date:   Fri Mar 22 14:46:23 2019 +0800
 
-    vmh264: fix frame mode playback not smooth issue  [1/1]
+    amstream: adjust vdec connect timming. [1/1]
     
-    PD#SWPL-5926
+    PD#SWPL-5888
     
     Problem:
-    In frame mode and frmbase_cont_bitlevel > 0 case. with some stream
-    driver will finish search start code until H264_SEARCH_BUFEMPTY. it
-    will cost 2+ vsync time. decoder will be blocked. actually, in frame mode
-    decoder don't need to wait for timeout. decoder should return with
-    H264_SEARCH_BUFEMPTY once bitlevel is very low.
+    too many vdec_sync_input error print.
     
     Solution:
-    skip search start code vsync timeout wait in frame mode
-    
-    ucode gerrit: 63873 63932
+    1. remove vdec_connect befer other hw initial.
+    2. vdec_disconnect before parser wp/rp reset in tsdemux.
     
     Verify:
-    X301
+    x301
     
-    Change-Id: Id7a8f08aef41c16f00b56745ac8ffbced632e97e
-    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
+    Change-Id: I7b8909496918a581d48a09deefad58cb1ce0e0f4
+    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-index fdd0a2b..1523bdc 100644
---- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
-+++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-@@ -5139,8 +5139,8 @@ pic_done_proc:
- 			(dec_dpb_status == H264_DECODE_TIMEOUT)) {
- empty_proc:
- 		reset_process_time(hw);
--
--		release_cur_decoding_buf(hw);
-+		if (!hw->frmbase_cont_flag)
-+			release_cur_decoding_buf(hw);
+diff --git a/drivers/stream_input/amports/amstream.c b/drivers/stream_input/amports/amstream.c
+index c3c3095..a1b4a47 100644
+--- a/drivers/stream_input/amports/amstream.c
++++ b/drivers/stream_input/amports/amstream.c
+@@ -685,8 +685,6 @@ static int video_port_init(struct port_priv_s *priv,
  
- 		if (input_frame_based(vdec) ||
- 			(READ_VREG(VLD_MEM_VIFIFO_LEVEL) > 0x200)) {
-@@ -5171,8 +5171,8 @@ empty_proc:
- 				hw->decode_timeout_num++;
- 			else if (dec_dpb_status == H264_DECODE_BUFEMPTY)
- 				hw->decode_dataempty_num++;
--
--			hw->data_flag |= ERROR_FLAG;
-+			if (!hw->frmbase_cont_flag)
-+				hw->data_flag |= ERROR_FLAG;
+ 	pbuf->flag |= BUF_FLAG_IN_USE;
  
- 			vdec_schedule_work(&hw->work);
- 		} else {
-diff --git a/firmware/video_ucode.bin b/firmware/video_ucode.bin
-old mode 100644
-new mode 100755
-index 386394b..a514560
-Binary files a/firmware/video_ucode.bin and b/firmware/video_ucode.bin differ
+-	vdec_connect(priv->vdec);
+-
+ 	return 0;
+ }
+ 
+@@ -1031,6 +1029,7 @@ static int amstream_port_release(struct port_priv_s *priv)
+ 	}
+ 
+ 	if (port->type & PORT_TYPE_MPTS) {
++		vdec_disconnect(priv->vdec);
+ 		tsync_pcr_stop();
+ 		tsdemux_release();
+ 	}
