@@ -1,371 +1,371 @@
 Loaded /home/narmstrong/projects/amlogic/openlinux/media_modules/firmware/video_ucode.bin: 945408 bytes
-gxm_avs.bin ; avs ; gxm ; 12800
-Name: gxm_avs.bin
-CPU: gxm
-Format: avs
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:39 2019
-Size: 12288
-RealSize: 11651 (00002D83)
-
-Name: gxl_avs_no_cabac.bin
-CPU: gxl
-Format: avs_no_cabac
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:39 2019
-Size: 12288
-RealSize: 11599 (00002D4F)
-
-Name: gxl_avs.bin
-CPU: gxl
-Format: avs
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:39 2019
-Size: 16384
-RealSize: 13235 (000033B3)
-
-Name: gxl_real_v9.bin
-CPU: gxl
-Format: real_v9
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:40 2019
-Size: 16384
-RealSize: 13236 (000033B4)
-
-Name: gxl_real_v8.bin
-CPU: gxl
-Format: real_v8
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:40 2019
-Size: 16384
-RealSize: 13404 (0000345C)
-
-Name: txlx_real_v8.bin
-CPU: txlx
-Format: real_v8
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:40 2019
-Size: 16384
-RealSize: 13404 (0000345C)
-
-Name: txlx_real_v9.bin
-CPU: txlx
-Format: real_v9
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:40 2019
-Size: 16384
-RealSize: 13236 (000033B4)
-
-Name: gxl_xvid.bin
-CPU: gxl
-Format: xvid
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:40 2019
-Size: 16384
-RealSize: 12783 (000031EF)
-
-Name: gxl_h263.bin
-CPU: gxl
-Format: h263
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:40 2019
-Size: 12288
-RealSize: 9512 (00002528)
-
-Name: gxl_h264.bin
-CPU: gxl
-Format: h264
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:40 2019
-Size: 28672
-RealSize: 28072 (00006DA8)
-
-Name: gxm_h264.bin
-CPU: gxm
-Format: h264
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:40 2019
-Size: 28672
-RealSize: 28072 (00006DA8)
-
-Name: g12a_h264.bin
-CPU: g12a
-Format: h264
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:40 2019
-Size: 28672
-RealSize: 28072 (00006DA8)
-
-Name: gxl_mpeg12.bin
-CPU: gxl
-Format: mpeg12
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:40 2019
-Size: 8192
-RealSize: 7436 (00001D0C)
-
-Name: g12a_vp9_mmu.bin
-CPU: g12a
-Format: vp9_mmu
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:41 2019
-Size: 28672
-RealSize: 9800 (00002648)
-
-Name: gxl_vp9.bin
-CPU: gxl
-Format: vp9
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:41 2019
-Size: 28672
-RealSize: 9900 (000026AC)
-
-Name: tl1_vp9_mmu.bin
-CPU: tl1
-Format: vp9_mmu
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:41 2019
-Size: 28672
-RealSize: 9792 (00002640)
-
-Name: gxl_vp9_mmu.bin
-CPU: gxl
-Format: vp9_mmu
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:41 2019
-Size: 28672
-RealSize: 9960 (000026E8)
-
-Name: g12a_vp9.bin
-CPU: g12a
-Format: vp9
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:41 2019
-Size: 28672
-RealSize: 9800 (00002648)
-
-Name: gxl_h264_multi.bin
-CPU: gxl
-Format: h264_multi
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:41 2019
-Size: 28672
-RealSize: 21332 (00005354)
-
-Name: g12a_h264_multi_mmu.bin
-CPU: g12a
-Format: h264_multi_mmu
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:41 2019
-Size: 4096
-RealSize: 280 (00000118)
-
+gxm_h264_multi.bin ; h264_multi ; gxm ; 29184
 Name: gxm_h264_multi.bin
 CPU: gxm
 Format: h264_multi
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:41 2019
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:08 2019
 Size: 28672
 RealSize: 21332 (00005354)
 
 Name: gxl_h264_multi_mmu.bin
 CPU: gxl
 Format: h264_multi_mmu
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:41 2019
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:08 2019
 Size: 4096
 RealSize: 448 (000001C0)
 
-Name: gxl_h263_multi.bin
-CPU: gxl
-Format: h263_multi
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:41 2019
-Size: 12288
-RealSize: 9404 (000024BC)
-
-Name: gxl_xvid_multi.bin
-CPU: gxl
-Format: xvid_multi
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:41 2019
-Size: 16384
-RealSize: 12783 (000031EF)
-
-Name: g12b_mjpeg_multi.bin
-CPU: g12b
-Format: mjpeg_multi
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:41 2019
-Size: 16384
-RealSize: 13459 (00003493)
-
-Name: gxl_mjpeg_multi.bin
-CPU: gxl
-Format: mjpeg_multi
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:41 2019
-Size: 16384
-RealSize: 13459 (00003493)
-
-Name: gxl_mjpeg.bin
-CPU: gxl
-Format: mjpeg
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:41 2019
-Size: 16384
-RealSize: 13459 (00003493)
-
-Name: g12b_mjpeg.bin
-CPU: g12b
-Format: mjpeg
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:41 2019
-Size: 16384
-RealSize: 13459 (00003493)
-
-Name: gxl_mpeg12_multi.bin
-CPU: gxl
-Format: mpeg12_multi
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:41 2019
-Size: 8192
-RealSize: 6968 (00001B38)
-
-Name: g12a_hevc.bin
+Name: g12a_h264_multi_mmu.bin
 CPU: g12a
-Format: hevc
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:42 2019
-Size: 36864
-RealSize: 15856 (00003DF0)
+Format: h264_multi_mmu
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:09 2019
+Size: 4096
+RealSize: 280 (00000118)
+
+Name: gxl_h264_multi.bin
+CPU: gxl
+Format: h264_multi
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:08 2019
+Size: 28672
+RealSize: 21332 (00005354)
+
+Name: gxl_vp9_mmu.bin
+CPU: gxl
+Format: vp9_mmu
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:09 2019
+Size: 28672
+RealSize: 9960 (000026E8)
+
+Name: g12a_vp9_mmu.bin
+CPU: g12a
+Format: vp9_mmu
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:09 2019
+Size: 28672
+RealSize: 9800 (00002648)
+
+Name: tl1_vp9_mmu.bin
+CPU: tl1
+Format: vp9_mmu
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:09 2019
+Size: 28672
+RealSize: 9792 (00002640)
+
+Name: gxl_vp9.bin
+CPU: gxl
+Format: vp9
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:09 2019
+Size: 28672
+RealSize: 9900 (000026AC)
+
+Name: g12a_vp9.bin
+CPU: g12a
+Format: vp9
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:09 2019
+Size: 28672
+RealSize: 9800 (00002648)
+
+Name: gxl_avs.bin
+CPU: gxl
+Format: avs
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:09 2019
+Size: 16384
+RealSize: 13235 (000033B3)
+
+Name: gxl_avs_no_cabac.bin
+CPU: gxl
+Format: avs_no_cabac
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:09 2019
+Size: 12288
+RealSize: 11599 (00002D4F)
+
+Name: gxm_avs.bin
+CPU: gxm
+Format: avs
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:09 2019
+Size: 12288
+RealSize: 11651 (00002D83)
 
 Name: gxl_hevc.bin
 CPU: gxl
 Format: hevc
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:41 2019
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:09 2019
 Size: 36864
 RealSize: 15932 (00003E3C)
-
-Name: g12a_hevc_mmu.bin
-CPU: g12a
-Format: hevc_mmu
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:42 2019
-Size: 36864
-RealSize: 16160 (00003F20)
 
 Name: gxl_hevc_mmu_swap.bin
 CPU: gxl
 Format: hevc_mmu_swap
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:42 2019
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:09 2019
 Size: 40960
 RealSize: 22984 (000059C8)
 
 Name: tl1_hevc_mmu.bin
 CPU: tl1
 Format: hevc_mmu
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:42 2019
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:10 2019
+Size: 36864
+RealSize: 16160 (00003F20)
+
+Name: g12a_hevc_mmu.bin
+CPU: g12a
+Format: hevc_mmu
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:10 2019
 Size: 36864
 RealSize: 16160 (00003F20)
 
 Name: gxl_hevc_mmu.bin
 CPU: gxl
 Format: hevc_mmu
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:42 2019
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:10 2019
 Size: 36864
 RealSize: 16228 (00003F64)
 
-Name: gxm_h264_mvc.bin
-CPU: gxm
-Format: h264_mvc
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:42 2019
-Size: 28672
-RealSize: 24895 (0000613F)
-
-Name: gxl_h264_mvc.bin
-CPU: gxl
-Format: h264_mvc
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:42 2019
-Size: 28672
-RealSize: 24895 (0000613F)
-
-Name: gxl_vc1.bin
-CPU: gxl
-Format: vc1
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:42 2019
-Size: 16384
-RealSize: 13176 (00003378)
+Name: g12a_hevc.bin
+CPU: g12a
+Format: hevc
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:10 2019
+Size: 36864
+RealSize: 15856 (00003DF0)
 
 Name: g12a_vc1.bin
 CPU: g12a
 Format: vc1
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:42 2019
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:10 2019
 Size: 16384
 RealSize: 13228 (000033AC)
+
+Name: gxl_vc1.bin
+CPU: gxl
+Format: vc1
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:10 2019
+Size: 16384
+RealSize: 13176 (00003378)
+
+Name: gxm_h264.bin
+CPU: gxm
+Format: h264
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:10 2019
+Size: 28672
+RealSize: 28072 (00006DA8)
+
+Name: gxl_h264.bin
+CPU: gxl
+Format: h264
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:10 2019
+Size: 28672
+RealSize: 28072 (00006DA8)
+
+Name: g12a_h264.bin
+CPU: g12a
+Format: h264
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:10 2019
+Size: 28672
+RealSize: 28072 (00006DA8)
 
 Name: gxlx2_avs2_mmu.bin
 CPU: gxlx2
 Format: avs2_mmu
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:43 2019
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:10 2019
 Size: 28672
-RealSize: 8412 (000020DC)
+RealSize: 8440 (000020F8)
 
 Name: g12a_avs2_mmu.bin
 CPU: g12a
 Format: avs2_mmu
-Version: v0.1.d34ea25.Ie82fd56
-Author: nanxin.qin
-Date: Fri Jan 25 20:07:43 2019
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:10 2019
 Size: 28672
-RealSize: 8772 (00002244)
+RealSize: 8800 (00002260)
+
+Name: gxl_mjpeg.bin
+CPU: gxl
+Format: mjpeg
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:10 2019
+Size: 16384
+RealSize: 13459 (00003493)
+
+Name: gxl_mjpeg_multi.bin
+CPU: gxl
+Format: mjpeg_multi
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:10 2019
+Size: 16384
+RealSize: 13459 (00003493)
+
+Name: g12b_mjpeg.bin
+CPU: g12b
+Format: mjpeg
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:11 2019
+Size: 16384
+RealSize: 13459 (00003493)
+
+Name: g12b_mjpeg_multi.bin
+CPU: g12b
+Format: mjpeg_multi
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:11 2019
+Size: 16384
+RealSize: 13459 (00003493)
+
+Name: gxl_xvid.bin
+CPU: gxl
+Format: xvid
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:11 2019
+Size: 16384
+RealSize: 12783 (000031EF)
+
+Name: gxl_h263.bin
+CPU: gxl
+Format: h263
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:11 2019
+Size: 12288
+RealSize: 9512 (00002528)
+
+Name: gxl_mpeg12.bin
+CPU: gxl
+Format: mpeg12
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:11 2019
+Size: 8192
+RealSize: 7436 (00001D0C)
+
+Name: txlx_real_v8.bin
+CPU: txlx
+Format: real_v8
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:11 2019
+Size: 16384
+RealSize: 13404 (0000345C)
+
+Name: gxl_real_v8.bin
+CPU: gxl
+Format: real_v8
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:11 2019
+Size: 16384
+RealSize: 13404 (0000345C)
+
+Name: txlx_real_v9.bin
+CPU: txlx
+Format: real_v9
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:11 2019
+Size: 16384
+RealSize: 13236 (000033B4)
+
+Name: gxl_real_v9.bin
+CPU: gxl
+Format: real_v9
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:11 2019
+Size: 16384
+RealSize: 13236 (000033B4)
+
+Name: gxl_h264_mvc.bin
+CPU: gxl
+Format: h264_mvc
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:11 2019
+Size: 28672
+RealSize: 24895 (0000613F)
+
+Name: gxm_h264_mvc.bin
+CPU: gxm
+Format: h264_mvc
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:11 2019
+Size: 28672
+RealSize: 24895 (0000613F)
+
+Name: gxl_xvid_multi.bin
+CPU: gxl
+Format: xvid_multi
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:11 2019
+Size: 16384
+RealSize: 12783 (000031EF)
+
+Name: gxl_h263_multi.bin
+CPU: gxl
+Format: h263_multi
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:12 2019
+Size: 12288
+RealSize: 9404 (000024BC)
+
+Name: gxl_mpeg12_multi.bin
+CPU: gxl
+Format: mpeg12_multi
+Version: v0.1.0372eea.If18ca0a
+Author: hui.zhang
+Date: Tue Jan 29 18:25:12 2019
+Size: 8192
+RealSize: 6968 (00001B38)
 
