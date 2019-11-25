@@ -1,63 +1,688 @@
-commit 96b88a8af905ed5b22c6a09a9365c349ffe9d0b2
-Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Thu Jun 13 17:12:05 2019 +0800
+commit 1cb8d0da71c702f12c74359077e577e3f2911afe
+Author: Nanxin Qin <nanxin.qin@amlogic.com>
+Date:   Mon Jan 7 10:24:46 2019 +0800
 
-    vp9: fix vp9 decoder green screen issue [1/1]
+    decode: suspend and resume was invoked by the pm. [1/1]
     
-    PD#TV-6406
+    PD#SWPL-9189
     
     Problem:
-    playback youtube, the value vp9_max_pic_x is not correct with some
-    APK. acutal size is beyond max value, cause canvas size overflow
+    DTV switch channel + suspend, h264 timeout trigger watchdog restart.
     
     Solution:
-    add a vp9_max_pic_x value check, to use vp9_buf_x as max when
-    origanl  vp9_max_pic_x is less then vp9_buf_x
+    suspend and resume callback was invoked by the pm of the struct driver.
     
     Verify:
     x301
     
-    Change-Id: Ie9f256ff43ddd81effb1b8b9a990d26fe09d2ee0
-    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
+    Change-Id: I58ab659d0442d2e60f8c98c7944614c9f6665f29
+    Signed-off-by: Nanxin Qin <nanxin.qin@amlogic.com>
 
+diff --git a/drivers/frame_provider/decoder/avs/avs.c b/drivers/frame_provider/decoder/avs/avs.c
+index cf0c436..5d85fb9 100644
+--- a/drivers/frame_provider/decoder/avs/avs.c
++++ b/drivers/frame_provider/decoder/avs/avs.c
+@@ -1819,12 +1819,32 @@ static int amvdec_avs_remove(struct platform_device *pdev)
+ }
+ 
+ /****************************************/
++#ifdef CONFIG_PM
++static int avs_suspend(struct device *dev)
++{
++	amvdec_suspend(to_platform_device(dev), dev->power.power_state);
++	return 0;
++}
++
++static int avs_resume(struct device *dev)
++{
++	amvdec_resume(to_platform_device(dev));
++	return 0;
++}
++
++static const struct dev_pm_ops avs_pm_ops = {
++	SET_SYSTEM_SLEEP_PM_OPS(avs_suspend, avs_resume)
++};
++#endif
+ 
+ static struct platform_driver amvdec_avs_driver = {
+ 	.probe = amvdec_avs_probe,
+ 	.remove = amvdec_avs_remove,
+ 	.driver = {
+ 		.name = DRIVER_NAME,
++#ifdef CONFIG_PM
++		.pm = &avs_pm_ops,
++#endif
+ 	}
+ };
+ 
+diff --git a/drivers/frame_provider/decoder/avs2/vavs2.c b/drivers/frame_provider/decoder/avs2/vavs2.c
+index 3a3e515..f662f91 100644
+--- a/drivers/frame_provider/decoder/avs2/vavs2.c
++++ b/drivers/frame_provider/decoder/avs2/vavs2.c
+@@ -6568,16 +6568,32 @@ static int amvdec_avs2_remove(struct platform_device *pdev)
+ }
+ 
+ /****************************************/
++#ifdef CONFIG_PM
++static int avs2_suspend(struct device *dev)
++{
++	amhevc_suspend(to_platform_device(dev), dev->power.power_state);
++	return 0;
++}
++
++static int avs2_resume(struct device *dev)
++{
++	amhevc_resume(to_platform_device(dev));
++	return 0;
++}
++
++static const struct dev_pm_ops avs2_pm_ops = {
++	SET_SYSTEM_SLEEP_PM_OPS(avs2_suspend, avs2_resume)
++};
++#endif
+ 
+ static struct platform_driver amvdec_avs2_driver = {
+ 	.probe = amvdec_avs2_probe,
+ 	.remove = amvdec_avs2_remove,
+-#ifdef CONFIG_PM
+-	.suspend = amhevc_suspend,
+-	.resume = amhevc_resume,
+-#endif
+ 	.driver = {
+ 		.name = DRIVER_NAME,
++#ifdef CONFIG_PM
++		.pm = &avs2_pm_ops,
++#endif
+ 	}
+ };
+ 
+@@ -7434,12 +7450,11 @@ static int ammvdec_avs2_remove(struct platform_device *pdev)
+ static struct platform_driver ammvdec_avs2_driver = {
+ 	.probe = ammvdec_avs2_probe,
+ 	.remove = ammvdec_avs2_remove,
+-#ifdef CONFIG_PM
+-	.suspend = amvdec_suspend,
+-	.resume = amvdec_resume,
+-#endif
+ 	.driver = {
+ 		.name = MULTI_DRIVER_NAME,
++#ifdef CONFIG_PM
++		.pm = &avs2_pm_ops,
++#endif
+ 	}
+ };
+ #endif
+diff --git a/drivers/frame_provider/decoder/h264/vh264.c b/drivers/frame_provider/decoder/h264/vh264.c
+index 8377998..fa008da 100644
+--- a/drivers/frame_provider/decoder/h264/vh264.c
++++ b/drivers/frame_provider/decoder/h264/vh264.c
+@@ -4338,16 +4338,32 @@ static int amvdec_h264_remove(struct platform_device *pdev)
+ }
+ 
+ /****************************************/
++#ifdef CONFIG_PM
++static int h264_suspend(struct device *dev)
++{
++	amvdec_suspend(to_platform_device(dev), dev->power.power_state);
++	return 0;
++}
++
++static int h264_resume(struct device *dev)
++{
++	amvdec_resume(to_platform_device(dev));
++	return 0;
++}
++
++static const struct dev_pm_ops h264_pm_ops = {
++	SET_SYSTEM_SLEEP_PM_OPS(h264_suspend, h264_resume)
++};
++#endif
+ 
+ static struct platform_driver amvdec_h264_driver = {
+ 	.probe = amvdec_h264_probe,
+ 	.remove = amvdec_h264_remove,
+-#ifdef CONFIG_PM
+-	.suspend = amvdec_suspend,
+-	.resume = amvdec_resume,
+-#endif
+ 	.driver = {
+ 		.name = DRIVER_NAME,
++#ifdef CONFIG_PM
++		.pm = &h264_pm_ops,
++#endif
+ 	}
+ };
+ 
+diff --git a/drivers/frame_provider/decoder/h264/vh264_mvc.c b/drivers/frame_provider/decoder/h264/vh264_mvc.c
+index 1f783e5..fdb0535 100644
+--- a/drivers/frame_provider/decoder/h264/vh264_mvc.c
++++ b/drivers/frame_provider/decoder/h264/vh264_mvc.c
+@@ -1656,16 +1656,32 @@ static int amvdec_h264mvc_remove(struct platform_device *pdev)
+ }
+ 
+ /****************************************/
++#ifdef CONFIG_PM
++static int h264mvc_suspend(struct device *dev)
++{
++	amvdec_suspend(to_platform_device(dev), dev->power.power_state);
++	return 0;
++}
++
++static int h264mvc_resume(struct device *dev)
++{
++	amvdec_resume(to_platform_device(dev));
++	return 0;
++}
++
++static const struct dev_pm_ops h264mvc_pm_ops = {
++	SET_SYSTEM_SLEEP_PM_OPS(h264mvc_suspend, h264mvc_resume)
++};
++#endif
+ 
+ static struct platform_driver amvdec_h264mvc_driver = {
+ 	.probe = amvdec_h264mvc_probe,
+ 	.remove = amvdec_h264mvc_remove,
+-#ifdef CONFIG_PM
+-	.suspend = amvdec_suspend,
+-	.resume = amvdec_resume,
+-#endif
+ 	.driver = {
+ 		.name = DRIVER_NAME,
++#ifdef CONFIG_PM
++		.pm = &h264mvc_pm_ops,
++#endif
+ 	}
+ };
+ 
+diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+index 42f57f7..29732fd 100644
+--- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
++++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+@@ -2496,7 +2496,7 @@ int prepare_display_buf(struct vdec_s *vdec, struct FrameStore *frame)
+ 			|| (frame->is_used == 2 && frame->bottom_field))) {
+ 			dpb_print(DECODE_ID(hw), PRINT_FLAG_ERRORFLAG_DBG,
+ 				"%s Error  frame_num %d  used %d\n",
+-					frame->frame_num, frame->is_used);
++				__func__, frame->frame_num, frame->is_used);
+ 			frame->data_flag |= ERROR_FLAG;
+ 	}
+ 
+@@ -8865,16 +8865,32 @@ static int ammvdec_h264_remove(struct platform_device *pdev)
+ }
+ 
+ /****************************************/
++#ifdef CONFIG_PM
++static int mh264_suspend(struct device *dev)
++{
++	amvdec_suspend(to_platform_device(dev), dev->power.power_state);
++	return 0;
++}
++
++static int mh264_resume(struct device *dev)
++{
++	amvdec_resume(to_platform_device(dev));
++	return 0;
++}
++
++static const struct dev_pm_ops mh264_pm_ops = {
++	SET_SYSTEM_SLEEP_PM_OPS(mh264_suspend, mh264_resume)
++};
++#endif
+ 
+ static struct platform_driver ammvdec_h264_driver = {
+ 	.probe = ammvdec_h264_probe,
+ 	.remove = ammvdec_h264_remove,
+-#ifdef CONFIG_PM
+-	.suspend = amvdec_suspend,
+-	.resume = amvdec_resume,
+-#endif
+ 	.driver = {
+ 		.name = DRIVER_NAME,
++#ifdef CONFIG_PM
++		.pm = &mh264_pm_ops,
++#endif
+ 	}
+ };
+ 
+diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
+index 4aa226d..5b111e2 100644
+--- a/drivers/frame_provider/decoder/h265/vh265.c
++++ b/drivers/frame_provider/decoder/h265/vh265.c
+@@ -11965,16 +11965,32 @@ static int amvdec_h265_remove(struct platform_device *pdev)
+ 	return 0;
+ }
+ /****************************************/
++#ifdef CONFIG_PM
++static int h265_suspend(struct device *dev)
++{
++	amhevc_suspend(to_platform_device(dev), dev->power.power_state);
++	return 0;
++}
++
++static int h265_resume(struct device *dev)
++{
++	amhevc_resume(to_platform_device(dev));
++	return 0;
++}
++
++static const struct dev_pm_ops h265_pm_ops = {
++	SET_SYSTEM_SLEEP_PM_OPS(h265_suspend, h265_resume)
++};
++#endif
+ 
+ static struct platform_driver amvdec_h265_driver = {
+ 	.probe = amvdec_h265_probe,
+ 	.remove = amvdec_h265_remove,
+-#ifdef CONFIG_PM
+-	.suspend = amhevc_suspend,
+-	.resume = amhevc_resume,
+-#endif
+ 	.driver = {
+ 		.name = DRIVER_NAME,
++#ifdef CONFIG_PM
++		.pm = &h265_pm_ops,
++#endif
+ 	}
+ };
+ 
+@@ -12393,12 +12409,11 @@ static int ammvdec_h265_remove(struct platform_device *pdev)
+ static struct platform_driver ammvdec_h265_driver = {
+ 	.probe = ammvdec_h265_probe,
+ 	.remove = ammvdec_h265_remove,
+-#ifdef CONFIG_PM
+-	.suspend = amhevc_suspend,
+-	.resume = amhevc_resume,
+-#endif
+ 	.driver = {
+ 		.name = MULTI_DRIVER_NAME,
++#ifdef CONFIG_PM
++		.pm = &h265_pm_ops,
++#endif
+ 	}
+ };
+ #endif
+diff --git a/drivers/frame_provider/decoder/mjpeg/vmjpeg.c b/drivers/frame_provider/decoder/mjpeg/vmjpeg.c
+index 6f21125..6b87d4a 100644
+--- a/drivers/frame_provider/decoder/mjpeg/vmjpeg.c
++++ b/drivers/frame_provider/decoder/mjpeg/vmjpeg.c
+@@ -911,16 +911,32 @@ static int amvdec_mjpeg_remove(struct platform_device *pdev)
+ }
+ 
+ /****************************************/
++#ifdef CONFIG_PM
++static int mjpeg_suspend(struct device *dev)
++{
++	amvdec_suspend(to_platform_device(dev), dev->power.power_state);
++	return 0;
++}
++
++static int mjpeg_resume(struct device *dev)
++{
++	amvdec_resume(to_platform_device(dev));
++	return 0;
++}
++
++static const struct dev_pm_ops mjpeg_pm_ops = {
++	SET_SYSTEM_SLEEP_PM_OPS(mjpeg_suspend, mjpeg_resume)
++};
++#endif
+ 
+ static struct platform_driver amvdec_mjpeg_driver = {
+ 	.probe = amvdec_mjpeg_probe,
+ 	.remove = amvdec_mjpeg_remove,
+-#ifdef CONFIG_PM
+-	.suspend = amvdec_suspend,
+-	.resume = amvdec_resume,
+-#endif
+ 	.driver = {
+ 		.name = DRIVER_NAME,
++#ifdef CONFIG_PM
++		.pm = &mjpeg_pm_ops,
++#endif
+ 	}
+ };
+ 
+diff --git a/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c b/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c
+index 1eaf641..79d7976 100644
+--- a/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c
++++ b/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c
+@@ -1241,16 +1241,32 @@ static int ammvdec_mjpeg_remove(struct platform_device *pdev)
+ }
+ 
+ /****************************************/
++#ifdef CONFIG_PM
++static int mmjpeg_suspend(struct device *dev)
++{
++	amvdec_suspend(to_platform_device(dev), dev->power.power_state);
++	return 0;
++}
++
++static int mmjpeg_resume(struct device *dev)
++{
++	amvdec_resume(to_platform_device(dev));
++	return 0;
++}
++
++static const struct dev_pm_ops mmjpeg_pm_ops = {
++	SET_SYSTEM_SLEEP_PM_OPS(mmjpeg_suspend, mmjpeg_resume)
++};
++#endif
+ 
+ static struct platform_driver ammvdec_mjpeg_driver = {
+ 	.probe = ammvdec_mjpeg_probe,
+ 	.remove = ammvdec_mjpeg_remove,
+-#ifdef CONFIG_PM
+-	.suspend = amvdec_suspend,
+-	.resume = amvdec_resume,
+-#endif
+ 	.driver = {
+ 		.name = DRIVER_NAME,
++#ifdef CONFIG_PM
++		.pm = &mmjpeg_pm_ops,
++#endif
+ 	}
+ };
+ 
+diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
+index 630b693..c2eca07 100644
+--- a/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
++++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
+@@ -2156,16 +2156,32 @@ static int amvdec_mpeg12_remove(struct platform_device *pdev)
+ }
+ 
+ /****************************************/
++#ifdef CONFIG_PM
++static int mpeg12_suspend(struct device *dev)
++{
++	amvdec_suspend(to_platform_device(dev), dev->power.power_state);
++	return 0;
++}
++
++static int mpeg12_resume(struct device *dev)
++{
++	amvdec_resume(to_platform_device(dev));
++	return 0;
++}
++
++static const struct dev_pm_ops mpeg12_pm_ops = {
++	SET_SYSTEM_SLEEP_PM_OPS(mpeg12_suspend, mpeg12_resume)
++};
++#endif
+ 
+ static struct platform_driver amvdec_mpeg12_driver = {
+ 	.probe = amvdec_mpeg12_probe,
+ 	.remove = amvdec_mpeg12_remove,
+-#ifdef CONFIG_PM
+-	.suspend = amvdec_suspend,
+-	.resume = amvdec_resume,
+-#endif
+ 	.driver = {
+ 		.name = DRIVER_NAME,
++#ifdef CONFIG_PM
++		.pm = &mpeg12_pm_ops,
++#endif
+ 	}
+ };
+ 
+diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
+index 731c645..f5f5f3a 100644
+--- a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
++++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
+@@ -2665,16 +2665,32 @@ static int ammvdec_mpeg12_remove(struct platform_device *pdev)
+ }
+ 
+ /****************************************/
++#ifdef CONFIG_PM
++static int mmpeg12_suspend(struct device *dev)
++{
++	amvdec_suspend(to_platform_device(dev), dev->power.power_state);
++	return 0;
++}
++
++static int mmpeg12_resume(struct device *dev)
++{
++	amvdec_resume(to_platform_device(dev));
++	return 0;
++}
++
++static const struct dev_pm_ops mmpeg12_pm_ops = {
++	SET_SYSTEM_SLEEP_PM_OPS(mmpeg12_suspend, mmpeg12_resume)
++};
++#endif
+ 
+ static struct platform_driver ammvdec_mpeg12_driver = {
+ 	.probe = ammvdec_mpeg12_probe,
+ 	.remove = ammvdec_mpeg12_remove,
+-#ifdef CONFIG_PM
+-	.suspend = amvdec_suspend,
+-	.resume = amvdec_resume,
+-#endif
+ 	.driver = {
+ 		.name = DRIVER_NAME,
++#ifdef CONFIG_PM
++		.pm = &mmpeg12_pm_ops,
++#endif
+ 	}
+ };
+ 
+diff --git a/drivers/frame_provider/decoder/mpeg4/vmpeg4.c b/drivers/frame_provider/decoder/mpeg4/vmpeg4.c
+index 5525086..7092ddb 100644
+--- a/drivers/frame_provider/decoder/mpeg4/vmpeg4.c
++++ b/drivers/frame_provider/decoder/mpeg4/vmpeg4.c
+@@ -1216,16 +1216,32 @@ static int amvdec_mpeg4_remove(struct platform_device *pdev)
+ }
+ 
+ /****************************************/
++#ifdef CONFIG_PM
++static int mpeg4_suspend(struct device *dev)
++{
++	amvdec_suspend(to_platform_device(dev), dev->power.power_state);
++	return 0;
++}
++
++static int mpeg4_resume(struct device *dev)
++{
++	amvdec_resume(to_platform_device(dev));
++	return 0;
++}
++
++static const struct dev_pm_ops mpeg4_pm_ops = {
++	SET_SYSTEM_SLEEP_PM_OPS(mpeg4_suspend, mpeg4_resume)
++};
++#endif
+ 
+ static struct platform_driver amvdec_mpeg4_driver = {
+ 	.probe = amvdec_mpeg4_probe,
+ 	.remove = amvdec_mpeg4_remove,
+-#ifdef CONFIG_PM
+-	.suspend = amvdec_suspend,
+-	.resume = amvdec_resume,
+-#endif
+ 	.driver = {
+ 		.name = DRIVER_NAME,
++#ifdef CONFIG_PM
++		.pm = &mpeg4_pm_ops,
++#endif
+ 	}
+ };
+ 
+diff --git a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
+index 7670010..6483c96 100644
+--- a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
++++ b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
+@@ -2097,16 +2097,32 @@ static int ammvdec_mpeg4_remove(struct platform_device *pdev)
+ }
+ 
+ /****************************************/
++#ifdef CONFIG_PM
++static int mmpeg4_suspend(struct device *dev)
++{
++	amvdec_suspend(to_platform_device(dev), dev->power.power_state);
++	return 0;
++}
++
++static int mmpeg4_resume(struct device *dev)
++{
++	amvdec_resume(to_platform_device(dev));
++	return 0;
++}
++
++static const struct dev_pm_ops mmpeg4_pm_ops = {
++	SET_SYSTEM_SLEEP_PM_OPS(mmpeg4_suspend, mmpeg4_resume)
++};
++#endif
+ 
+ static struct platform_driver ammvdec_mpeg4_driver = {
+ 	.probe = ammvdec_mpeg4_probe,
+ 	.remove = ammvdec_mpeg4_remove,
+-#ifdef CONFIG_PM
+-	.suspend = amvdec_suspend,
+-	.resume = amvdec_resume,
+-#endif
+ 	.driver = {
+ 		.name = DRIVER_NAME,
++#ifdef CONFIG_PM
++		.pm = &mmpeg4_pm_ops,
++#endif
+ 	}
+ };
+ 
+diff --git a/drivers/frame_provider/decoder/real/vreal.c b/drivers/frame_provider/decoder/real/vreal.c
+index 3b55d9c..a752f78 100644
+--- a/drivers/frame_provider/decoder/real/vreal.c
++++ b/drivers/frame_provider/decoder/real/vreal.c
+@@ -1001,16 +1001,32 @@ static int amvdec_real_remove(struct platform_device *pdev)
+ }
+ 
+ /****************************************/
++#ifdef CONFIG_PM
++static int real_suspend(struct device *dev)
++{
++	amvdec_suspend(to_platform_device(dev), dev->power.power_state);
++	return 0;
++}
++
++static int real_resume(struct device *dev)
++{
++	amvdec_resume(to_platform_device(dev));
++	return 0;
++}
++
++static const struct dev_pm_ops real_pm_ops = {
++	SET_SYSTEM_SLEEP_PM_OPS(real_suspend, real_resume)
++};
++#endif
+ 
+ static struct platform_driver amvdec_real_driver = {
+ 	.probe = amvdec_real_probe,
+ 	.remove = amvdec_real_remove,
+-#ifdef CONFIG_PM
+-	.suspend = amvdec_suspend,
+-	.resume = amvdec_resume,
+-#endif
+ 	.driver = {
+ 		.name = DRIVER_NAME,
++#ifdef CONFIG_PM
++		.pm = &real_pm_ops,
++#endif
+ 	}
+ };
+ 
+diff --git a/drivers/frame_provider/decoder/vc1/vvc1.c b/drivers/frame_provider/decoder/vc1/vvc1.c
+index 40cdee5..1616893 100644
+--- a/drivers/frame_provider/decoder/vc1/vvc1.c
++++ b/drivers/frame_provider/decoder/vc1/vvc1.c
+@@ -1234,16 +1234,32 @@ static int amvdec_vc1_remove(struct platform_device *pdev)
+ }
+ 
+ /****************************************/
++#ifdef CONFIG_PM
++static int vc1_suspend(struct device *dev)
++{
++	amvdec_suspend(to_platform_device(dev), dev->power.power_state);
++	return 0;
++}
++
++static int vc1_resume(struct device *dev)
++{
++	amvdec_resume(to_platform_device(dev));
++	return 0;
++}
++
++static const struct dev_pm_ops vc1_pm_ops = {
++	SET_SYSTEM_SLEEP_PM_OPS(vc1_suspend, vc1_resume)
++};
++#endif
+ 
+ static struct platform_driver amvdec_vc1_driver = {
+ 	.probe = amvdec_vc1_probe,
+ 	.remove = amvdec_vc1_remove,
+-#ifdef CONFIG_PM
+-	.suspend = amvdec_suspend,
+-	.resume = amvdec_resume,
+-#endif
+ 	.driver = {
+ 		.name = DRIVER_NAME,
++#ifdef CONFIG_PM
++		.pm = &vc1_pm_ops,
++#endif
+ 	}
+ };
+ 
 diff --git a/drivers/frame_provider/decoder/vp9/vvp9.c b/drivers/frame_provider/decoder/vp9/vvp9.c
-index d112c65..8f67a01 100644
+index 8f67a01..7e2f0ac 100644
 --- a/drivers/frame_provider/decoder/vp9/vvp9.c
 +++ b/drivers/frame_provider/decoder/vp9/vvp9.c
-@@ -9930,6 +9930,8 @@ static int ammvdec_vp9_probe(struct platform_device *pdev)
- 	if ((debug & IGNORE_PARAM_FROM_CONFIG) == 0 &&
- 			pdata->config_len) {
- #ifdef MULTI_INSTANCE_SUPPORT
-+		int vp9_buf_width = 0;
-+		int vp9_buf_height = 0;
- 		/*use ptr config for doubel_write_mode, etc*/
- 		vp9_print(pbi, 0, "pdata->config=%s\n", pdata->config);
- 		if (get_config_int(pdata->config, "vp9_double_write_mode",
-@@ -9943,6 +9945,14 @@ static int ammvdec_vp9_probe(struct platform_device *pdev)
- 			pbi->save_buffer_mode = config_val;
- 		else
- 			pbi->save_buffer_mode = 0;
-+		if (get_config_int(pdata->config, "vp9_buf_width",
-+				&config_val) == 0) {
-+			vp9_buf_width = config_val;
-+		}
-+		if (get_config_int(pdata->config, "vp9_buf_height",
-+				&config_val) == 0) {
-+			vp9_buf_height = config_val;
-+		}
+@@ -9019,16 +9019,32 @@ static int amvdec_vp9_remove(struct platform_device *pdev)
+ }
  
- 		/*use ptr config for max_pic_w, etc*/
- 		if (get_config_int(pdata->config, "vp9_max_pic_w",
-@@ -9953,6 +9963,12 @@ static int ammvdec_vp9_probe(struct platform_device *pdev)
- 				&config_val) == 0) {
- 				pbi->max_pic_h = config_val;
- 		}
-+		if ((pbi->max_pic_w * pbi->max_pic_h)
-+			< (vp9_buf_width * vp9_buf_height)) {
-+			pbi->max_pic_w = vp9_buf_width;
-+			pbi->max_pic_h = vp9_buf_height;
-+			vp9_print(pbi, 0, "use buf resolution\n");
-+		}
+ /****************************************/
++#ifdef CONFIG_PM
++static int vp9_suspend(struct device *dev)
++{
++	amhevc_suspend(to_platform_device(dev), dev->power.power_state);
++	return 0;
++}
++
++static int vp9_resume(struct device *dev)
++{
++	amhevc_resume(to_platform_device(dev));
++	return 0;
++}
++
++static const struct dev_pm_ops vp9_pm_ops = {
++	SET_SYSTEM_SLEEP_PM_OPS(vp9_suspend, vp9_resume)
++};
++#endif
+ 
+ static struct platform_driver amvdec_vp9_driver = {
+ 	.probe = amvdec_vp9_probe,
+ 	.remove = amvdec_vp9_remove,
+-#ifdef CONFIG_PM
+-	.suspend = amhevc_suspend,
+-	.resume = amhevc_resume,
+-#endif
+ 	.driver = {
+ 		.name = DRIVER_NAME,
++#ifdef CONFIG_PM
++		.pm = &vp9_pm_ops,
++#endif
+ 	}
+ };
+ 
+@@ -10173,12 +10189,11 @@ static int ammvdec_vp9_remove(struct platform_device *pdev)
+ static struct platform_driver ammvdec_vp9_driver = {
+ 	.probe = ammvdec_vp9_probe,
+ 	.remove = ammvdec_vp9_remove,
+-#ifdef CONFIG_PM
+-	.suspend = amhevc_suspend,
+-	.resume = amhevc_resume,
+-#endif
+ 	.driver = {
+ 		.name = MULTI_DRIVER_NAME,
++#ifdef CONFIG_PM
++		.pm = &vp9_pm_ops,
++#endif
+ 	}
+ };
  #endif
- 		if (get_config_int(pdata->config, "HDRStaticInfo",
- 				&vf_dp.present_flag) == 0
