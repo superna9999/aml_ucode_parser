@@ -1,29 +1,36 @@
-commit 660f805eed9d8979fbb8a258967519e211227c44
+commit f222bacf37ba1e49beaadaee2ec9581b9c08565c
 Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Mon Sep 9 16:59:43 2019 +0800
+Date:   Thu Sep 12 12:54:05 2019 +0800
 
-    vmh264: fix memory pollution issue caused by DCAC DMA  [1/1]
+    vh265: fix seek mosaic issue   [1/1]
     
-    PD#SWPL-13280
+    PD#SWPL-14049
     
     Problem:
-    DCAC dma address is invalid. cause memory pollution
+    there is mosaic in screeen when ff/ff or seek
     
     Solution:
-    read mem_offset from SCRATCH register directly. because
-    some corner cases, mem_offset will be set to 0. it will
-    cause DMA Address outof range
-    
-    ucode gerrit: 85293
-    ucode change id: I4b82d
-    ucode commit id: 5aed5
+    not to do error flush until first pic decoded
     
     Verify:
-    x301
+    r314
     
-    Change-Id: Ifdadb92c0f86e5ed2e6f23cbb4d43e8a9544c23e
+    Change-Id: Idd0499add7040ff5bb059ebdc0db16d6680a4600
     Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
 
-diff --git a/firmware/video_ucode.bin b/firmware/video_ucode.bin
-index cd6b03c..25ae9a5 100755
-Binary files a/firmware/video_ucode.bin and b/firmware/video_ucode.bin differ
+diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
+index 02944e6..1229791 100644
+--- a/drivers/frame_provider/decoder/h265/vh265.c
++++ b/drivers/frame_provider/decoder/h265/vh265.c
+@@ -5877,9 +5877,9 @@ static void check_pic_decoded_error(struct hevc_state_s *hevc,
+ 				current_lcu_idx,
+ 				hevc->lcu_x_num*hevc->lcu_y_num);
+ 			if (((hevc->i_only & 0x4)  == 0) && hevc->cur_pic->POC && ( hevc->cur_pic->slice_type == 0)
+-					&& ((hevc->cur_pic->POC + hevc->sps_num_reorder_pics_0) < hevc->iPrevPOC)) {
++					&& ((hevc->cur_pic->POC + MAX_BUF_NUM) < hevc->iPrevPOC)) {
+ 					hevc_print(hevc, 0,
+-					"Flush  .. num_reorder_pic %d  pic->POC %d  hevc->iPrevPOC %d\n",
++					"Flush.. num_reorder_pic %d  pic->POC %d  hevc->iPrevPOC %d\n",
+ 					hevc->sps_num_reorder_pics_0,hevc->cur_pic->POC ,hevc->iPrevPOC);
+ 					flush_output(hevc, get_pic_by_POC(hevc, hevc->cur_pic->POC ));
+ 			}
