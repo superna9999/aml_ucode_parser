@@ -1,38 +1,69 @@
-commit 85c5e7aa6c93eb86f212f353c32fa41822995bb5
-Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Wed Jun 5 14:53:46 2019 +0800
+commit 52a31dc3d4e72f2a70595624786e6fc969838b55
+Author: Nanxin Qin <nanxin.qin@amlogic.com>
+Date:   Thu Jun 6 13:33:58 2019 +0800
 
-    vmh264: fix invalid resolution  in pool signal caused too much printf issue [1/1]
+    vdec: fixed the playback with h263. [1/1]
     
-    PD#SWPL-9391
+    PD#SWPL-9467
     
     Problem:
-    too many error print in invalid resolution in poor signal.
-    it caused system dead.
+    fixed the playback with h263
     
     Solution:
-    skip error nal when invalid resolution happen. search next start
-    code.
+    fixed the playback with h263
     
     Verify:
-    x301
+    U212
     
-    Change-Id: Ib5dd280fd36e0b1d963a31e4d2a2633ddf6ff7d4
-    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
+    Change-Id: I24a0c0817503c65ed64e0c21e3c3ca70d189921c
+    Signed-off-by: Nanxin Qin <nanxin.qin@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-index 552f8b7..a27b76f 100644
---- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
-+++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-@@ -4405,10 +4405,7 @@ static int vh264_set_params(struct vdec_h264_hw_s *hw,
- 			seq_info2,
- 			mb_width,
- 			mb_height);
--		WRITE_VREG(AV_SCRATCH_0, (hw->max_reference_size<<24) |
--			(hw->dpb.mDPB.size<<16) |
--			(hw->dpb.mDPB.size<<8));
--		return 0;
-+		return -1;
- 	}
+diff --git a/drivers/frame_provider/decoder/utils/vdec.c b/drivers/frame_provider/decoder/utils/vdec.c
+index 089c235..bb8edab 100644
+--- a/drivers/frame_provider/decoder/utils/vdec.c
++++ b/drivers/frame_provider/decoder/utils/vdec.c
+@@ -909,6 +909,22 @@ int vdec_set_decinfo(struct vdec_s *vdec, struct dec_sysinfo *p)
+ 		sizeof(struct dec_sysinfo)))
+ 		return -EFAULT;
  
- 	if (seq_info2 != 0 &&
++	/* force switch to mult instance if supports this profile. */
++	if ((vdec->type == VDEC_TYPE_SINGLE) &&
++		!disable_switch_single_to_mult) {
++		const char *str = NULL;
++		char fmt[16] = {0};
++
++		str = strchr(get_dev_name(false, vdec->format), '_');
++		if (!str)
++			return -1;
++
++		sprintf(fmt, "m%s", ++str);
++		if (is_support_profile(fmt) &&
++			vdec->sys_info->format != VIDEO_DEC_FORMAT_H263)
++			vdec->type = VDEC_TYPE_STREAM_PARSER;
++	}
++
+ 	return 0;
+ }
+ EXPORT_SYMBOL(vdec_set_decinfo);
+@@ -974,21 +990,6 @@ int vdec_set_format(struct vdec_s *vdec, int format)
+ 		vdec->slave->format = format;
+ 		vdec->slave->port_flag |= PORT_FLAG_VFORMAT;
+ 	}
+-
+-	/* force switch to mult instance if supports this profile. */
+-	if ((vdec->type == VDEC_TYPE_SINGLE) &&
+-		!disable_switch_single_to_mult) {
+-		const char *str = NULL;
+-		char fmt[16] = {0};
+-
+-		str = strchr(get_dev_name(false, format), '_');
+-		if (!str)
+-			return -1;
+-
+-		sprintf(fmt, "m%s", ++str);
+-		if (is_support_profile(fmt))
+-			vdec->type = VDEC_TYPE_STREAM_PARSER;
+-	}
+ 	//trace_vdec_set_format(vdec, format);/*DEBUG_TMP*/
+ 
+ 	return 0;
