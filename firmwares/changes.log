@@ -1,260 +1,299 @@
-commit e3b2152eff4cea27079e16da70e9ab14c8f0ce7b
-Author: shihong.zheng <shihong.zheng@amlogic.com>
-Date:   Thu Jun 20 14:54:56 2019 +0800
+commit 33d1149b1003e6f56e54c7f94f33215f0c47ac01
+Author: apollo.ling <apollo.ling@amlogic.com>
+Date:   Wed Jul 3 10:54:37 2019 +0800
 
-    vdec: add keep last pic mem_handle for multi instance. [1/1]
+    media_module: Decoder add scaling down config for 1080p(dw mode 0x300) [1/1]
     
-    PD#IPTV-3280
+    PD#SWPL-10642
     
     Problem:
-    flash green screen when change to noraml play from fast forward.
+    Add dw mode 0x300
     
     Solution:
-    1. add mem_handle for keeper;
-    2. do not vmap cc phyaddr when tvp enable;
-    3. clear some debug code, optimize code.
+    resolution>720p,vdec ratio 1/2,others vdec ratio 1/1
     
     Verify:
-    S905L3
+    franklin
     
-    Change-Id: I8d04c2859cb2b62588b5587494cd79c7c9c029ec
-    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
+    Change-Id: Ibeb06fcea18f8fd61fa67153af9e8c4862b5bc27
+    Signed-off-by: apollo.ling <apollo.ling@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c b/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c
-index 79d7976..352baa5 100644
---- a/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c
-+++ b/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c
-@@ -303,6 +303,9 @@ static irqreturn_t vmjpeg_isr(struct vdec_s *vdec, int irq)
- 	vf->orientation = 0;
- 	hw->vfbuf_use[index]++;
+diff --git a/drivers/frame_provider/decoder/avs2/vavs2.c b/drivers/frame_provider/decoder/avs2/vavs2.c
+index f662f91..e958825 100644
+--- a/drivers/frame_provider/decoder/avs2/vavs2.c
++++ b/drivers/frame_provider/decoder/avs2/vavs2.c
+@@ -254,12 +254,17 @@ static u32 again_threshold = 0x40;
  
-+	vf->mem_handle =
-+		decoder_bmmu_box_get_mem_handle(
-+			hw->mm_blk_handle, index);
- 	kfifo_put(&hw->display_q, (const struct vframe_s *)vf);
- 	ATRACE_COUNTER(MODULE_NAME, vf->pts);
- 	hw->frame_num++;
-diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
-index 4b48612..29757a0 100644
---- a/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
-+++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
-@@ -1754,7 +1754,7 @@ static int vmpeg12_canvas_init(void)
- 				ccbuf_phyAddress_virt
- 					= codec_mm_phys_to_virt(
- 						ccbuf_phyAddress);
--				if (!ccbuf_phyAddress_virt) {
-+				if ((!ccbuf_phyAddress_virt) && (!tvp_flag)) {
- 					ccbuf_phyAddress_virt
- 						= codec_mm_vmap(
- 							ccbuf_phyAddress,
-diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-index aff4f1a..a57fe89 100644
---- a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-+++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-@@ -1329,6 +1329,9 @@ static int prepare_display_buf(struct vdec_mpeg12_hw_s *hw,
- 			if (i == 0)
- 				decoder_do_frame_check(hw_to_vdec(hw), vf);
- 			vdec->vdec_fps_detec(vdec->id);
-+			vf->mem_handle =
-+				decoder_bmmu_box_get_mem_handle(
-+				hw->mm_blk_handle, index);
- 			kfifo_put(&hw->display_q,
- 				(const struct vframe_s *)vf);
- 			vf_notify_receiver(vdec->vf_provider_name,
-@@ -1855,7 +1858,7 @@ static void vmpeg12_canvas_init(struct vdec_mpeg12_hw_s *hw)
- 			hw->ccbuf_phyAddress_virt
- 				= codec_mm_phys_to_virt(
- 					hw->ccbuf_phyAddress);
--			if (!hw->ccbuf_phyAddress_virt) {
-+			if ((!hw->ccbuf_phyAddress_virt) && (!hw->tvp_flag)) {
- 				hw->ccbuf_phyAddress_virt
- 					= codec_mm_vmap(
- 						hw->ccbuf_phyAddress,
-diff --git a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
-index 05b2bec..929e6ec 100644
---- a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
-+++ b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
-@@ -517,6 +517,9 @@ static int prepare_display_buf(struct vdec_mpeg4_hw_s * hw,
- 				(const struct vframe_s *)vf);
- 			return 0;
- 		} else {
-+			vf->mem_handle =
-+				decoder_bmmu_box_get_mem_handle(
-+					hw->mm_blk_handle, index);
- 			kfifo_put(&hw->display_q,
- 				(const struct vframe_s *)vf);
- 			ATRACE_COUNTER(MODULE_NAME, vf->pts);
-@@ -561,6 +564,9 @@ static int prepare_display_buf(struct vdec_mpeg4_hw_s * hw,
- 			kfifo_put(&hw->newframe_q,
- 				(const struct vframe_s *)vf);
- 		} else {
-+			vf->mem_handle =
-+				decoder_bmmu_box_get_mem_handle(
-+					hw->mm_blk_handle, index);
- 			kfifo_put(&hw->display_q,
- 				(const struct vframe_s *)vf);
- 			ATRACE_COUNTER(MODULE_NAME, vf->pts);
-@@ -611,6 +617,9 @@ static int prepare_display_buf(struct vdec_mpeg4_hw_s * hw,
- 			kfifo_put(&hw->newframe_q,
- 				(const struct vframe_s *)vf);
- 		} else {
-+			vf->mem_handle =
-+				decoder_bmmu_box_get_mem_handle(
-+					hw->mm_blk_handle, index);
- 			kfifo_put(&hw->display_q,
- 				(const struct vframe_s *)vf);
- 			ATRACE_COUNTER(MODULE_NAME, vf->pts);
-@@ -1014,6 +1023,7 @@ static irqreturn_t vmpeg4_isr_thread_fn(struct vdec_s *vdec, int irq)
- 			hw->chunk_frame_count);
- 		hw->last_pts = disp_pic->pts;
- 		hw->last_pts64 = disp_pic->pts64;
-+		hw->frame_dur = duration;
- 		disp_pic->duration = duration;
- 		disp_pic->repeat_cnt = repeat_cnt;
  
-@@ -1212,7 +1222,8 @@ static int  vmpeg_vf_states(struct vframe_states *states, void *op_arg)
+ /* DOUBLE_WRITE_MODE is enabled only when NV21 8 bit output is needed */
+-/* double_write_mode: 0, no double write
+-					  1, 1:1 ratio
+-					  2, (1/4):(1/4) ratio
+-					  4, (1/2):(1/2) ratio
+-					0x10, double write only
+-*/
++/* double_write_mode:
++ *	0, no double write;
++ *	1, 1:1 ratio;
++ *	2, (1/4):(1/4) ratio;
++ *	3, (1/4):(1/4) ratio, with both compressed frame included
++ *	4, (1/2):(1/2) ratio;
++ *	0x10, double write only
++ *	0x100, if > 1080p,use mode 4,else use mode 1;
++ *	0x200, if > 1080p,use mode 2,else use mode 1;
++ *	0x300, if > 720p, use mode 4, else use mode 1;
++ */
+ static u32 double_write_mode;
  
- static int dec_status(struct vdec_s *vdec, struct vdec_info *vstatus)
+ #define DRIVER_NAME "amvdec_avs2"
+@@ -870,37 +875,56 @@ static u32 get_valid_double_write_mode(struct AVS2Decoder_s *dec)
+ static int get_double_write_mode(struct AVS2Decoder_s *dec)
  {
--	struct vdec_mpeg4_hw_s *hw = (struct vdec_mpeg4_hw_s *)vdec->private;
-+	struct vdec_mpeg4_hw_s *hw =
-+		(struct vdec_mpeg4_hw_s *)vdec->private;
- 
- 	if (!hw)
- 		return -1;
-@@ -1226,6 +1237,9 @@ static int dec_status(struct vdec_s *vdec, struct vdec_info *vstatus)
- 		vstatus->frame_rate = DURATION_UNIT;
- 	vstatus->error_count = READ_VREG(MP4_ERR_COUNT);
- 	vstatus->status = hw->stat;
-+	vstatus->frame_dur = hw->frame_dur;
-+	snprintf(vstatus->vdec_name, sizeof(vstatus->vdec_name),
-+			"%s", DRIVER_NAME);
- 
- 	return 0;
- }
-diff --git a/drivers/frame_provider/decoder/utils/vdec_input.c b/drivers/frame_provider/decoder/utils/vdec_input.c
-index 9c7ed4c..d819885 100644
---- a/drivers/frame_provider/decoder/utils/vdec_input.c
-+++ b/drivers/frame_provider/decoder/utils/vdec_input.c
-@@ -746,11 +746,6 @@ static int	vdec_input_get_free_block(
- 	return 0;
- }
- 
--static void *virt_mem = NULL;
--static u32 virt_mem_size = (SZ_1M * 2);
--static u32 inoffset = 0;
--static u32 trig_error_data = 0;
+ 	u32 valid_dw_mode = get_valid_double_write_mode(dec);
+-	u32 dw;
+-	if (valid_dw_mode == 0x100) {
+-		int w = dec->avs2_dec.img.width;
+-		int h = dec->avs2_dec.img.height;
++	int w = dec->avs2_dec.img.width;
++	int h = dec->avs2_dec.img.height;
++	u32 dw = 0x1; /*1:1*/
++	switch (valid_dw_mode) {
++	case 0x100:
+ 		if (w > 1920 && h > 1088)
+ 			dw = 0x4; /*1:2*/
+-		else
+-			dw = 0x1; /*1:1*/
 -
- int vdec_input_add_chunk(struct vdec_input_s *input, const char *buf,
- 		size_t count, u32 handle)
+-		return dw;
++		break;
++	case 0x200:
++		if (w > 1920 && h > 1088)
++			dw = 0x2; /*1:4*/
++		break;
++	case 0x300:
++		if (w > 1280 && h > 720)
++			dw = 0x4; /*1:2*/
++		break;
++	default:
++		dw = valid_dw_mode;
++		break;
+ 	}
+-
+-	return valid_dw_mode;
++	return dw;
+ }
+ 
+ /* for double write buf alloc */
+ static int get_double_write_mode_init(struct AVS2Decoder_s *dec)
  {
-@@ -758,7 +753,6 @@ int vdec_input_add_chunk(struct vdec_input_s *input, const char *buf,
- 	struct vframe_chunk_s *chunk;
- 	struct vdec_s *vdec = input->vdec;
- 	struct vframe_block_list_s *block;
--	int crc = 0;
- 
- 	int need_pading_size = MIN_FRAME_PADDING_SIZE;
- 
-@@ -809,27 +803,6 @@ int vdec_input_add_chunk(struct vdec_input_s *input, const char *buf,
- 		if (input_stream_based(input))
- 			return -EINVAL;
- 
--		if (!virt_mem) {
--			virt_mem = vmalloc(virt_mem_size);
--			if (!virt_mem)
--				pr_info("%s, vmalloc buffer failed\n", __func__);
--		}
+ 	u32 valid_dw_mode = get_valid_double_write_mode(dec);
+-	if (valid_dw_mode == 0x100) {
+-		u32 dw;
+-		int w = dec->init_pic_w;
+-		int h = dec->init_pic_h;
++	u32 dw;
++	int w = dec->init_pic_w;
++	int h = dec->init_pic_h;
++
++	dw = 0x1; /*1:1*/
++	switch (valid_dw_mode) {
++	case 0x100:
+ 		if (w > 1920 && h > 1088)
+ 			dw = 0x4; /*1:2*/
+-		else
+-			dw = 0x1; /*1:1*/
 -
--		if (virt_mem) {
--			if (count < virt_mem_size) {
--				int r = copy_from_user(virt_mem, (void *)buf, count);
--				if (r)
--					pr_info("%s copy_from_user failed\n", __func__);
--				inoffset += count;
--				crc = 0;
--				crc = crc32_le(crc, virt_mem, count);
--				//pr_info("[INPUT] crc: %x, size: %zx, offset: %x\n", crc, count, inoffset);
--			} else {
--				pr_info("%s, count(%zx) > virt_mem_size(%x)\n", __func__, count, virt_mem_size);
--			}
--		}
--		count -= trig_error_data;
--
- 		if (count < PAGE_SIZE) {
- 			need_pading_size = PAGE_ALIGN(count + need_pading_size) -
- 				count;
-@@ -949,7 +922,7 @@ int vdec_input_add_chunk(struct vdec_input_s *input, const char *buf,
- 		input->total_wr_count += 38;
- #endif
- 
--	return (count + trig_error_data);
-+	return count;
+-		return dw;
++		break;
++	case 0x200:
++		if (w > 1920 && h > 1088)
++			dw = 0x2; /*1:4*/
++		break;
++	case 0x300:
++		if (w > 1280 && h > 720)
++			dw = 0x4; /*1:2*/
++		break;
++	default:
++		dw = valid_dw_mode;
++		break;
+ 	}
+-	return valid_dw_mode;
++	return dw;
  }
  
- int vdec_input_add_frame(struct vdec_input_s *input, const char *buf,
+ static int get_double_write_ratio(struct AVS2Decoder_s *dec,
+diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
+index 34b198c..f21cf63 100644
+--- a/drivers/frame_provider/decoder/h265/vh265.c
++++ b/drivers/frame_provider/decoder/h265/vh265.c
+@@ -222,12 +222,16 @@ static const char * const matrix_coeffs_names[] = {
+ #define HEVC_SAO_CTRL9                             0x362d
+ #define LOSLESS_COMPRESS_MODE
+ /* DOUBLE_WRITE_MODE is enabled only when NV21 8 bit output is needed */
+-/* hevc->double_write_mode:
++/* double_write_mode:
+  *	0, no double write;
+  *	1, 1:1 ratio;
+  *	2, (1/4):(1/4) ratio;
+  *	3, (1/4):(1/4) ratio, with both compressed frame included
++ *	4, (1/2):(1/2) ratio;
+  *	0x10, double write only
++ *	0x100, if > 1080p,use mode 4,else use mode 1;
++ *	0x200, if > 1080p,use mode 2,else use mode 1;
++ *	0x300, if > 720p, use mode 4, else use mode 1;
+  */
+ static u32 double_write_mode;
+ 
+@@ -1909,17 +1913,26 @@ static int get_dynamic_buf_num_margin(struct hevc_state_s *hevc)
+ static int get_double_write_mode(struct hevc_state_s *hevc)
+ {
+ 	u32 valid_dw_mode = get_valid_double_write_mode(hevc);
+-	u32 dw = hevc->double_write_mode;
+-	if (valid_dw_mode == 0x100) {
+-		int w = hevc->pic_w;
+-		int h = hevc->pic_h;
++	int w = hevc->pic_w;
++	int h = hevc->pic_h;
++	u32 dw = 0x1; /*1:1*/
++	switch (valid_dw_mode) {
++	case 0x100:
+ 		if (w > 1920 && h > 1088)
+ 			dw = 0x4; /*1:2*/
+-		else
+-			dw = 0x1; /*1:1*/
+-
+-	} else
++		break;
++	case 0x200:
++		if (w > 1920 && h > 1088)
++			dw = 0x2; /*1:4*/
++		break;
++	case 0x300:
++		if (w > 1280 && h > 720)
++			dw = 0x4; /*1:2*/
++		break;
++	default:
+ 		dw = valid_dw_mode;
++		break;
++	}
+ 	return dw;
+ }
+ 
 diff --git a/drivers/frame_provider/decoder/vp9/vvp9.c b/drivers/frame_provider/decoder/vp9/vvp9.c
-index aeb7e6b..751aeae 100644
+index aeb7e6b..e2fb8fb 100644
 --- a/drivers/frame_provider/decoder/vp9/vvp9.c
 +++ b/drivers/frame_provider/decoder/vp9/vvp9.c
-@@ -6254,11 +6254,21 @@ static int vp9_local_init(struct VP9Decoder_s *pbi)
- 		pbi->vvp9_amstream_dec_info.height :
- 		pbi->work_space_buf->max_height));
+@@ -166,12 +166,17 @@ static u32 work_buf_size;
+ static u32 mv_buf_margin;
  
-+	/* video is not support unaligned with 64 in tl1
-+	** vdec canvas mode will be linear when dump yuv is set
-+	*/
- 	if ((get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SM1) &&
- 		(pbi->double_write_mode != 0) &&
- 		(((pbi->max_pic_w % 64) != 0) ||
--		(pbi->vvp9_amstream_dec_info.width % 64) != 0))
--		mem_map_mode = 2;
-+		(pbi->vvp9_amstream_dec_info.width % 64) != 0)) {
-+		if (hw_to_vdec(pbi)->canvas_mode !=
-+			CANVAS_BLKMODE_LINEAR)
-+			mem_map_mode = 2;
-+		else {
-+			mem_map_mode = 0;
-+			pr_info("vdec blkmod linear, force mem_map_mode 0\n");
-+		}
-+	}
+ /* DOUBLE_WRITE_MODE is enabled only when NV21 8 bit output is needed */
+-/* double_write_mode: 0, no double write
+-					  1, 1:1 ratio
+-					  2, (1/4):(1/4) ratio
+-					  4, (1/2):(1/2) ratio
+-					0x10, double write only
+-*/
++/* double_write_mode:
++ *	0, no double write;
++ *	1, 1:1 ratio;
++ *	2, (1/4):(1/4) ratio;
++ *	3, (1/4):(1/4) ratio, with both compressed frame included
++ *	4, (1/2):(1/2) ratio;
++ *	0x10, double write only
++ *	0x100, if > 1080p,use mode 4,else use mode 1;
++ *	0x200, if > 1080p,use mode 2,else use mode 1;
++ *	0x300, if > 720p, use mode 4, else use mode 1;
++ */
+ static u32 double_write_mode;
  
- #ifndef MV_USE_FIXED_BUF
- 	if (init_mv_buf_list(pbi) < 0) {
-@@ -6923,22 +6933,22 @@ static int prepare_display_buf(struct VP9Decoder_s *pbi,
- 		}
- 		update_vf_memhandle(pbi, vf, pic_config);
- 		if (!(pic_config->y_crop_width == 196
--				&& pic_config->y_crop_height == 196
--				&& (debug & VP9_DEBUG_NO_TRIGGER_FRAME) == 0
--				)) {
--		inc_vf_ref(pbi, pic_config->index);
--		decoder_do_frame_check(hw_to_vdec(pbi), vf);
--		kfifo_put(&pbi->display_q, (const struct vframe_s *)vf);
--		ATRACE_COUNTER(MODULE_NAME, vf->pts);
--		pbi->vf_pre_count++;
-+		&& pic_config->y_crop_height == 196
-+		&& (debug & VP9_DEBUG_NO_TRIGGER_FRAME) == 0
-+		&& (get_cpu_major_id() < AM_MESON_CPU_MAJOR_ID_TXLX))) {
-+			inc_vf_ref(pbi, pic_config->index);
-+			decoder_do_frame_check(hw_to_vdec(pbi), vf);
-+			kfifo_put(&pbi->display_q, (const struct vframe_s *)vf);
-+			ATRACE_COUNTER(MODULE_NAME, vf->pts);
-+			pbi->vf_pre_count++;
- #ifndef CONFIG_AMLOGIC_MEDIA_MULTI_DEC
--		/*count info*/
--		gvs->frame_dur = pbi->frame_dur;
--		vdec_count_info(gvs, 0, stream_offset);
-+			/*count info*/
-+			gvs->frame_dur = pbi->frame_dur;
-+			vdec_count_info(gvs, 0, stream_offset);
+ #define DRIVER_NAME "amvdec_vp9"
+@@ -1570,43 +1575,64 @@ static int get_double_write_mode(struct VP9Decoder_s *pbi)
+ {
+ 	u32 valid_dw_mode = get_valid_double_write_mode(pbi);
+ 	u32 dw;
+-	if (valid_dw_mode == 0x100) {
+-		struct VP9_Common_s *cm = &pbi->common;
+-		struct PIC_BUFFER_CONFIG_s *cur_pic_config;
+-		int w, h;
+-
+-		if (!cm->cur_frame)
+-			return 1;/*no valid frame,*/
+-		cur_pic_config = &cm->cur_frame->buf;
+-		w = cur_pic_config->y_crop_width;
+-		h = cur_pic_config->y_crop_width;
++	int w, h;
++	struct VP9_Common_s *cm = &pbi->common;
++	struct PIC_BUFFER_CONFIG_s *cur_pic_config;
++
++	if (!cm->cur_frame)
++		return 1;/*no valid frame,*/
++	cur_pic_config = &cm->cur_frame->buf;
++	w = cur_pic_config->y_crop_width;
++	h = cur_pic_config->y_crop_height;
++
++	dw = 0x1; /*1:1*/
++	switch (valid_dw_mode) {
++	case 0x100:
+ 		if (w > 1920 && h > 1088)
+ 			dw = 0x4; /*1:2*/
+-		else
+-			dw = 0x1; /*1:1*/
+-
+-		return dw;
++		break;
++	case 0x200:
++		if (w > 1920 && h > 1088)
++			dw = 0x2; /*1:4*/
++		break;
++	case 0x300:
++		if (w > 1280 && h > 720)
++			dw = 0x4; /*1:2*/
++		break;
++	default:
++		dw = valid_dw_mode;
++		break;
+ 	}
+-
+-	return valid_dw_mode;
++	return dw;
+ }
+ 
+ /* for double write buf alloc */
+ static int get_double_write_mode_init(struct VP9Decoder_s *pbi)
+ {
+ 	u32 valid_dw_mode = get_valid_double_write_mode(pbi);
+-	if (valid_dw_mode == 0x100) {
+-		u32 dw;
+-		int w = pbi->init_pic_w;
+-		int h = pbi->init_pic_h;
++	u32 dw;
++	int w = pbi->init_pic_w;
++	int h = pbi->init_pic_h;
++
++	dw = 0x1; /*1:1*/
++	switch (valid_dw_mode) {
++	case 0x100:
+ 		if (w > 1920 && h > 1088)
+ 			dw = 0x4; /*1:2*/
+-		else
+-			dw = 0x1; /*1:1*/
+-
+-		return dw;
++		break;
++	case 0x200:
++		if (w > 1920 && h > 1088)
++			dw = 0x2; /*1:4*/
++		break;
++	case 0x300:
++		if (w > 1280 && h > 720)
++			dw = 0x4; /*1:2*/
++		break;
++	default:
++		dw = valid_dw_mode;
++		break;
+ 	}
+-	return valid_dw_mode;
++	return dw;
+ }
  #endif
--		hw_to_vdec(pbi)->vdec_fps_detec(hw_to_vdec(pbi)->id);
--		vf_notify_receiver(pbi->provider_name,
--				VFRAME_EVENT_PROVIDER_VFRAME_READY, NULL);
-+			hw_to_vdec(pbi)->vdec_fps_detec(hw_to_vdec(pbi)->id);
-+			vf_notify_receiver(pbi->provider_name,
-+					VFRAME_EVENT_PROVIDER_VFRAME_READY, NULL);
- 		} else {
- 			pbi->stat |= VP9_TRIGGER_FRAME_DONE;
- 			hevc_source_changed(VFORMAT_VP9, 196, 196, 30);
+ 
