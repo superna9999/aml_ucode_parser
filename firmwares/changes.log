@@ -1,78 +1,73 @@
-commit 6493894a60e2017e90cf1c6e20899ff0d1d800f7
-Author: shihong.zheng <shihong.zheng@amlogic.com>
-Date:   Tue Jun 25 17:55:46 2019 +0800
+commit cc08fcc6478f95d89329bc867776f039527afcbf
+Author: kunpeng.tang <kunpeng.tang@amlogic.com>
+Date:   Wed Jun 26 15:11:05 2019 +0800
 
-    h265: fix h265 crash and frame check. [1/1]
+    Encoder: Add qp mode interface [1/2]
     
-    PD#SWPL-10258
+    PD#OPS-665
     
     Problem:
-    gxl crash when play h265 video.
+    The es stream comes from h.264 encoder is not consistency
     
     Solution:
-    remove some code in ucode.
-    gerrit id: 78086
-    change id: I024a20e
+    Add qp mode interface,it could set quant to limit range,
+    beyond this issue,may be needed in the future
     
     Verify:
-    ampere
+    U212
     
-    Change-Id: I8095031caaa6315f89671f839391d7fcff74a81b
-    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
+    Change-Id: Ic454f94e9d3eb8d6c2463e6d3081234f55cb6541
+    Signed-off-by: kunpeng.tang <kunpeng.tang@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
-index 569cbff..34b198c 100644
---- a/drivers/frame_provider/decoder/h265/vh265.c
-+++ b/drivers/frame_provider/decoder/h265/vh265.c
-@@ -8403,6 +8403,7 @@ static int prepare_display_buf(struct hevc_state_s *hevc, struct PIC_s *pic)
- 				| VIDTYPE_VIU_NV21;
- 			}
- 			hevc->vf_pre_count++;
-+			decoder_do_frame_check(hw_to_vdec(hevc), vf);
- 			kfifo_put(&hevc->display_q,
- 			(const struct vframe_s *)vf);
- 			ATRACE_COUNTER(MODULE_NAME, vf->pts);
-@@ -8451,6 +8452,7 @@ static int prepare_display_buf(struct hevc_state_s *hevc, struct PIC_s *pic)
- 				| VIDTYPE_VIU_NV21;
- 			}
- 			hevc->vf_pre_count++;
-+			decoder_do_frame_check(hw_to_vdec(hevc), vf);
- 			kfifo_put(&hevc->display_q,
- 			(const struct vframe_s *)vf);
- 			ATRACE_COUNTER(MODULE_NAME, vf->pts);
-@@ -8476,6 +8478,7 @@ static int prepare_display_buf(struct hevc_state_s *hevc, struct PIC_s *pic)
- 			process_pending_vframe(hevc,
- 			pic, (pic->pic_struct == 9));
+diff --git a/drivers/frame_sink/encoder/h264/encoder.c b/drivers/frame_sink/encoder/h264/encoder.c
+index 2295bc3..1d2b96e 100644
+--- a/drivers/frame_sink/encoder/h264/encoder.c
++++ b/drivers/frame_sink/encoder/h264/encoder.c
+@@ -184,6 +184,7 @@ static unsigned int c_snr_gau_alp0_max = 63;
+ static unsigned int c_bld_beta2alp_rate = 16;
+ static unsigned int c_bld_beta_min;
+ static unsigned int c_bld_beta_max = 63;
++static unsigned int qp_mode;
  
-+			decoder_do_frame_check(hw_to_vdec(hevc), vf);
- 			/* process current vf */
- 			kfifo_put(&hevc->pending_q,
- 			(const struct vframe_s *)vf);
-@@ -8521,6 +8524,7 @@ static int prepare_display_buf(struct hevc_state_s *hevc, struct PIC_s *pic)
- 				VIDTYPE_VIU_NV21 | VIDTYPE_VIU_FIELD;
- 				vf->index = (pic->index << 8) | 0xff;
- 			}
-+			decoder_do_frame_check(hw_to_vdec(hevc), vf);
- 			kfifo_put(&hevc->pending_q,
- 			(const struct vframe_s *)vf);
+ static DEFINE_SPINLOCK(lock);
  
-@@ -8563,6 +8567,7 @@ static int prepare_display_buf(struct hevc_state_s *hevc, struct PIC_s *pic)
- 				break;
- 			}
- 			hevc->vf_pre_count++;
-+			decoder_do_frame_check(hw_to_vdec(hevc), vf);
- 			kfifo_put(&hevc->display_q,
- 			(const struct vframe_s *)vf);
- 			ATRACE_COUNTER(MODULE_NAME, vf->pts);
-@@ -9972,7 +9977,7 @@ static irqreturn_t vh265_isr(int irq, void *data)
- static void vh265_set_clk(struct work_struct *work)
- {
- 	struct hevc_state_s *hevc = container_of(work,
--		struct hevc_state_s, work);
-+		struct hevc_state_s, set_clk_work);
+@@ -2159,8 +2160,13 @@ static void avc_prot_init(struct encode_wq_s *wq,
+ 		WRITE_HREG(HCODEC_V5_SMALL_DIFF_CNT,
+ 			(v5_small_diff_C<<16) |
+ 			(v5_small_diff_Y<<0));
+-		WRITE_HREG(HCODEC_V5_SIMPLE_MB_DQUANT,
+-			v5_simple_dq_setting);
++		if (qp_mode == 1) {
++			WRITE_HREG(HCODEC_V5_SIMPLE_MB_DQUANT,
++				0);
++		} else {
++			WRITE_HREG(HCODEC_V5_SIMPLE_MB_DQUANT,
++				v5_simple_dq_setting);
++		}
+ 		WRITE_HREG(HCODEC_V5_SIMPLE_MB_ME_WEIGHT,
+ 			v5_simple_me_weight_setting);
+ 		/* txlx can remove it */
+@@ -3292,6 +3298,10 @@ static long amvenc_avc_ioctl(struct file *file, u32 cmd, ulong arg)
+ 	case AMVENC_AVC_IOC_MAX_INSTANCE:
+ 		put_user(encode_manager.max_instance, (u32 *)arg);
+ 		break;
++	case AMVENC_AVC_IOC_QP_MODE:
++		get_user(qp_mode, ((u32 *)arg));
++		pr_info("qp_mode %d\n", qp_mode);
++		break;
+ 	default:
+ 		r = -1;
+ 		break;
+diff --git a/drivers/frame_sink/encoder/h264/encoder.h b/drivers/frame_sink/encoder/h264/encoder.h
+index 39a3c1e..e47fa39 100644
+--- a/drivers/frame_sink/encoder/h264/encoder.h
++++ b/drivers/frame_sink/encoder/h264/encoder.h
+@@ -123,6 +123,8 @@
+ #define AMVENC_AVC_IOC_GET_BUFFINFO _IOW(AMVENC_AVC_IOC_MAGIC, 0x08, u32)
+ #define AMVENC_AVC_IOC_SUBMIT	_IOW(AMVENC_AVC_IOC_MAGIC, 0x09, u32)
+ #define AMVENC_AVC_IOC_READ_CANVAS _IOW(AMVENC_AVC_IOC_MAGIC, 0x0a, u32)
++#define AMVENC_AVC_IOC_QP_MODE _IOW(AMVENC_AVC_IOC_MAGIC, 0x0b, u32)
++
  
- 		int fps = 96000 / hevc->frame_dur;
  
-diff --git a/firmware/video_ucode.bin b/firmware/video_ucode.bin
-index ffbccce..024f549 100644
-Binary files a/firmware/video_ucode.bin and b/firmware/video_ucode.bin differ
+ #define IE_PIPPELINE_BLOCK_SHIFT 0
