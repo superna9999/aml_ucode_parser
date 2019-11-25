@@ -1,135 +1,78 @@
-commit 0996b97f6bef3930beb3106eaa1ef60dbfd19559
+commit a39bd1d3a208e8bd446eced19eeea96575449d76
 Author: shihong.zheng <shihong.zheng@amlogic.com>
-Date:   Tue Jun 11 11:35:04 2019 +0800
+Date:   Tue Jun 18 20:25:48 2019 +0800
 
-    vmpeg12: add tvp support for vmpeg12. [1/1]
+    h265: parse sei in condition meet. [1/1]
     
-    PD#SWPL-6302
+    PD#SWPL-9823
     
     Problem:
-    vmpeg12 is not support tvp.
+    parser sei error cause hevc display abnormal
+    after support hevc interlace.
     
     Solution:
-    add tvp_flag init for vmpeg12.
+    parser sei when do not parse in ucode and
+    frame_field_info_present_flag is true.
+    gerrit id: 77205
+    change id: I4bb0ed5
     
     Verify:
     u212
     
-    Change-Id: I032659e5954b8447030d0ec9e317b257082cd4d4
+    Change-Id: I6bb77e1d45cfbca4621c631cac1bb8b305af2f39
     Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
-index c2eca07..4b48612 100644
---- a/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
-+++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
-@@ -145,6 +145,7 @@ static const struct vframe_operations_s vmpeg_vf_provider = {
- };
- static void *mm_blk_handle;
- static struct vframe_provider_s vmpeg_vf_prov;
-+static int tvp_flag;
+diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
+index 5b111e2..569cbff 100644
+--- a/drivers/frame_provider/decoder/h265/vh265.c
++++ b/drivers/frame_provider/decoder/h265/vh265.c
+@@ -1516,6 +1516,7 @@ struct hevc_state_s {
  
- static DECLARE_KFIFO(newframe_q, struct vframe_s *, VF_POOL_SIZE);
- static DECLARE_KFIFO(display_q, struct vframe_s *, VF_POOL_SIZE);
-@@ -1928,7 +1929,8 @@ static void vmpeg12_local_init(void)
- 			MAX_BMMU_BUFFER_NUM,
- 			4 + PAGE_SHIFT,
- 			CODEC_MM_FLAGS_CMA_CLEAR |
--			CODEC_MM_FLAGS_FOR_VDECODER);
-+			CODEC_MM_FLAGS_FOR_VDECODER |
-+			tvp_flag);
+ 	unsigned char interlace_flag;
+ 	unsigned char curr_pic_struct;
++	unsigned char frame_field_info_present_flag;
  
+ 	unsigned short sps_num_reorder_pics_0;
+ 	unsigned short misc_flag0;
+@@ -6312,6 +6313,10 @@ static int hevc_slice_segment_header_process(struct hevc_state_s *hevc,
+ 			(rpm_param->p.profile_etc >> 2) & 0x1;
+ 		hevc->curr_pic_struct =
+ 			(rpm_param->p.sei_frame_field_info >> 3) & 0xf;
++		if (parser_sei_enable & 0x4) {
++			hevc->frame_field_info_present_flag =
++				(rpm_param->p.sei_frame_field_info >> 8) & 0x1;
++		}
  
- 	frame_width = frame_height = frame_dur = frame_prog = 0;
-@@ -2050,6 +2052,7 @@ static int amvdec_mpeg12_probe(struct platform_device *pdev)
- 		return -EFAULT;
- 	}
- 
-+	tvp_flag = vdec_secure(pdata) ? CODEC_MM_FLAGS_TVP : 0;
- 	if (pdata->sys_info)
- 		vmpeg12_amstream_dec_info = *pdata->sys_info;
- 
-diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-index f5f5f3a..aff4f1a 100644
---- a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-+++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-@@ -289,6 +289,7 @@ struct vdec_mpeg12_hw_s {
- 	int n_userdata_id;
- 	u32 reference[MAX_UD_RECORDS];
- #endif
-+	int tvp_flag;
- };
- static void vmpeg12_local_init(struct vdec_mpeg12_hw_s *hw);
- static int vmpeg12_hw_ctx_restore(struct vdec_mpeg12_hw_s *hw);
-@@ -2219,7 +2220,8 @@ static void vmpeg12_local_init(struct vdec_mpeg12_hw_s *hw)
- 			MAX_BMMU_BUFFER_NUM,
- 			4 + PAGE_SHIFT,
- 			CODEC_MM_FLAGS_CMA_CLEAR |
--			CODEC_MM_FLAGS_FOR_VDECODER);
-+			CODEC_MM_FLAGS_FOR_VDECODER |
-+			hw->tvp_flag);
- 	hw->eos = 0;
- 	hw->frame_width = hw->frame_height = 0;
- 	hw->frame_dur = hw->frame_prog = 0;
-@@ -2563,9 +2565,17 @@ static int ammvdec_mpeg12_probe(struct platform_device *pdev)
- 	hw->canvas_mode = pdata->canvas_mode;
- 	hw->platform_dev = pdev;
- 
-+	hw->tvp_flag = vdec_secure(pdata) ? CODEC_MM_FLAGS_TVP : 0;
- 	if (pdata->sys_info)
- 		hw->vmpeg12_amstream_dec_info = *pdata->sys_info;
- 
-+	debug_print(DECODE_ID(hw), 0,
-+		"%s, sysinfo: %dx%d, tvp_flag = 0x%x\n",
-+		__func__,
-+		hw->vmpeg12_amstream_dec_info.width,
-+		hw->vmpeg12_amstream_dec_info.height,
-+		hw->tvp_flag);
-+
- 	if (vmpeg12_init(hw) < 0) {
- 		pr_info("ammvdec_mpeg12 init failed.\n");
- 		if (hw) {
-diff --git a/drivers/stream_input/amports/amstream.c b/drivers/stream_input/amports/amstream.c
-index 8b39c7f..e2e4498 100644
---- a/drivers/stream_input/amports/amstream.c
-+++ b/drivers/stream_input/amports/amstream.c
-@@ -3285,11 +3285,18 @@ static long amstream_do_ioctl_old(struct port_priv_s *priv,
- 	}
- 	case AMSTREAM_IOC_SET_DRMMODE:
- 		if ((u32) arg == 1) {
--			pr_err("set drmmode\n");
-+			pr_err("set drmmode, input must be secure buffer\n");
- 			this->flag |= PORT_FLAG_DRM;
- 			if ((this->type & PORT_TYPE_VIDEO) &&
- 				(priv->vdec))
- 				priv->vdec->port_flag |= PORT_FLAG_DRM;
-+		} else if ((u32)arg == 2) {
-+			pr_err("set drmmode, input must be normal buffer\n");
-+			if ((this->type & PORT_TYPE_VIDEO) &&
-+				(priv->vdec)) {
-+				pr_err("vdec port_flag with drmmode\n");
-+				priv->vdec->port_flag |= PORT_FLAG_DRM;
-+			}
- 		} else {
- 			this->flag &= (~PORT_FLAG_DRM);
- 			pr_err("no drmmode\n");
-diff --git a/drivers/stream_input/parser/esparser.c b/drivers/stream_input/parser/esparser.c
-index 3d0eb2b..1e45893 100644
---- a/drivers/stream_input/parser/esparser.c
-+++ b/drivers/stream_input/parser/esparser.c
-@@ -736,7 +736,6 @@ ssize_t drm_write(struct file *file, struct stream_buf_s *stbuf,
- 	s32 r;
- 	u32 len;
- 	u32 realcount, totalcount;
--	u32 re_count = count;
- 	u32 havewritebytes = 0;
- 	u32 leftcount = 0;
- 
-@@ -845,7 +844,7 @@ ssize_t drm_write(struct file *file, struct stream_buf_s *stbuf,
- 		mutex_unlock(&esparser_mutex);
- 	}
- 
--	return re_count;
-+	return havewritebytes;
- }
- EXPORT_SYMBOL(drm_write);
- 
+ 		if (interlace_enable == 0 || hevc->m_ins_flag)
+ 			hevc->interlace_flag = 0;
+@@ -7290,14 +7295,17 @@ static int parse_sei(struct hevc_state_s *hevc,
+ 		if (p+payload_size <= sei_buf+size) {
+ 			switch (payload_type) {
+ 			case SEI_PicTiming:
+-				p_sei = p;
+-				hevc->curr_pic_struct = (*p_sei >> 4)&0x0f;
+-				pic->pic_struct = hevc->curr_pic_struct;
+-				if (get_dbg_flag(hevc) &
+-					H265_DEBUG_PIC_STRUCT) {
+-					hevc_print(hevc, 0,
+-					"parse result pic_struct = %d\n",
+-					hevc->curr_pic_struct);
++				if ((parser_sei_enable & 0x4) &&
++					hevc->frame_field_info_present_flag) {
++					p_sei = p;
++					hevc->curr_pic_struct = (*p_sei >> 4)&0x0f;
++					pic->pic_struct = hevc->curr_pic_struct;
++					if (get_dbg_flag(hevc) &
++						H265_DEBUG_PIC_STRUCT) {
++						hevc_print(hevc, 0,
++						"parse result pic_struct = %d\n",
++						hevc->curr_pic_struct);
++					}
+ 				}
+ 				break;
+ 			case SEI_UserDataITU_T_T35:
+diff --git a/firmware/video_ucode.bin b/firmware/video_ucode.bin
+old mode 100755
+new mode 100644
+index 9ef34f2..ffbccce
+Binary files a/firmware/video_ucode.bin and b/firmware/video_ucode.bin differ
