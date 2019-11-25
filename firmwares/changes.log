@@ -1,42 +1,34 @@
-commit 5739dda4f95dcb3ba242419b0368eb47a1091441
-Author: shihong.zheng <shihong.zheng@amlogic.com>
-Date:   Fri Mar 22 14:46:23 2019 +0800
+commit 29975b377cd5b3c0323001a72e900dfe3a918b79
+Author: rongrong zhou <rongrong.zhou@amlogic.com>
+Date:   Fri Mar 22 17:10:46 2019 +0800
 
-    amstream: adjust vdec connect timming. [1/1]
+    mpeg12: do not use p frame pts for some stream [1/1]
     
-    PD#SWPL-5888
+    PD#SWPL-4402
     
     Problem:
-    too many vdec_sync_input error print.
+    play not smooth
     
     Solution:
-    1. remove vdec_connect befer other hw initial.
-    2. vdec_disconnect before parser wp/rp reset in tsdemux.
+    do not use P frame pts
     
     Verify:
-    x301
+    Verify on X301
     
-    Change-Id: I7b8909496918a581d48a09deefad58cb1ce0e0f4
-    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
+    Change-Id: I70b91506d1ecdc9baf8c66a27b706416a769bac6
+    Signed-off-by: rongrong zhou <rongrong.zhou@amlogic.com>
 
-diff --git a/drivers/stream_input/amports/amstream.c b/drivers/stream_input/amports/amstream.c
-index c3c3095..a1b4a47 100644
---- a/drivers/stream_input/amports/amstream.c
-+++ b/drivers/stream_input/amports/amstream.c
-@@ -685,8 +685,6 @@ static int video_port_init(struct port_priv_s *priv,
+diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
+index d119032..0842625 100644
+--- a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
++++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
+@@ -514,8 +514,7 @@ static irqreturn_t vmpeg12_isr_thread_fn(struct vdec_s *vdec, int irq)
+ 		"ammvdec_mpeg12: error = 0x%x, offset = 0x%x\n",
+ 			info & PICINFO_ERROR, offset);*/
  
- 	pbuf->flag |= BUF_FLAG_IN_USE;
- 
--	vdec_connect(priv->vdec);
--
- 	return 0;
- }
- 
-@@ -1031,6 +1029,7 @@ static int amstream_port_release(struct port_priv_s *priv)
- 	}
- 
- 	if (port->type & PORT_TYPE_MPTS) {
-+		vdec_disconnect(priv->vdec);
- 		tsync_pcr_stop();
- 		tsdemux_release();
- 	}
+-		if (((info & PICINFO_TYPE_MASK) == PICINFO_TYPE_I) ||
+-			((info & PICINFO_TYPE_MASK) == PICINFO_TYPE_P)) {
++		if (((info & PICINFO_TYPE_MASK) == PICINFO_TYPE_I)) {
+ 			if (hw->chunk) {
+ 				hw->pts_valid[index] = hw->chunk->pts_valid;
+ 				hw->pts[index] = hw->chunk->pts;
