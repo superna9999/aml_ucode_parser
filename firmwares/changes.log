@@ -1,83 +1,38 @@
-commit ef1fce5465899c1ec81c2fe6b36743f7799ad515
-Author: shihong.zheng <shihong.zheng@amlogic.com>
-Date:   Wed Jul 3 20:25:32 2019 +0800
+commit a58ffb61974a29579ebb36d2f80921faddca3921
+Author: Hui Zhang <hui.zhang@amlogic.com>
+Date:   Wed Jul 3 10:10:53 2019 +0800
 
-    mmpeg4: fix timeout repeatedly when vfifo empty. [1/1]
+    vmh264: fixed playback not smooth issue. [1/1]
     
-    PD#SWPL-8550
+    PD#SWPL-7105
     
     Problem:
-    mpeg4 stuck, consuming input data,
-    decode timeout repeatedly.
+    this stream pts not smooth which lead playback not smooth
     
     Solution:
-    retry and result done if it can't dec out.
-    do not save incomplete context.
-    ucode gerrit id: 79111
-    ucode change id: I40176d
+    when pts is 0 and slice is B frame in one field. we use
+    duration to calulate a new pts
     
     Verify:
     x301
     
-    Change-Id: Ie2b18508ebba1891ea52d82898a762b281eb025e
-    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
+    Change-Id: I4a5c947c762b9a3c5cbf68298b870290200391f2
+    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
-index 6483c96..05b2bec 100644
---- a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
-+++ b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
-@@ -290,6 +290,7 @@ struct vdec_mpeg4_hw_s {
- 	struct firmware_s *fw;
- 	u32 blkmode;
- 	wait_queue_head_t wait_q;
-+	u32 dec_again_cnt;
- };
- static void vmpeg4_local_init(struct vdec_mpeg4_hw_s *hw);
- static int vmpeg4_hw_ctx_restore(struct vdec_mpeg4_hw_s *hw);
-@@ -752,7 +753,15 @@ static irqreturn_t vmpeg4_isr_thread_fn(struct vdec_s *vdec, int irq)
- 			READ_VREG(VIFF_BIT_CNT));
- 
- 		if (vdec_frame_based(vdec)) {
--			vmpeg4_save_hw_context(hw);
-+			if (++hw->dec_again_cnt > 3) {
-+				hw->dec_again_cnt = 0;
-+				hw->dec_result = DEC_RESULT_DONE;
-+				vdec_schedule_work(&hw->work);
-+			} else {
-+				//vmpeg4_save_hw_context(hw);
-+				hw->dec_result = DEC_RESULT_AGAIN;
-+				vdec_schedule_work(&hw->work);
-+			}
- 		} else {
- 			reset_process_time(hw);
- 			hw->dec_result = DEC_RESULT_AGAIN;
-@@ -1083,8 +1092,7 @@ static void vmpeg4_work(struct work_struct *work)
- 		vdec_vframe_dirty(vdec, hw->chunk);
- 		hw->chunk = NULL;
- 	} else if (hw->dec_result == DEC_RESULT_AGAIN
--	&& (vdec->next_status !=
--		VDEC_STATUS_DISCONNECTED)) {
-+		&& (vdec->next_status != VDEC_STATUS_DISCONNECTED)) {
- 		/*
- 			stream base: stream buf empty or timeout
- 			frame base: vdec_prepare_input fail
-@@ -1470,7 +1478,7 @@ static void timeout_process(struct vdec_mpeg4_hw_s *hw)
- 		amvdec_stop();
- 		hw->stat &= ~STAT_VDEC_RUN;
- 	}
--	mmpeg4_debug_print(DECODE_ID(hw), PRINT_FLAG_TIMEOUT_STATUS,
-+	mmpeg4_debug_print(DECODE_ID(hw), 0,
- 		"%s decoder timeout\n", __func__);
- 	reset_process_time(hw);
- 	hw->first_i_frame_ready = 0;
-@@ -1671,6 +1679,7 @@ static void vmpeg4_local_init(struct vdec_mpeg4_hw_s *hw)
- 	hw->buffer_not_ready = 0;
- 	hw->init_flag = 0;
- 	hw->dec_result = DEC_RESULT_NONE;
-+	hw->dec_again_cnt = 0;
- 
- 	for (i = 0; i < DECODE_BUFFER_NUM_MAX; i++)
- 		hw->vfbuf_use[i] = 0;
-diff --git a/firmware/video_ucode.bin b/firmware/video_ucode.bin
-index 024f549..ca6cc7d 100644
-Binary files a/firmware/video_ucode.bin and b/firmware/video_ucode.bin differ
+diff --git a/drivers/frame_provider/decoder/h264_multi/h264_dpb.c b/drivers/frame_provider/decoder/h264_multi/h264_dpb.c
+index 845541e..a1715eb 100644
+--- a/drivers/frame_provider/decoder/h264_multi/h264_dpb.c
++++ b/drivers/frame_provider/decoder/h264_multi/h264_dpb.c
+@@ -1568,6 +1568,12 @@ static void dpb_combine_field(struct h264_dpb_stru *p_H264_Dpb,
+ 	if (fs->top_field->poc < fs->bottom_field->poc) {
+ 		fs->pts = fs->top_field->pts;
+ 		fs->pts64 = fs->top_field->pts64;
++		/*SWPL-7105 fix */
++		if ((fs->frame->slice_type == B_SLICE)
++			&& (!fs->bottom_field->pts) &&(!fs->bottom_field->pts64)) {
++			fs->pts =  0;
++			fs->pts64 = 0;
++		}
+ 		fs->offset_delimiter = fs->top_field->offset_delimiter;
+ 	} else {
+ 		fs->pts = fs->bottom_field->pts;
