@@ -1,36 +1,111 @@
-commit 0a8033b9919342253f7937ea550cf7fee06bec30
-Author: Nanxin Qin <nanxin.qin@amlogic.com>
-Date:   Wed May 22 14:19:32 2019 +0800
+commit e77bbe413adcb7f15f202e67cb81ab02b431041e
+Author: Peng Yixin <yixin.peng@amlogic.com>
+Date:   Wed May 22 19:51:21 2019 +0800
 
-    decode: fixed issue of print info for v4l codec. [1/1]
+    media: Solve the problem of atv can not video playing [1/1]
     
-    PD#SWPL-5314
+    PD#SWPL-8864
     
     Problem:
-    on non-v4l playback mode when use variable-len
-    parameters to print, at this time v4l instance
-    is null thus cause to panic.
+    Solve the problem of atv can not video playing.
     
     Solution:
-    remove v4l inst from vari-len print.
+    Since the hard demux cannot to judge whether the
+    data is sufficient, so turn off stream mode low latency optimization.
     
     Verify:
-    u212
+    X301
     
-    Change-Id: I36b9ff0732be606c4f73403508780f71671a2469
-    Signed-off-by: Nanxin Qin <nanxin.qin@amlogic.com>
+    Change-Id: I702774b5afbfd7071635a6e9983e38db9fe3e7b6
+    Signed-off-by: Peng Yixin <yixin.peng@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
-index 25d8b56..2cf7257 100644
---- a/drivers/frame_provider/decoder/h265/vh265.c
-+++ b/drivers/frame_provider/decoder/h265/vh265.c
-@@ -2912,8 +2912,7 @@ static int cal_current_buf_size(struct hevc_state_s *hevc,
- 		buf_stru->mc_buffer_size_u_v_h = mc_buffer_size_u_v_h;
+diff --git a/drivers/frame_provider/decoder/utils/vdec.c b/drivers/frame_provider/decoder/utils/vdec.c
+index 4831169..67736bf 100644
+--- a/drivers/frame_provider/decoder/utils/vdec.c
++++ b/drivers/frame_provider/decoder/utils/vdec.c
+@@ -289,7 +289,7 @@ static bool vdec_is_input_frame_empty(struct vdec_s *vdec) {
+ 	unsigned long flags;
+ 
+ 	flags = vdec_inputbuff_lock(core);
+-	ret = !(vdec->core_mask && core->buff_flag);
++	ret = !(vdec->core_mask & core->buff_flag);
+ 	vdec_inputbuff_unlock(core, flags);
+ 
+ 	return ret;
+@@ -569,14 +569,13 @@ static void vdec_update_buff_status(void)
+ 			if (input->have_frame_num)
+ 				core->buff_flag |= vdec->core_mask;
+ 		} else if (input_stream_based(input)) {
+-			if (!(vdec->need_more_data & VDEC_NEED_MORE_DATA))
+-				core->stream_buff_flag |= vdec->core_mask;
++			core->stream_buff_flag |= vdec->core_mask;
+ 		}
+ 	}
+ 	vdec_inputbuff_unlock(core, flags);
+ }
+ 
+-
++#if 0
+ void vdec_update_streambuff_status(void)
+ {
+ 	struct vdec_core_s *core = vdec_core;
+@@ -610,6 +609,7 @@ void vdec_update_streambuff_status(void)
+ 	}
+ }
+ EXPORT_SYMBOL(vdec_update_streambuff_status);
++#endif
+ 
+ int vdec_status(struct vdec_s *vdec, struct vdec_info *vstatus)
+ {
+@@ -2482,7 +2482,6 @@ thread_isr_done:
+ 
+ unsigned long vdec_ready_to_run(struct vdec_s *vdec, unsigned long mask)
+ {
+-	struct vdec_core_s *core = vdec_core;
+ 	unsigned long ready_mask;
+ 	struct vdec_input_s *input = &vdec->input;
+ 	if ((vdec->status != VDEC_STATUS_CONNECTED) &&
+@@ -2525,10 +2524,7 @@ unsigned long vdec_ready_to_run(struct vdec_s *vdec, unsigned long mask)
+ 			if ((level < input->prepare_level) &&
+ 				(pts_get_rec_num(PTS_TYPE_VIDEO,
+ 					vdec->input.total_rd_count) < 2)) {
+-				if (debug & 8)
+-					pr_info("ready to run VDEC_NEED_MORE_DATA\n");
+ 				vdec->need_more_data |= VDEC_NEED_MORE_DATA;
+-				core->stream_buff_flag &= ~vdec->core_mask;
+ #ifdef VDEC_DEBUG_SUPPORT
+ 				inc_profi_count(mask, vdec->input_underrun_count);
+ 				if (step_mode & 0x200) {
+@@ -2539,7 +2535,8 @@ unsigned long vdec_ready_to_run(struct vdec_s *vdec, unsigned long mask)
+ 				}
+ #endif
+ 				return false;
+-			}
++			} else if (level > input->prepare_level)
++				vdec->need_more_data &= ~VDEC_NEED_MORE_DATA;
+ 		}
  	}
  
--	hevc_print(hevc, PRINT_FLAG_V4L_DETAIL,"[%d] pic width: %d, pic height: %d, headr: %d, body: %d, size h: %d, size uvh: %d, buf size: %x\n",
--		((struct aml_vcodec_ctx *)(hevc->v4l2_ctx))->id,
-+	hevc_print(hevc, PRINT_FLAG_V4L_DETAIL,"pic width: %d, pic height: %d, headr: %d, body: %d, size h: %d, size uvh: %d, buf size: %x\n",
- 		pic_width, pic_height, losless_comp_header_size,
- 		losless_comp_body_size, mc_buffer_size_h,
- 		mc_buffer_size_u_v_h, buf_size);
+diff --git a/drivers/frame_provider/decoder/utils/vdec.h b/drivers/frame_provider/decoder/utils/vdec.h
+index 0ca9560..cf44967 100644
+--- a/drivers/frame_provider/decoder/utils/vdec.h
++++ b/drivers/frame_provider/decoder/utils/vdec.h
+@@ -448,6 +448,4 @@ extern struct vframe_qos_s *vdec_get_qos_info(void);
+ 
+ int vdec_get_frame_num(struct vdec_s *vdec);
+ 
+-extern void vdec_update_streambuff_status(void);
+-
+ #endif				/* VDEC_H */
+diff --git a/drivers/stream_input/amports/amstream.c b/drivers/stream_input/amports/amstream.c
+index 93eaad5..765502c 100644
+--- a/drivers/stream_input/amports/amstream.c
++++ b/drivers/stream_input/amports/amstream.c
+@@ -1118,7 +1118,6 @@ static ssize_t amstream_vbuf_write(struct file *file, const char *buf,
+ #ifdef DATA_DEBUG
+ 	debug_file_write(buf, r);
+ #endif
+-	vdec_update_streambuff_status();
+ 
+ 	return r;
+ }
