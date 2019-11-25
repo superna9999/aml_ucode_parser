@@ -1,146 +1,92 @@
-commit e661515421c79861f044356cf4936f70b55392b5
-Author: jintao xu <jintao.xu@amlogic.com>
-Date:   Tue Mar 26 22:49:29 2019 +0800
+commit 54afe6646a8a9fbc7a16eab651bc2217502f77fe
+Author: shihong.zheng <shihong.zheng@amlogic.com>
+Date:   Mon Apr 15 15:42:08 2019 +0800
 
-    encoder: bringup sm1 and tm2. [1/1]
+    mmpeg12: fixed closed caption disorder. [1/1]
     
-    PD#SWPL-6373
+    PD#SWPL-4186
     
     Problem:
-    1.bringup sm1.
-    2.bringup tm2.
+    mpeg2 display cc abnormal.
     
     Solution:
-    1.modify the operation of the DOS power on/off
-    to compatible with soc sm1/tm2.
-    2.fix sm1 265 encoder cannot init driver
+    drop old cc data when dec_result is DEC_RESULT_AGAIN.
     
     Verify:
-    AC200 & AB311
+    x301
     
-    Change-Id: If8bfff5ac558cff7e93f1c48ea6eef0592427753
-    Signed-off-by: jintao xu <jintao.xu@amlogic.com>
+    Change-Id: I88d25d1defb6b10cbf5790ab8691e9a95c58e510
+    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
 
-diff --git a/drivers/frame_sink/encoder/h264/encoder.c b/drivers/frame_sink/encoder/h264/encoder.c
-index 68bdc52..fadff43 100644
---- a/drivers/frame_sink/encoder/h264/encoder.c
-+++ b/drivers/frame_sink/encoder/h264/encoder.c
-@@ -2418,7 +2418,11 @@ static s32 avc_poweron(u32 clock)
- 	/* Powerup HCODEC */
- 	/* [1:0] HCODEC */
- 	WRITE_AOREG(AO_RTI_GEN_PWR_SLEEP0,
--		(READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) & (~0x3)));
-+			READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) &
-+			((get_cpu_type() == MESON_CPU_MAJOR_ID_SM1 ||
-+			 get_cpu_type() >= MESON_CPU_MAJOR_ID_TM2)
-+			? ~0x1 : ~0x3));
+diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
+index 842e5be..a8962dd 100644
+--- a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
++++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
+@@ -268,6 +268,8 @@ struct vdec_mpeg12_hw_s {
+ 	u8 *user_data_buffer;
+ 	int wait_for_udr_send;
+ 	u32 ucode_cc_last_wp;
++	u32 notify_ucode_cc_last_wp;
++	u32 notify_data_cc_last_wp;
+ 
+ #ifdef DUMP_USER_DATA
+ #define MAX_USER_DATA_SIZE		1572864
+@@ -807,6 +809,8 @@ static void user_data_ready_notify(struct vdec_mpeg12_hw_s *hw,
+ 		hw->wait_for_udr_send = 0;
+ 		hw->cur_ud_idx = 0;
+ 	}
++	hw->notify_ucode_cc_last_wp = hw->ucode_cc_last_wp;
++	hw->notify_data_cc_last_wp = hw->userdata_info.last_wp;
+ }
+ 
+ static int vmmpeg2_user_data_read(struct vdec_s *vdec,
+@@ -1052,7 +1056,6 @@ static void userdata_push_do_work(struct work_struct *work)
+ 	struct vdec_mpeg12_hw_s *hw = container_of(work,
+ 					struct vdec_mpeg12_hw_s, userdata_push_work);
+ 
+-
+ 	memset(&meta_info, 0, sizeof(meta_info));
+ 
+ 	meta_info.duration = hw->frame_dur;
+@@ -1174,7 +1177,6 @@ static void userdata_push_do_work(struct work_struct *work)
+ 		if (pdata >= hw->userdata_info.data_buf_end)
+ 			pdata = hw->userdata_info.data_buf;
+ 	}
+-
+ 	pcur_ud_rec = hw->ud_record + hw->cur_ud_idx;
+ 
+ 	pcur_ud_rec->meta_info = meta_info;
+@@ -1201,6 +1203,17 @@ static void userdata_push_do_work(struct work_struct *work)
+ 
+ 	hw->cur_ud_idx++;
+ 	WRITE_VREG(AV_SCRATCH_J, 0);
 +
- 	udelay(10);
- 
- 	WRITE_VREG(DOS_SW_RESET1, 0xffffffff);
-@@ -2432,7 +2436,11 @@ static s32 avc_poweron(u32 clock)
- 
- 	/* Remove HCODEC ISO */
- 	WRITE_AOREG(AO_RTI_GEN_PWR_ISO0,
--		(READ_AOREG(AO_RTI_GEN_PWR_ISO0) & (~0x30)));
-+			READ_AOREG(AO_RTI_GEN_PWR_ISO0) &
-+			((get_cpu_type() == MESON_CPU_MAJOR_ID_SM1 ||
-+			  get_cpu_type() >= MESON_CPU_MAJOR_ID_TM2)
-+			? ~0x1 : ~0x30));
++}
 +
- 	udelay(10);
- 	/* Disable auto-clock gate */
- 	WRITE_VREG(DOS_GEN_CTRL0,
-@@ -2454,7 +2462,11 @@ static s32 avc_poweroff(void)
- 
- 	/* enable HCODEC isolation */
- 	WRITE_AOREG(AO_RTI_GEN_PWR_ISO0,
--		READ_AOREG(AO_RTI_GEN_PWR_ISO0) | 0x30);
-+			READ_AOREG(AO_RTI_GEN_PWR_ISO0) |
-+			((get_cpu_type() == MESON_CPU_MAJOR_ID_SM1 ||
-+			  get_cpu_type() >= MESON_CPU_MAJOR_ID_TM2)
-+			? 0x1 : 0x30));
 +
- 	/* power off HCODEC memories */
- 	WRITE_VREG(DOS_MEM_PD_HCODEC, 0xffffffffUL);
++void userdata_pushed_drop(struct vdec_mpeg12_hw_s *hw)
++{
++	hw->userdata_info.last_wp = hw->notify_data_cc_last_wp;
++	hw->ucode_cc_last_wp = hw->notify_ucode_cc_last_wp;
++	hw->cur_ud_idx = 0;
++	hw->wait_for_udr_send = 0;
++
+ }
  
-@@ -2463,7 +2475,10 @@ static s32 avc_poweroff(void)
  
- 	/* HCODEC power off */
- 	WRITE_AOREG(AO_RTI_GEN_PWR_SLEEP0,
--		READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) | 0x3);
-+			READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) |
-+			((get_cpu_type() == MESON_CPU_MAJOR_ID_SM1 ||
-+			  get_cpu_type() >= MESON_CPU_MAJOR_ID_TM2)
-+			? 0x1 : 0x3));
- 
- 	spin_unlock_irqrestore(&lock, flags);
- 
-diff --git a/drivers/frame_sink/encoder/h265/vpu.c b/drivers/frame_sink/encoder/h265/vpu.c
-index bddf33d..3180b49 100644
---- a/drivers/frame_sink/encoder/h265/vpu.c
-+++ b/drivers/frame_sink/encoder/h265/vpu.c
-@@ -385,7 +385,9 @@ static s32 vpu_open(struct inode *inode, struct file *filp)
- 		amports_switch_gate("vdec", 1);
- 		spin_lock_irqsave(&s_vpu_lock, flags);
- 		WRITE_AOREG(AO_RTI_GEN_PWR_SLEEP0,
--			READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) & ~(0x3<<24));
-+			READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) &
-+			(get_cpu_type() == MESON_CPU_MAJOR_ID_SM1
-+			? ~0x8 : ~(0x3<<24)));
- 		udelay(10);
- 
- 		if (get_cpu_type() <= MESON_CPU_MAJOR_ID_TXLX) {
-@@ -418,7 +420,9 @@ static s32 vpu_open(struct inode *inode, struct file *filp)
- 		WRITE_VREG(DOS_MEM_PD_WAVE420L, 0x0);
- 
- 		WRITE_AOREG(AO_RTI_GEN_PWR_ISO0,
--			READ_AOREG(AO_RTI_GEN_PWR_ISO0) & ~(0x3<<12));
-+			READ_AOREG(AO_RTI_GEN_PWR_ISO0) &
-+			(get_cpu_type() == MESON_CPU_MAJOR_ID_SM1
-+			? ~0x8 : ~(0x3<<12)));
- 		udelay(10);
- 
- 		spin_unlock_irqrestore(&s_vpu_lock, flags);
-@@ -1368,7 +1372,9 @@ static s32 vpu_release(struct inode *inode, struct file *filp)
- 			}
- 			spin_lock_irqsave(&s_vpu_lock, flags);
- 			WRITE_AOREG(AO_RTI_GEN_PWR_ISO0,
--				READ_AOREG(AO_RTI_GEN_PWR_ISO0) | (0x3<<12));
-+				READ_AOREG(AO_RTI_GEN_PWR_ISO0) |
-+				(get_cpu_type() == MESON_CPU_MAJOR_ID_SM1
-+				? 0x8 : (0x3<<12)));
- 			udelay(10);
- 
- 			WRITE_VREG(DOS_MEM_PD_WAVE420L, 0xffffffff);
-@@ -1376,7 +1382,9 @@ static s32 vpu_release(struct inode *inode, struct file *filp)
- 			vpu_clk_config(0);
+@@ -1251,6 +1264,7 @@ static irqreturn_t vmpeg12_isr_thread_fn(struct vdec_s *vdec, int irq)
+ 		else {
+ 			hw->dec_result = DEC_RESULT_AGAIN;
+ 			vdec_schedule_work(&hw->work);
++			userdata_pushed_drop(hw);
+ 		}
+ 		return IRQ_HANDLED;
+ 	} else {
+@@ -1742,7 +1756,6 @@ static void vmpeg12_work(struct work_struct *work)
+ 			vdec_schedule_work(&hw->work);
+ 			return;
+ 		}
+-
+ #ifdef AGAIN_HAS_THRESHOLD
+ 	hw->next_again_flag = 1;
  #endif
- 			WRITE_AOREG(AO_RTI_GEN_PWR_SLEEP0,
--				READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) | (0x3<<24));
-+				READ_AOREG(AO_RTI_GEN_PWR_SLEEP0) |
-+				(get_cpu_type() == MESON_CPU_MAJOR_ID_SM1
-+				? 0x8 : (0x3<<24)));
- 			udelay(10);
- 			spin_unlock_irqrestore(&s_vpu_lock, flags);
- 			amports_switch_gate("vdec", 0);
-@@ -1980,7 +1988,8 @@ static s32 __init vpu_init(void)
- 	if ((get_cpu_type() != MESON_CPU_MAJOR_ID_GXM)
- 		&& (get_cpu_type() != MESON_CPU_MAJOR_ID_G12A)
- 			&& (get_cpu_type() != MESON_CPU_MAJOR_ID_GXLX)
--				&& (get_cpu_type() != MESON_CPU_MAJOR_ID_G12B)) {
-+				&& (get_cpu_type() != MESON_CPU_MAJOR_ID_G12B)
-+				&& (get_cpu_type() != MESON_CPU_MAJOR_ID_SM1)) {
- 		enc_pr(LOG_DEBUG,
- 			"The chip is not support hevc encoder\n");
- 		return -1;
-@@ -2005,7 +2014,8 @@ static void __exit vpu_exit(void)
- 	if ((get_cpu_type() != MESON_CPU_MAJOR_ID_GXM) &&
- 		(get_cpu_type() != MESON_CPU_MAJOR_ID_G12A) &&
- 		(get_cpu_type() != MESON_CPU_MAJOR_ID_GXLX) &&
--		(get_cpu_type() != MESON_CPU_MAJOR_ID_G12B)) {
-+		(get_cpu_type() != MESON_CPU_MAJOR_ID_G12B) &&
-+		(get_cpu_type() != MESON_CPU_MAJOR_ID_SM1)) {
- 		enc_pr(LOG_INFO,
- 			"The chip is not support hevc encoder\n");
- 		return;
