@@ -1,7 +1,7 @@
-commit c8289239f0a7b8c9456ee49f3cf33bbc3626890d
-Merge: 00eef5b a4ceeb2
-Author: Zhi Zhou <zhi.zhou@amlogic.com>
-Date:   Sun Sep 29 04:16:38 2019 -0700
+commit 08e1af117a62aee0f6633b5c0e5f45a24b384cc6
+Merge: c828923 8e6e047
+Author: Hui Zhang <hui.zhang@amlogic.com>
+Date:   Sun Sep 29 19:16:04 2019 -0700
 
-    Merge "media: h264 encoder add svc feature [1/1]" into amlogic-4.9-dev
+    Merge "h264: h264 dpb_print error. [1/1]" into amlogic-4.9-dev
 
