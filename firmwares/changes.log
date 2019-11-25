@@ -1,46 +1,130 @@
-commit 8773984960bbdc020f2a1c1047d5bf4e9b4bdbca
-Author: Nanxin Qin <nanxin.qin@amlogic.com>
-Date:   Mon Jun 17 21:33:35 2019 +0800
+commit 0649fdd7a30f41858117e45a56dc57ee6a36eeab
+Author: Peng Yixin <yixin.peng@amlogic.com>
+Date:   Wed Sep 18 21:29:36 2019 +0800
 
-    vmh264: fixed playback for the interlace source. [1/1]
+    media_modules: h265 format playback appears mosaic [1/1]
     
-    PD#OTT-4563
+    PD#SWPL-13111
     
     Problem:
-    1080i-25-H264.mkv playback failed,no video and audio
+    Garbage image is observed after forwarding/rewinding.
+    The HEVC decoder working buffer has missing initializing
+    before decoding and it may cause decoder internal
+    wrong state and generate bad output.
     
     Solution:
-    fixed playback for the interlace source.
+    Clear decoder internal working buffer before decoding.
     
     Verify:
-    w400
+    U212
     
-    Change-Id: Ie01282e4173b51f62165ebcbbffb0e7f55c58025
-    Signed-off-by: Nanxin Qin <nanxin.qin@amlogic.com>
+    Change-Id: Ie3b942bbbf9470d1869cb2f4e20647e9dbbea86a
+    Signed-off-by: Peng Yixin <yixin.peng@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-index e284a98..075ce66 100644
---- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
-+++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-@@ -5552,10 +5552,19 @@ static irqreturn_t vh264_isr_thread_fn(struct vdec_s *vdec, int irq)
- 
- 		if (p_H264_Dpb->mVideo.dec_picture) {
- 			int cfg_ret = 0;
-+			bool field_pic_flag = false;
-+
- 			if (slice_header_process_status == 1) {
--				if ((p_H264_Dpb->mSPS.profile_idc == BASELINE) ||
-+				if (!p_H264_Dpb->mSPS.frame_mbs_only_flag) {
-+					field_pic_flag =
-+						(p_H264_Dpb->mSlice.structure == TOP_FIELD ||
-+						p_H264_Dpb->mSlice.structure == BOTTOM_FIELD) ?
-+						true : false;
-+				}
-+
-+				if (!field_pic_flag && ((p_H264_Dpb->mSPS.profile_idc == BASELINE) ||
- 					(((unsigned long)(hw->vh264_amstream_dec_info
--						.param)) & 0x8)) {
-+						.param)) & 0x8))) {
- 					p_H264_Dpb->fast_output_enable =
- 					H264_OUTPUT_MODE_FAST;
+diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
+index 1229791..79e0c9a 100644
+--- a/drivers/frame_provider/decoder/h265/vh265.c
++++ b/drivers/frame_provider/decoder/h265/vh265.c
+@@ -2755,6 +2755,31 @@ static int alloc_mv_buf(struct hevc_state_s *hevc, int i)
+ 			(void *)hevc->m_mv_BUF[i].start_adr,
+ 			hevc->m_mv_BUF[i].size);
+ 		}
++		if (!vdec_secure(hw_to_vdec(hevc)) && (hevc->m_mv_BUF[i].start_adr)) {
++			void *mem_start_virt;
++			mem_start_virt =
++					codec_mm_phys_to_virt(hevc->m_mv_BUF[i].start_adr);
++			if (mem_start_virt) {
++					memset(mem_start_virt, 0, hevc->m_mv_BUF[i].size);
++					codec_mm_dma_flush(mem_start_virt,
++							hevc->m_mv_BUF[i].size, DMA_TO_DEVICE);
++			} else {
++					mem_start_virt = codec_mm_vmap(
++							hevc->m_mv_BUF[i].start_adr,
++							hevc->m_mv_BUF[i].size);
++					if (mem_start_virt) {
++							memset(mem_start_virt, 0, hevc->m_mv_BUF[i].size);
++							codec_mm_dma_flush(mem_start_virt,
++									hevc->m_mv_BUF[i].size,
++									DMA_TO_DEVICE);
++							codec_mm_unmap_phyaddr(mem_start_virt);
++					} else {
++							/*not virt for tvp playing,
++							may need clear on ucode.*/
++							pr_err("ref %s	mem_start_virt failed\n", __func__);
++					}
++			}
++		}
+ 	}
+ 	/*put_cma_alloc_ref();*/ /*DEBUG_TMP*/
+ 	return ret;
+@@ -3000,6 +3025,32 @@ static int alloc_buf(struct hevc_state_s *hevc)
+ 					(void *)hevc->m_BUF[i].start_adr,
+ 					hevc->m_BUF[i].size);
  				}
++				/*flush the buffer make sure no cache dirty*/
++				if (!vdec_secure(hw_to_vdec(hevc)) && (hevc->m_BUF[i].start_adr)) {
++					void *mem_start_virt;
++					mem_start_virt =
++					codec_mm_phys_to_virt(hevc->m_BUF[i].start_adr);
++					if (mem_start_virt) {
++						memset(mem_start_virt, 0, hevc->m_BUF[i].size);
++						codec_mm_dma_flush(mem_start_virt,
++						hevc->m_BUF[i].size, DMA_TO_DEVICE);
++					} else {
++						mem_start_virt = codec_mm_vmap(
++						hevc->m_BUF[i].start_adr,
++						hevc->m_BUF[i].size);
++						if (mem_start_virt) {
++							memset(mem_start_virt, 0, hevc->m_BUF[i].size);
++							codec_mm_dma_flush(mem_start_virt,
++							hevc->m_BUF[i].size,
++							DMA_TO_DEVICE);
++							codec_mm_unmap_phyaddr(mem_start_virt);
++						} else {
++							/*not virt for tvp playing,
++							may need clear on ucode.*/
++							pr_err("ref %s	mem_start_virt failed\n", __func__);
++						}
++					}
++				}
+ 			}
+ 			/*put_cma_alloc_ref();*/ /*DEBUG_TMP*/
+ 		} else
+@@ -11937,6 +11988,7 @@ static int amvdec_h265_probe(struct platform_device *pdev)
+ 	struct vdec_dev_reg_s *pdata =
+ 		(struct vdec_dev_reg_s *)pdev->dev.platform_data;
+ #endif
++	char *tmpbuf;
+ 	int ret;
+ 	struct hevc_state_s *hevc;
+ 
+@@ -12001,6 +12053,29 @@ static int amvdec_h265_probe(struct platform_device *pdev)
+ 	}
+ 	hevc->buf_size = work_buf_size;
+ 
++
++	if (!vdec_secure(pdata)) {
++			tmpbuf = (char *)codec_mm_phys_to_virt(hevc->buf_start);
++			if (tmpbuf) {
++					memset(tmpbuf, 0, work_buf_size);
++					dma_sync_single_for_device(amports_get_dma_device(),
++							hevc->buf_start,
++							work_buf_size, DMA_TO_DEVICE);
++			} else {
++					tmpbuf = codec_mm_vmap(hevc->buf_start,
++							work_buf_size);
++					if (tmpbuf) {
++							memset(tmpbuf, 0, work_buf_size);
++							dma_sync_single_for_device(
++									amports_get_dma_device(),
++									hevc->buf_start,
++									work_buf_size,
++									DMA_TO_DEVICE);
++							codec_mm_unmap_phyaddr(tmpbuf);
++					}
++			}
++	}
++
+ 	if (get_dbg_flag(hevc)) {
+ 		hevc_print(hevc, 0,
+ 			"===H.265 decoder mem resource 0x%lx size 0x%x\n",
