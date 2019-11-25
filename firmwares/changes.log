@@ -1,35 +1,50 @@
-commit 3a5d05d26d479ceb31d776736ddc9e03ac2ff9e0
-Author: shihong.zheng <shihong.zheng@amlogic.com>
-Date:   Mon Jun 10 17:19:06 2019 +0800
+commit cf0bf849bc58122b3533b777c3bd1e0259632f98
+Author: Hanjie Lin <hanjie.lin@amlogic.com>
+Date:   Mon Jun 10 16:49:43 2019 +0800
 
-    mh264: disable mmu for 4k mbaff video. [1/1]
+    firmware_drv: should not use AMSTREAM_MAJOR [1/1]
     
-    PD#SWPL-7113
+    PD#SWPL-9538
     
     Problem:
-    h264 mmu is not support mb_aff 4k videos, can't play
-    [4KH264_25.000fps_17.7Mbps_8bit]B600Media.ts
+    firmware_drv and amstream shouldn't use the same AMSTREAM_MAJOR
     
     Solution:
-    force_enable_mmu set to 0.
+    use FIRMWARE_MAJOR for firmware_drv
+    vdec compile error
     
     Verify:
-    x301
+    ac200
     
-    Change-Id: I1ac5838f3316062dd54433eaffaf5e514b492eac
-    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
+    Change-Id: I0c13c8658477c7e7b39f08ed0e2d09293b678fff
+    Signed-off-by: Hanjie Lin <hanjie.lin@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-index a27b76f..2ea0d1b 100644
---- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
-+++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-@@ -121,7 +121,8 @@
- #define H264_MMU
- #define VIDEO_SIGNAL_TYPE_AVAILABLE_MASK	0x20000000
- static int mmu_enable;
--static int force_enable_mmu = 1;
-+/*mmu do not support mbaff*/
-+static int force_enable_mmu = 0;
- unsigned int h264_debug_flag; /* 0xa0000000; */
- unsigned int h264_debug_mask = 0xff;
- 	/*
+diff --git a/drivers/common/firmware/firmware_drv.c b/drivers/common/firmware/firmware_drv.c
+index f1ea445..86988dd 100644
+--- a/drivers/common/firmware/firmware_drv.c
++++ b/drivers/common/firmware/firmware_drv.c
+@@ -57,6 +57,10 @@
+ #define PACK ('P' << 24 | 'A' << 16 | 'C' << 8 | 'K')
+ #define CODE ('C' << 24 | 'O' << 16 | 'D' << 8 | 'E')
+ 
++#ifndef FIRMWARE_MAJOR
++#define FIRMWARE_MAJOR AMSTREAM_MAJOR
++#endif
++
+ static DEFINE_MUTEX(mutex);
+ 
+ static  struct ucode_file_info_s ucode_info[] = {
+@@ -851,11 +855,11 @@ static int fw_driver_init(void)
+ 	if (IS_ERR_OR_NULL(g_dev))
+ 		return -ENOMEM;
+ 
+-	g_dev->dev_no = MKDEV(AMSTREAM_MAJOR, 100);
++	g_dev->dev_no = MKDEV(FIRMWARE_MAJOR, 100);
+ 
+ 	ret = register_chrdev_region(g_dev->dev_no, 1, DEV_NAME);
+ 	if (ret < 0) {
+-		pr_info("Can't get major number %d.\n", AMSTREAM_MAJOR);
++		pr_info("Can't get major number %d.\n", FIRMWARE_MAJOR);
+ 		goto err;
+ 	}
+ 
