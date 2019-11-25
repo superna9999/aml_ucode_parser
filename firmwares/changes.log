@@ -1,61 +1,313 @@
-commit 2e50e35d8c28bd54ff4207fba29a7fa088bb5990
-Author: Nanxin Qin <nanxin.qin@amlogic.com>
-Date:   Thu Dec 27 16:14:46 2018 +0800
+commit 1a10720fd5d92aa357e0db86eaa4c497805635fa
+Author: Yao.Liu <yao.liu@amlogic.com>
+Date:   Mon Dec 31 22:50:42 2018 -0500
 
-    vmh264: fixed the issue of the mb size checking. [1/1]
+    vpu: fix h265 encoder memory vmap failed problem [1/1]
     
-    PD#SWPL-3564
+    PD#SWPL-3625
     
     Problem:
-    Black screen occured when playing 2160x3840 4K video.
+    h265 encoder need alloc 64M from codec_mm CMA, and need to get virt address.
+    For 32bit kernel, it is easily fail to vmap due to CMA is PageHighMem.
     
     Solution:
-    fixed the issue of the mb size checking.
+    Dont use virt address, just use phy addr to manage the little buffers from 64M.
     
     Verify:
-    u212
+    Verified U212.
     
-    Change-Id: Ief18170dc8a8e41ce4d558794f1b07a78f77de04
-    Signed-off-by: Nanxin Qin <nanxin.qin@amlogic.com>
+    Change-Id: I0cf983dea1c3ebb91ea82b4ab45a98afbacd7652
+    Signed-off-by: Yao.Liu <yao.liu@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-index e6675e4..c86e738 100644
---- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
-+++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-@@ -872,6 +872,23 @@ static void h264_clear_dpb(struct vdec_h264_hw_s *hw);
- /* 0:linear 1:32x32 2:64x32 ; m8baby test1902 */
- static u32 mem_map_mode = H265_MEM_MAP_MODE;
+diff --git a/drivers/frame_sink/encoder/h265/vpu.c b/drivers/frame_sink/encoder/h265/vpu.c
+index 5bea570..8ae38ba 100644
+--- a/drivers/frame_sink/encoder/h265/vpu.c
++++ b/drivers/frame_sink/encoder/h265/vpu.c
+@@ -154,8 +154,7 @@ static s32 vpu_alloc_dma_buffer(struct vpudrv_buffer_t *vb)
+ 		return -1;
+ 	}
  
-+#define MAX_SIZE_8K (8192 * 4608)
-+#define MAX_SIZE_4K (4096 * 2304)
+-	vb->base = (ulong)(s_video_memory.base +
+-		(vb->phys_addr - s_video_memory.phys_addr));
++	enc_pr(LOG_INFO, "vpu_alloc_dma_buffer: vb->phys_addr 0x%lx \n",vb->phys_addr);
+ 	return 0;
+ }
+ 
+@@ -163,8 +162,9 @@ static void vpu_free_dma_buffer(struct vpudrv_buffer_t *vb)
+ {
+ 	if (!vb)
+ 		return;
++	enc_pr(LOG_INFO, "vpu_free_dma_buffer 0x%lx\n",vb->phys_addr);
+ 
+-	if (vb->base)
++	if (vb->phys_addr)
+ 		vmem_free(&s_vmem, vb->phys_addr, 0);
+ }
+ 
+@@ -211,7 +211,7 @@ static s32 vpu_free_buffers(struct file *filp)
+ 	list_for_each_entry_safe(pool, n, &s_vbp_head, list) {
+ 		if (pool->filp == filp) {
+ 			vb = pool->vb;
+-			if (vb.base) {
++			if (vb.phys_addr) {
+ 				vpu_free_dma_buffer(&vb);
+ 				list_del(&pool->list);
+ 				kfree(pool);
+@@ -324,12 +324,7 @@ static s32 vpu_open(struct inode *inode, struct file *filp)
+ 		s_video_memory.phys_addr =
+ 			(ulong)codec_mm_alloc_for_dma(VPU_DEV_NAME,
+ 			VPU_INIT_VIDEO_MEMORY_SIZE_IN_BYTE >> PAGE_SHIFT, 0, 0);
+-		if (s_video_memory.phys_addr)
+-			s_video_memory.base =
+-				(ulong)codec_mm_vmap(s_video_memory.phys_addr,s_video_memory.size);
+-		else
+-			s_video_memory.base = 0;
+-		if (s_video_memory.base) {
++		if (s_video_memory.phys_addr) {
+ 			enc_pr(LOG_DEBUG,
+ 				"allocating phys 0x%lx, virt addr 0x%lx, size %dk\n",
+ 				s_video_memory.phys_addr,
+@@ -340,8 +335,6 @@ static s32 vpu_open(struct inode *inode, struct file *filp)
+ 				s_video_memory.size) < 0) {
+ 				enc_pr(LOG_ERROR, "fail to init vmem system\n");
+ 				r = -ENOMEM;
+-				codec_mm_unmap_phyaddr((u8 *)s_video_memory.base);
+-				s_video_memory.base = 0;
+ 				codec_mm_free_for_dma(
+ 					VPU_DEV_NAME,
+ 					(u32)s_video_memory.phys_addr);
+@@ -367,7 +360,7 @@ static s32 vpu_open(struct inode *inode, struct file *filp)
+ 			"No CMA and reserved memory for HevcEnc!!!\n");
+ 		r = -ENOMEM;
+ #endif
+-	} else if (!s_video_memory.base) {
++	} else if (!s_video_memory.phys_addr) {
+ 		enc_pr(LOG_ERROR,
+ 			"HevcEnc memory is not malloced!!!\n");
+ 		r = -ENOMEM;
+@@ -384,6 +377,7 @@ static s32 vpu_open(struct inode *inode, struct file *filp)
+ 			if (err) {
+ 				enc_pr(LOG_ERROR,
+ 					"fail to register interrupt handler\n");
++				s_vpu_drv_context.open_count--;
+ 				return -EFAULT;
+ 			}
+ 			s_vpu_irq_requested = true;
+@@ -430,6 +424,8 @@ static s32 vpu_open(struct inode *inode, struct file *filp)
+ 		spin_unlock_irqrestore(&s_vpu_lock, flags);
+ 	}
+ Err:
++	if (r != 0)
++		s_vpu_drv_context.open_count--;
+ 	enc_pr(LOG_DEBUG, "[-] %s, ret: %d\n", __func__, r);
+ 	return r;
+ }
+@@ -521,8 +517,6 @@ static long vpu_ioctl(struct file *filp, u32 cmd, ulong arg)
+ 				vbp->vb.cached = buf32.cached;
+ 				vbp->vb.phys_addr =
+ 					(ulong)buf32.phys_addr;
+-				vbp->vb.base =
+-					(ulong)buf32.base;
+ 				vbp->vb.virt_addr =
+ 					(ulong)buf32.virt_addr;
+ 				ret = vpu_alloc_dma_buffer(&(vbp->vb));
+@@ -536,8 +530,6 @@ static long vpu_ioctl(struct file *filp, u32 cmd, ulong arg)
+ 				buf32.size = vbp->vb.size;
+ 				buf32.phys_addr =
+ 					(compat_ulong_t)vbp->vb.phys_addr;
+-				buf32.base =
+-					(compat_ulong_t)vbp->vb.base;
+ 				buf32.virt_addr =
+ 					(compat_ulong_t)vbp->vb.virt_addr;
+ 
+@@ -580,19 +572,20 @@ static long vpu_ioctl(struct file *filp, u32 cmd, ulong arg)
+ 					return -EACCES;
+ 				}
+ 
+-				if (vb.base)
++				if (vb.phys_addr)
+ 					vpu_free_dma_buffer(&vb);
+ 
+ 				spin_lock(&s_vpu_lock);
+ 				list_for_each_entry_safe(vbp, n,
+ 					&s_vbp_head, list) {
+-					if (vbp->vb.base == vb.base) {
++					if (vbp->vb.phys_addr == vb.phys_addr) {
+ 						list_del(&vbp->list);
+ 						kfree(vbp);
+ 						break;
+ 					}
+ 				}
+ 				spin_unlock(&s_vpu_lock);
 +
-+static int is_oversize(int w, int h)
-+{
-+	int max = (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TL1)?
-+		MAX_SIZE_8K : MAX_SIZE_4K;
+ 				up(&s_vpu_sem);
+ 			}
+ 			enc_pr(LOG_ALL,
+@@ -621,12 +614,10 @@ static long vpu_ioctl(struct file *filp, u32 cmd, ulong arg)
+ 				vb.size = buf32.size;
+ 				vb.phys_addr =
+ 					(ulong)buf32.phys_addr;
+-				vb.base =
+-					(ulong)buf32.base;
+ 				vb.virt_addr =
+ 					(ulong)buf32.virt_addr;
+ 
+-				if (vb.base)
++				if (vb.phys_addr)
+ 					vpu_free_dma_buffer(&vb);
+ 
+ 				spin_lock(&s_vpu_lock);
+@@ -651,7 +642,7 @@ static long vpu_ioctl(struct file *filp, u32 cmd, ulong arg)
+ 		{
+ 			enc_pr(LOG_ALL,
+ 				"[+]VDI_IOCTL_GET_RESERVED_VIDEO_MEMORY_INFO\n");
+-			if (s_video_memory.base != 0) {
++			if (s_video_memory.phys_addr != 0) {
+ 				ret = copy_to_user((void __user *)arg,
+ 					&s_video_memory,
+ 					sizeof(struct vpudrv_buffer_t));
+@@ -675,11 +666,9 @@ static long vpu_ioctl(struct file *filp, u32 cmd, ulong arg)
+ 			buf32.size = s_video_memory.size;
+ 			buf32.phys_addr =
+ 				(compat_ulong_t)s_video_memory.phys_addr;
+-			buf32.base =
+-				(compat_ulong_t)s_video_memory.base;
+ 			buf32.virt_addr =
+ 				(compat_ulong_t)s_video_memory.virt_addr;
+-			if (s_video_memory.base != 0) {
++			if (s_video_memory.phys_addr != 0) {
+ 				ret = copy_to_user((void __user *)arg,
+ 					&buf32,
+ 					sizeof(struct compat_vpudrv_buffer_t));
+@@ -826,9 +815,6 @@ static long vpu_ioctl(struct file *filp, u32 cmd, ulong arg)
+ 				buf32.phys_addr =
+ 					(compat_ulong_t)
+ 					s_instance_pool.phys_addr;
+-				buf32.base =
+-					(compat_ulong_t)
+-					s_instance_pool.base;
+ 				buf32.virt_addr =
+ 					(compat_ulong_t)
+ 					s_instance_pool.virt_addr;
+@@ -888,7 +874,7 @@ static long vpu_ioctl(struct file *filp, u32 cmd, ulong arg)
+ 		{
+ 			enc_pr(LOG_ALL,
+ 				"[+]VDI_IOCTL_GET_COMMON_MEMORY\n");
+-			if (s_common_memory.base != 0) {
++			if (s_common_memory.phys_addr != 0) {
+ 				ret = copy_to_user((void __user *)arg,
+ 					&s_common_memory,
+ 					sizeof(struct vpudrv_buffer_t));
+@@ -928,13 +914,10 @@ static long vpu_ioctl(struct file *filp, u32 cmd, ulong arg)
+ 			buf32.phys_addr =
+ 				(compat_ulong_t)
+ 				s_common_memory.phys_addr;
+-			buf32.base =
+-				(compat_ulong_t)
+-				s_common_memory.base;
+ 			buf32.virt_addr =
+ 				(compat_ulong_t)
+ 				s_common_memory.virt_addr;
+-			if (s_common_memory.base != 0) {
++			if (s_common_memory.phys_addr != 0) {
+ 				ret = copy_to_user((void __user *)arg,
+ 					&buf32,
+ 					sizeof(struct compat_vpudrv_buffer_t));
+@@ -956,9 +939,6 @@ static long vpu_ioctl(struct file *filp, u32 cmd, ulong arg)
+ 					buf32.phys_addr =
+ 						(compat_ulong_t)
+ 						s_common_memory.phys_addr;
+-					buf32.base =
+-						(compat_ulong_t)
+-						s_common_memory.base;
+ 					buf32.virt_addr =
+ 						(compat_ulong_t)
+ 						s_common_memory.virt_addr;
+@@ -1156,9 +1136,6 @@ static long vpu_ioctl(struct file *filp, u32 cmd, ulong arg)
+ 			buf32.phys_addr =
+ 				(compat_ulong_t)
+ 				s_vpu_register.phys_addr;
+-			buf32.base =
+-				(compat_ulong_t)
+-				s_vpu_register.base;
+ 			buf32.virt_addr =
+ 				(compat_ulong_t)
+ 				s_vpu_register.virt_addr;
+@@ -1261,6 +1238,7 @@ static long vpu_ioctl(struct file *filp, u32 cmd, ulong arg)
+ 		{
+ 			enc_pr(LOG_ERROR,
+ 				"No such IOCTL, cmd is %d\n", cmd);
++			ret = -EFAULT;
+ 		}
+ 		break;
+ 	}
+@@ -1359,15 +1337,14 @@ static s32 vpu_release(struct inode *inode, struct file *filp)
+ 				vfree((const void *)s_instance_pool.base);
+ 				s_instance_pool.base = 0;
+ 			}
+-			if (s_common_memory.base) {
+-				enc_pr(LOG_DEBUG, "free common memory\n");
++			if (s_common_memory.phys_addr) {
++				enc_pr(LOG_INFO, "vpu_release, s_common_memory 0x%lx\n",s_common_memory.phys_addr);
+ 				vpu_free_dma_buffer(&s_common_memory);
+-				s_common_memory.base = 0;
++				s_common_memory.phys_addr = 0;
+ 			}
+ 
+-			if (s_video_memory.base && !use_reserve) {
+-				codec_mm_unmap_phyaddr((u8 *)s_video_memory.base);
+-				s_video_memory.base = 0;
++			if (s_video_memory.phys_addr && !use_reserve) {
++				enc_pr(LOG_DEBUG, "vpu_release, s_video_memory 0x%lx\n",s_video_memory.phys_addr);
+ 				codec_mm_free_for_dma(
+ 					VPU_DEV_NAME,
+ 					(u32)s_video_memory.phys_addr);
+@@ -1578,18 +1555,8 @@ static s32 hevc_mem_device_init(
+ 	r = 0;
+ 	s_video_memory.size = rmem->size;
+ 	s_video_memory.phys_addr = (ulong)rmem->base;
+-	s_video_memory.base =
+-		(ulong)codec_mm_vmap(s_video_memory.phys_addr,s_video_memory.size);
+-	if (!s_video_memory.base) {
+-		enc_pr(LOG_ERROR, "fail to remap video memory ");
+-		enc_pr(LOG_ERROR,
+-			"physical phys_addr=0x%lx, base=0x%lx, size=0x%x\n",
+-			(ulong)s_video_memory.phys_addr,
+-			(ulong)s_video_memory.base,
+-			(u32)s_video_memory.size);
+-		s_video_memory.phys_addr = 0;
+-		r = -EFAULT;
+-	}
++	enc_pr(LOG_DEBUG, "hevc_mem_device_init %d, 0x%lx\n ",s_video_memory.size,s_video_memory.phys_addr);
 +
-+	if (w < 0 || h < 0)
-+		return true;
-+
-+	if (h != 0 && (w > max / h))
-+		return true;
-+
-+	return false;
-+}
-+
- static int  compute_losless_comp_body_size(int width,
- 				int height, int bit_depth_10);
- static int  compute_losless_comp_header_size(int width, int height);
-@@ -3786,10 +3803,8 @@ static int vh264_set_params(struct vdec_h264_hw_s *hw,
- 		mb_width = 256;
- 	if (mb_width)
- 		mb_height = mb_total/mb_width;
--	if (mb_width > 0x110 ||
--		mb_height > 0xa0 ||
--		mb_width <= 0 ||
--		mb_height <= 0) {
-+	if (mb_width <= 0 || mb_height <= 0 ||
-+		is_oversize(mb_width << 4, mb_height << 4)) {
- 		dpb_print(DECODE_ID(hw), 0,
- 			"!!!wrong seq_info2 0x%x mb_width/mb_height (0x%x/0x%x) %x\r\n",
- 			seq_info2,
+ 	return r;
+ }
+ 
+@@ -1756,7 +1723,7 @@ ERROR_PROVE_DEVICE:
+ 		memset(&s_vpu_register, 0, sizeof(struct vpudrv_buffer_t));
+ 	}
+ 
+-	if (s_video_memory.base) {
++	if (s_video_memory.phys_addr) {
+ 		vmem_exit(&s_vmem);
+ 		memset(&s_video_memory, 0, sizeof(struct vpudrv_buffer_t));
+ 		memset(&s_vmem, 0, sizeof(struct video_mm_t));
+@@ -1784,15 +1751,13 @@ static s32 vpu_remove(struct platform_device *pdev)
+ 		s_instance_pool.base = 0;
+ 	}
+ 
+-	if (s_common_memory.base) {
++	if (s_common_memory.phys_addr) {
+ 		vpu_free_dma_buffer(&s_common_memory);
+-		s_common_memory.base = 0;
++		s_common_memory.phys_addr = 0;
+ 	}
+ 
+-	if (s_video_memory.base) {
++	if (s_video_memory.phys_addr) {
+ 		if (!use_reserve) {
+-			codec_mm_unmap_phyaddr((u8 *)s_video_memory.base);
+-			s_video_memory.base = 0;
+ 			codec_mm_free_for_dma(
+ 			VPU_DEV_NAME,
+ 			(u32)s_video_memory.phys_addr);
