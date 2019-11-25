@@ -1,34 +1,39 @@
-commit 9e85071c703932eb07ca961dedf36dd4136d735b
-Author: Peng Yixin <yixin.peng@amlogic.com>
-Date:   Tue Sep 10 19:54:06 2019 +0800
+commit f84d575313d689e8bff11f5f4e0055567dd3dc14
+Author: Gan Zhang <gan.zhang@amlogic.com>
+Date:   Tue Oct 8 13:14:40 2019 +0800
 
-    media_module: fixed mpeg2 playback stuck issue [1/1]
+    media_module: tiny h264 stream decode error [1/1]
     
-    PD#OTT-5167
+    PD#SWPL-13083
     
     Problem:
-    mpeg2 formate playback stuck when switch channel.
+    tiny h264 stream decode error
     
     Solution:
-    Modify the condition to trigger decoder timeout to
-    resolve this problem.
+    disable this read cache when frame width <= 64
+    IQIDCT_CONTROL, bit[16] – dcac_dma_read_cache_disable
     
     Verify:
-    U212
+    AC213
     
-    Change-Id: I2642a90f9debd1dcc656581c0771c0f1d8a640d0
-    Signed-off-by: Peng Yixin <yixin.peng@amlogic.com>
+    Change-Id: I8a07b70347b335709ebe7be44735f6aa667801c6
+    Signed-off-by: Gan Zhang <gan.zhang@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-index 36894e6..a6f25be 100644
---- a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-+++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-@@ -2094,8 +2094,6 @@ static void check_timer_func(unsigned long arg)
- 	}
+diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+index 52feccc..3224145 100644
+--- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
++++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+@@ -3214,6 +3214,13 @@ int config_decode_buf(struct vdec_h264_hw_s *hw, struct StorablePicture *pic)
+ 	j = 0;
+ 	h264_buffer_info_data_write_count = 0;
  
- 	if (((debug_enable & PRINT_FLAG_TIMEOUT_STATUS) == 0) &&
--		(vdec_frame_based(vdec) ||
--		((u32)READ_VREG(VLD_MEM_VIFIFO_LEVEL) > 0x100)) &&
- 		(timeout_val > 0) &&
- 		(hw->start_process_time > 0) &&
- 		((1000 * (jiffies - hw->start_process_time) / HZ)
++	//disable this read cache when frame width <= 64 (4MBs)
++	//IQIDCT_CONTROL, bit[16] – dcac_dma_read_cache_disable
++	if (hw->frame_width <= 64)
++		SET_VREG_MASK(IQIDCT_CONTROL,(1 << 16));
++	else
++		CLEAR_VREG_MASK(IQIDCT_CONTROL,(1 << 16));
++
+ 	if (last_pic)
+ 		dpb_print(DECODE_ID(hw), PRINT_FLAG_ERRORFLAG_DBG,
+ 				"last_pic->data_flag %x   slice_type %x last_pic->slice_type %x\n",
