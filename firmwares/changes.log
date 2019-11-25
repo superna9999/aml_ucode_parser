@@ -1,7 +1,51 @@
-commit ba1fc560188b2139f05dae05949e5221a51eb524
-Merge: a4e43db 96c44ab
-Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Wed May 8 01:20:36 2019 -0700
+commit 6965147e4b4d12011cc39771f7b9e6c02cf4a38d
+Author: Conglin Guo <conglin.guo@amlogic.com>
+Date:   Wed May 8 17:42:14 2019 +0800
 
-    Merge "media: add atrace tag [2/2]" into amlogic-4.9-dev
+    media_modules: vh264_reset state err [1/1]
+    
+    PD#SWPL-6744
+    
+    Problem:
+    state err,vh264_prot_init loop.
+    
+    Solution:
+    add timeout check,timeout after break loop.
+    
+    Verify:
+    T962X2
+    
+    Change-Id: I19399a4d4498dcb5a272e8c7d67af03fadf6b6a2
+    Signed-off-by: Conglin Guo <conglin.guo@amlogic.com>
 
+diff --git a/drivers/frame_provider/decoder/h264/vh264.c b/drivers/frame_provider/decoder/h264/vh264.c
+index 85c530a..8377998 100644
+--- a/drivers/frame_provider/decoder/h264/vh264.c
++++ b/drivers/frame_provider/decoder/h264/vh264.c
+@@ -3502,11 +3502,22 @@ int vh264_set_isreset(struct vdec_s *vdec, int isreset)
+ 
+ static void vh264_prot_init(void)
+ {
++	ulong timeout = jiffies + HZ;
+ 
+-	while (READ_VREG(DCAC_DMA_CTRL) & 0x8000)
+-		;
+-	while (READ_VREG(LMEM_DMA_CTRL) & 0x8000)
+-		;		/* reg address is 0x350 */
++	while (READ_VREG(DCAC_DMA_CTRL) & 0x8000) {
++		if (time_after(jiffies, timeout)) {
++			pr_info("%s DCAC_DMA_CTRL time out\n", __func__);
++			break;
++		}
++	}
++
++	timeout = jiffies + HZ;
++	while (READ_VREG(LMEM_DMA_CTRL) & 0x8000) {
++		if (time_after(jiffies, timeout)) {
++			pr_info("%s LMEM_DMA_CTRL time out\n", __func__);
++			break;
++		}
++	}
+ 
+ #if 1				/* MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6 */
+ 	WRITE_VREG(DOS_SW_RESET0, (1 << 7) | (1 << 6) | (1 << 4));
