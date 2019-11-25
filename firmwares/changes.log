@@ -1,7 +1,66 @@
-commit 5ab752dbb29cc847f2f193fe60f95f955f86d24e
-Merge: 25a6cb5 7bdb307
-Author: Jian Xu <jian.xu@amlogic.com>
-Date:   Wed Jan 23 00:31:29 2019 -0800
+commit 441cbb4b24bd0a39c77aae5a56fbe643648181f3
+Author: Yao.Liu <yao.liu@amlogic.com>
+Date:   Thu Jan 17 00:37:29 2019 -0500
 
-    Merge "audio: fix wrong uio info map data [1/1]" into amlogic-4.9-dev
+    vpu: Fix vpu panic if open quickly after close [1/1]
+    
+    PD#SWPL-4243
+    
+    Problem:
+    If the interrupt flag is not cleared before
+    closing the device, this flag will affect the
+    initialization operation of the next encode.
+    
+    Solution:
+    Clear interrupt flag before close device
+    
+    Verify:
+    u212
+    
+    Change-Id: Ie2e40c6441fd65fb02c6955ed0b7d12cae290bf5
+    Signed-off-by: Yao.Liu <yao.liu@amlogic.com>
 
+diff --git a/drivers/frame_sink/encoder/h265/vpu.c b/drivers/frame_sink/encoder/h265/vpu.c
+index 8ae38ba..4739b21 100644
+--- a/drivers/frame_sink/encoder/h265/vpu.c
++++ b/drivers/frame_sink/encoder/h265/vpu.c
+@@ -702,6 +702,9 @@ static long vpu_ioctl(struct file *filp, u32 cmd, ulong arg)
+ 				ret = -ETIME;
+ 				break;
+ 			}
++			enc_pr(LOG_INFO,
++			       "s_interrupt_flag(%d), reason(0x%08lx)\n",
++			       s_interrupt_flag, dev->interrupt_reason);
+ 			if (dev->interrupt_reason & (1 << W4_INT_ENC_PIC)) {
+ 				u32 start, end, size, core = 0;
+ 
+@@ -1332,6 +1335,11 @@ static s32 vpu_release(struct inode *inode, struct file *filp)
+ 		vpu_free_instances(filp);
+ 		s_vpu_drv_context.open_count--;
+ 		if (s_vpu_drv_context.open_count == 0) {
++			enc_pr(LOG_INFO,
++			       "vpu_release: s_interrupt_flag(%d), reason(0x%08lx)\n",
++			       s_interrupt_flag, s_vpu_drv_context.interrupt_reason);
++			s_vpu_drv_context.interrupt_reason = 0;
++			s_interrupt_flag = 0;
+ 			if (s_instance_pool.base) {
+ 				enc_pr(LOG_DEBUG, "free instance pool\n");
+ 				vfree((const void *)s_instance_pool.base);
+@@ -1993,8 +2001,15 @@ static s32 __init vpu_init(void)
+ static void __exit vpu_exit(void)
+ {
+ 	enc_pr(LOG_DEBUG, "vpu_exit\n");
+-	if (get_cpu_type() == MESON_CPU_MAJOR_ID_GXM)
+-		platform_driver_unregister(&vpu_driver);
++	if ((get_cpu_type() != MESON_CPU_MAJOR_ID_GXM) &&
++		(get_cpu_type() != MESON_CPU_MAJOR_ID_G12A) &&
++		(get_cpu_type() != MESON_CPU_MAJOR_ID_GXLX) &&
++		(get_cpu_type() != MESON_CPU_MAJOR_ID_G12B)) {
++		enc_pr(LOG_INFO,
++			"The chip is not support hevc encoder\n");
++		return;
++	}
++	platform_driver_unregister(&vpu_driver);
+ }
+ 
+ static const struct reserved_mem_ops rmem_hevc_ops = {
