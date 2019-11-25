@@ -1,7 +1,85 @@
-commit d1afc8a52042a8ead8ab457170c76cd8382270e9
-Merge: 5c56a0e 8c8439b
-Author: Zhi Zhou <zhi.zhou@amlogic.com>
-Date:   Fri May 10 00:18:39 2019 -0700
+commit b5d3df4398e5f24bc95ba4097bb64063d6a2c71b
+Author: nengwen.chen <nengwen.chen@amlogic.com>
+Date:   Mon May 6 16:05:39 2019 +0800
 
-    Merge "ci: added LPDU Packet read [1/8]" into amlogic-4.9-dev
+    media_modules: add atbm2040 tuner support [2/3]
+    
+    PD#TV-5499
+    
+    Problem:
+    add atbm2040 tuner support.
+    
+    Solution:
+    add atbm2040 tuner support.
+    
+    Verify:
+    Verified by x301
+    
+    Change-Id: Ifb972b83313186c694c83c3def103f90ed1d25ae
+    Signed-off-by: nengwen.chen <nengwen.chen@amlogic.com>
 
+diff --git a/drivers/stream_input/parser/hw_demux/aml_demod_gt.h b/drivers/stream_input/parser/hw_demux/aml_demod_gt.h
+index 3a5b3b0..d3541de 100644
+--- a/drivers/stream_input/parser/hw_demux/aml_demod_gt.h
++++ b/drivers/stream_input/parser/hw_demux/aml_demod_gt.h
+@@ -76,6 +76,11 @@ static inline struct dvb_frontend* r840_attach (struct dvb_frontend *fe, struct
+     return NULL;
+ }
+ 
++static inline struct dvb_frontend* atbm2040_attach (struct dvb_frontend *fe, struct i2c_adapter *i2c, struct tuner_config *cfg)
++{
++	return NULL;
++}
++
+ static inline struct dvb_frontend* atbm8881_attach (const struct amlfe_demod_config *config)
+ {
+ 	return NULL;
+diff --git a/drivers/stream_input/parser/hw_demux/aml_dvb.c b/drivers/stream_input/parser/hw_demux/aml_dvb.c
+index b3ffbb7..91bf2f7 100644
+--- a/drivers/stream_input/parser/hw_demux/aml_dvb.c
++++ b/drivers/stream_input/parser/hw_demux/aml_dvb.c
+@@ -75,6 +75,7 @@ typedef enum __tuner_type
+ 	TUNER_SI2159,
+ 	TUNER_R842,
+ 	TUNER_R840,
++	TUNER_ATBM2040,
+ 	TUNER_MAX_NUM
+ }tuner_type;
+ 
+@@ -193,6 +194,15 @@ static int dvb_attach_tuner(struct dvb_frontend *fe, struct aml_tuner *tuner, tu
+ 			*type = TUNER_MXL661;
+ 		}
+ 		break;
++	case AM_TUNER_ATBM2040:
++		if (!dvb_attach(atbm2040_attach, fe, i2c_adap, cfg)) {
++			pr_error("dvb attach atbm2040_attach tuner error\n");
++			return -1;
++		} else {
++			pr_inf("atbm2040_attach  attach sucess\n");
++			*type = TUNER_ATBM2040;
++		}
++		break;
+ 	default:
+ 		pr_error("can't support tuner type: %d\n", cfg->id);
+ 		break;
+@@ -2282,6 +2292,8 @@ static int aml_dvb_probe(struct platform_device *pdev)
+ 							advb->tuners[j].cfg.id = AM_TUNER_R840;
+ 						else if (!strncmp(str, "r842_tuner", 10))
+ 							advb->tuners[j].cfg.id = AM_TUNER_R842;
++						else if (!strncmp(str, "atbm2040_tuner", 14))
++							advb->tuners[i].cfg.id = AM_TUNER_ATBM2040;
+ 						else {
+ 							pr_err("nonsupport tuner: %s.\n", str);
+ 							advb->tuners[j].cfg.id = AM_TUNER_NONE;
+diff --git a/drivers/stream_input/tv_frontend/aml_fe.h b/drivers/stream_input/tv_frontend/aml_fe.h
+index c975b4c..f38c646 100644
+--- a/drivers/stream_input/tv_frontend/aml_fe.h
++++ b/drivers/stream_input/tv_frontend/aml_fe.h
+@@ -75,6 +75,7 @@ enum aml_tuner_type_t {
+ 	AM_TUNER_MXL608 = 11,
+ 	AM_TUNER_SI2159 = 12,
+ 	AM_TUNER_R842 = 13,
++	AM_TUNER_ATBM2040 = 14,
+ };
+ 
+ enum aml_atv_demod_type_t {
