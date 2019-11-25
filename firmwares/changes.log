@@ -1,33 +1,109 @@
-commit 60e7b9faf399a19d63b733aa58ad42af515958e2
-Author: renjiang.han <renjiang.han@amlogic.com>
-Date:   Fri Mar 22 16:25:41 2019 +0800
+commit 8a9b0dfdf7b7c31483717f4b739b909fd149419d
+Author: shihong.zheng <shihong.zheng@amlogic.com>
+Date:   Mon Mar 25 15:38:02 2019 +0800
 
-    path: add ppmgr [4/5]
+    mpeg4: unsupport resolution limit. [1/1]
     
-    PD#TV-2649
+    PD#TV-3382
     
     Problem:
-    There is no ppmgr in the path.
+    mpeg4 unsupport resolution which bigger than 1080p.
     
     Solution:
-    add ppmgr in the path.
+    check and limit the resolution in probe.
     
     Verify:
-    on u212
+    x301
     
-    Change-Id: If930b1ed868fe319b6baa8d285a605ef2c3ff075
-    Signed-off-by: renjiang.han <renjiang.han@amlogic.com>
+    Change-Id: I7b4ea8c707e4f488eb5f3a3886686de272894f37
+    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/utils/vdec.c b/drivers/frame_provider/decoder/utils/vdec.c
-index accd4b7..57159d7 100644
---- a/drivers/frame_provider/decoder/utils/vdec.c
-+++ b/drivers/frame_provider/decoder/utils/vdec.c
-@@ -1885,7 +1885,7 @@ s32 vdec_init(struct vdec_s *vdec, int is_4k)
- 			} else {
- 				snprintf(vdec->vfm_map_chain, VDEC_MAP_NAME_SIZE,
- 					"%s %s", vdec->vf_provider_name,
--					"amlvideo deinterlace amvideo");
-+					"amlvideo ppmgr deinterlace amvideo");
- 			}
- 			snprintf(vdec->vfm_map_id, VDEC_MAP_NAME_SIZE,
- 				"vdec-map-%d", vdec->id);
+diff --git a/drivers/frame_provider/decoder/mpeg4/vmpeg4.c b/drivers/frame_provider/decoder/mpeg4/vmpeg4.c
+index d43ef62..e93ed66 100644
+--- a/drivers/frame_provider/decoder/mpeg4/vmpeg4.c
++++ b/drivers/frame_provider/decoder/mpeg4/vmpeg4.c
+@@ -120,6 +120,8 @@ MODULE_AMLOG(LOG_LEVEL_ERROR, 0, LOG_LEVEL_DESC, LOG_DEFAULT_MASK_DESC);
+ 
+ #define DUR2PTS(x) ((x) - ((x) >> 4))
+ 
++#define MAX_MPEG4_SUPPORT_SIZE (1920*1088)
++
+ static struct vframe_s *vmpeg_vf_peek(void *);
+ static struct vframe_s *vmpeg_vf_get(void *);
+ static void vmpeg_vf_put(struct vframe_s *, void *);
+@@ -1040,7 +1042,7 @@ static s32 vmpeg4_init(void)
+ 
+ 		pr_info("load VIDEO_DEC_FORMAT_H263\n");
+ 	} else
+-		pr_err("not supported MPEG4 format %d\n",
++		pr_err("unsupport mpeg4 sub format %d\n",
+ 				vmpeg4_amstream_dec_info.format);
+ 
+ 	if (size < 0) {
+@@ -1132,9 +1134,17 @@ static int amvdec_mpeg4_probe(struct platform_device *pdev)
+ 		return -EFAULT;
+ 	}
+ 
+-	if (pdata->sys_info)
++	if (pdata->sys_info) {
+ 		vmpeg4_amstream_dec_info = *pdata->sys_info;
+-
++		if ((vmpeg4_amstream_dec_info.height != 0) &&
++			(vmpeg4_amstream_dec_info.width >
++			(MAX_MPEG4_SUPPORT_SIZE/vmpeg4_amstream_dec_info.height))) {
++			pr_info("amvdec_mpeg4: oversize, unsupport: %d*%d\n",
++				vmpeg4_amstream_dec_info.width,
++				vmpeg4_amstream_dec_info.height);
++			return -EFAULT;
++		}
++	}
+ 	pdata->dec_status = vmpeg4_dec_status;
+ 	pdata->set_isreset = vmpeg4_set_isreset;
+ 	is_reset = 0;
+diff --git a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
+index 60f69ed..06393ea 100644
+--- a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
++++ b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
+@@ -112,6 +112,8 @@ static u32 buf_size = 32 * 1024 * 1024;
+ 
+ #define DUR2PTS(x) ((x) - ((x) >> 4))
+ 
++#define MAX_MPEG4_SUPPORT_SIZE (1920*1088)
++
+ #define DEC_RESULT_NONE     0
+ #define DEC_RESULT_DONE     1
+ #define DEC_RESULT_AGAIN    2
+@@ -1560,7 +1562,9 @@ static s32 vmmpeg4_init(struct vdec_mpeg4_hw_s *hw)
+ 			VIDEO_DEC_FORMAT_H263) {
+ 		size = get_firmware_data(VIDEO_DEC_H263_MULTI, fw->data);
+ 		strncpy(fw->name, "mh263_mc", sizeof(fw->name));
+-	}
++	} else
++		pr_err("unsupport mpeg4 sub format %d\n",
++				hw->vmpeg4_amstream_dec_info.format);
+ 	pr_info("mmpeg4 get fw %s, size %x\n", fw->name, size);
+ 	if (size < 0) {
+ 		pr_err("get firmware failed.");
+@@ -1870,9 +1874,20 @@ static int ammvdec_mpeg4_probe(struct platform_device *pdev)
+ 	hw->buf_start = hw->cma_alloc_addr;
+ 	hw->buf_size = DEFAULT_MEM_SIZE;
+ */
+-	if (pdata->sys_info)
++	if (pdata->sys_info) {
+ 		hw->vmpeg4_amstream_dec_info = *pdata->sys_info;
+-
++		if ((hw->vmpeg4_amstream_dec_info.height != 0) &&
++			(hw->vmpeg4_amstream_dec_info.width >
++			(MAX_MPEG4_SUPPORT_SIZE/hw->vmpeg4_amstream_dec_info.height))) {
++			pr_info("ammvdec_mpeg4: oversize, unsupport: %d*%d\n",
++				hw->vmpeg4_amstream_dec_info.width,
++				hw->vmpeg4_amstream_dec_info.height);
++			pdata->dec_status = NULL;
++			vfree((void *)hw);
++			hw = NULL;
++			return -EFAULT;
++		}
++	}
+ 	mmpeg4_debug_print(DECODE_ID(hw), PRINT_FLAG_ERROR,
+ 		"W:%d,H:%d,rate=%d\n",
+ 	hw->vmpeg4_amstream_dec_info.width,
