@@ -1,7 +1,7 @@
-commit 36b26eab500c11b6b34e94a1a12b7cff17d30d49
-Merge: c6e96a6 a65ca8a
-Author: Simon Zheng <simon.zheng@amlogic.com>
-Date:   Thu Mar 28 23:01:12 2019 -0700
+commit 0581c37493d183918f77be762cd202ba369ebf73
+Merge: 36b26ea 60e7b9f
+Author: Hui Zhang <hui.zhang@amlogic.com>
+Date:   Fri Mar 29 04:40:19 2019 -0700
 
-    Merge "H.265: fix vpu resume issue [1/1]" into amlogic-4.9-dev
+    Merge "path: add ppmgr [4/5]" into amlogic-4.9-dev
 
