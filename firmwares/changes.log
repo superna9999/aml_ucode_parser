@@ -1,7 +1,133 @@
-commit 08e1af117a62aee0f6633b5c0e5f45a24b384cc6
-Merge: c828923 8e6e047
-Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Sun Sep 29 19:16:04 2019 -0700
+commit 3356dfe1b827a78b81f1056c85df5ef85fdf3f6b
+Author: Chuangcheng Peng <chuangcheng.peng@amlogic.com>
+Date:   Mon Sep 30 13:52:17 2019 +0800
 
-    Merge "h264: h264 dpb_print error. [1/1]" into amlogic-4.9-dev
+    dvb: support two si2168(si2151/av2018) [1/3]
+    
+    PD#SWPL-13198
+    
+    Problem:
+    support U212-D814
+    
+    Solution:
+    support U212-D814
+    
+    Verify:
+    verify at u212-D814
+    
+    Change-Id: Iede357c8cdfa24975db9d19f1f5121a51a48c85a
+    Signed-off-by: Chuangcheng Peng <chuangcheng.peng@amlogic.com>
 
+diff --git a/drivers/stream_input/parser/hw_demux/aml_demod_gt.h b/drivers/stream_input/parser/hw_demux/aml_demod_gt.h
+index 966e66b..7d8ae11 100644
+--- a/drivers/stream_input/parser/hw_demux/aml_demod_gt.h
++++ b/drivers/stream_input/parser/hw_demux/aml_demod_gt.h
+@@ -35,6 +35,11 @@ struct amlfe_demod_config {
+ 	int i2c_addr;
+ 	int	reset_gpio;
+ 	int	reset_value;
++	int ts_out_mode; //serial or parallel; 0:serial, 1:parallel
++	int tuner0_i2c_addr;
++	int tuner1_i2c_addr;
++	int tuner0_code;
++	int tuner1_code;
+ };
+ 
+ /* For configure different tuners */
+@@ -91,6 +96,11 @@ static inline struct dvb_frontend* si2168_attach (const struct amlfe_demod_confi
+ 	return NULL;
+ }
+ 
++static inline struct dvb_frontend* si2168_attach_1 (const struct amlfe_demod_config *config)
++{
++	return NULL;
++}
++
+ static inline struct dvb_frontend* avl6762_attach (const struct amlfe_demod_config *config)
+ {
+ 	return NULL;
+diff --git a/drivers/stream_input/parser/hw_demux/aml_dvb.c b/drivers/stream_input/parser/hw_demux/aml_dvb.c
+index e2306be..1a5e174 100644
+--- a/drivers/stream_input/parser/hw_demux/aml_dvb.c
++++ b/drivers/stream_input/parser/hw_demux/aml_dvb.c
+@@ -65,6 +65,7 @@ typedef enum __demod_type
+ 	DEMOD_ATBM8881,
+ 	DEMOD_SI2168,
+ 	DEMOD_AVL6762,
++	DEMOD_SI2168_1,
+ 	DEMOD_MAX_NUM
+ }demod_type;
+ 
+@@ -2465,6 +2466,35 @@ static int aml_dvb_probe(struct platform_device *pdev)
+ 					pr_error("reset_value error\n");
+ 					goto error_fe;
+ 				}
++				memset(buf, 0, 32);
++				snprintf(buf, sizeof(buf), "fe%d_tuner0_i2c_addr",i);
++				ret = of_property_read_u32(pdev->dev.of_node, buf,&config.tuner0_i2c_addr);
++				if (ret) {
++					pr_error("no tuner0 i2c_addr define\n");
++				}
++				memset(buf, 0, 32);
++				snprintf(buf, sizeof(buf), "fe%d_tuner1_i2c_addr",i);
++				ret = of_property_read_u32(pdev->dev.of_node, buf,&config.tuner1_i2c_addr);
++				if (ret) {
++					pr_error("no tuner1 addr define\n");
++				}
++				memset(buf, 0, 32);
++				snprintf(buf, sizeof(buf), "fe%d_tuner0_code",i);
++				ret = of_property_read_u32(pdev->dev.of_node, buf,&config.tuner0_code);
++				if (ret) {
++					pr_error("no tuner0_code define\n");
++				}
++				memset(buf, 0, 32);
++				snprintf(buf, sizeof(buf), "fe%d_tuner1_code",i);
++				ret = of_property_read_u32(pdev->dev.of_node, buf,&config.tuner1_code);
++				if (ret) {
++					pr_error("no tuner1_code define\n");
++				}
++				if (advb->ts[config.ts].mode == AM_TS_PARALLEL) {
++					config.ts_out_mode = 1;
++				} else {
++					config.ts_out_mode = 0;
++				}
+ 
+ 				if (!strcmp(name,"Atbm8881")) {
+ 					frontend[i] = dvb_attach(atbm8881_attach,&config);
+@@ -2486,6 +2516,16 @@ static int aml_dvb_probe(struct platform_device *pdev)
+ 						s_demod_type[i] = DEMOD_SI2168;
+ 					}
+ 				}
++				if (!strcmp(name,"Si2168-1")) {
++					frontend[i] = dvb_attach(si2168_attach_1,&config);
++					if (frontend[i] == NULL) {
++						pr_error("dvb attach demod error\n");
++						goto error_fe;
++					} else {
++						pr_inf("si2168_1 dtvdemod attatch sucess\n");
++						s_demod_type[i] = DEMOD_SI2168_1;
++					}
++				}
+ 				if (!strcmp(name,"Avl6762")) {
+ 					frontend[i] = dvb_attach(avl6762_attach,&config);
+ 					if (frontend[i] == NULL) {
+@@ -2520,6 +2560,10 @@ error_fe:
+ 				dvb_detach(si2168_attach);
+ 				frontend[i] = NULL;
+ 				s_demod_type[i] = DEMOD_INVALID;
++			}else if (s_demod_type[i] == DEMOD_SI2168_1) {
++				dvb_detach(si2168_attach_1);
++				frontend[i] = NULL;
++				s_demod_type[i] = DEMOD_INVALID;
+ 			}else if (s_demod_type[i] == DEMOD_AVL6762) {
+ 				dvb_detach(avl6762_attach);
+ 				frontend[i] = NULL;
+@@ -2581,6 +2625,8 @@ static int aml_dvb_remove(struct platform_device *pdev)
+ 			dvb_detach(atbm8881_attach);
+ 		}else if (s_demod_type[i] == DEMOD_SI2168) {
+ 			dvb_detach(si2168_attach);
++		}else if (s_demod_type[i] == DEMOD_SI2168_1) {
++			dvb_detach(si2168_attach_1);
+ 		}else if (s_demod_type[i] == DEMOD_AVL6762) {
+ 			dvb_detach(avl6762_attach);
+ 		}
