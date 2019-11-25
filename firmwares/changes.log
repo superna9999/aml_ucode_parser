@@ -1,7 +1,37 @@
-commit 25dd1991904adc1b7711112314d54d83945f1df6
-Merge: a2f7ce0 593fb82
-Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Mon Mar 18 19:14:20 2019 -0700
+commit a0f34e4118548b843ec45793ee045aa8da8cc2cb
+Author: Conglin Guo <conglin.guo@amlogic.com>
+Date:   Mon Mar 11 19:12:55 2019 +0800
 
-    Merge "vmh264: fix alloc memory failed on cts accuracy test [1/1]" into amlogic-4.9-dev
+    media_modules: g12b:Distinguish g12b vera verb [1/1]
+    
+    PD#SWPL-5259
+    
+    Problem:
+    Distinguish g12b  ver b ver a.
+    
+    Solution:
+    Distinguish g12b  ver b ver a.
+    
+    Verify:
+    g12a vera verb
+    
+    Change-Id: I9ae2890384d245933fcccce6d574366714599b25
+    Signed-off-by: Conglin Guo <conglin.guo@amlogic.com>
 
+diff --git a/drivers/common/chips/decoder_cpu_ver_info.c b/drivers/common/chips/decoder_cpu_ver_info.c
+index 36b594a..c869df2 100644
+--- a/drivers/common/chips/decoder_cpu_ver_info.c
++++ b/drivers/common/chips/decoder_cpu_ver_info.c
+@@ -141,6 +141,12 @@ static void initial_cpu_id(void)
+ 	{
+ 		cpu_ver_id = (enum AM_MESON_CPU_MAJOR_ID)get_cpu_type();
+ 	}
++
++	if (AM_MESON_CPU_MAJOR_ID_G12B == cpu_ver_id)
++	{
++		if (is_meson_rev_b())
++		cpu_ver_id = AM_MESON_CPU_MAJOR_ID_TL1;
++	}
+ }
+ 
+ enum AM_MESON_CPU_MAJOR_ID get_cpu_major_id(void)
