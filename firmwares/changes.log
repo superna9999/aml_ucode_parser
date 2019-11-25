@@ -1,76 +1,84 @@
-commit b23e1587561dcf41e0641a2887615088ecb58689
-Author: Conglin Guo <conglin.guo@amlogic.com>
-Date:   Tue May 14 21:29:12 2019 +0800
+commit 7f8ae49286060d2f6e8438bd049d452264185343
+Author: Nanxin Qin <nanxin.qin@amlogic.com>
+Date:   Mon May 13 15:45:16 2019 +0800
 
-    media_modules: cts Security Test Cases crash [1/1]
+    parser: fixed the issue of the mem flushed for the abuf. [1/1]
     
-    PD#SWPL-8383
+    PD#SWPL-6996
     
     Problem:
-    cts Security Test Cases crash
+    Continuous kernel error logs while playing audio ES with abuf injecting
     
     Solution:
-    1 check head param legality.just check the first head param.
+    fixed the issue of the mem flushed for the abuf.
     
     Verify:
-    u212
+    R314
     
-    Change-Id: I263225cf7ff3dac3b9fac02cec29699711036175
-    Signed-off-by: Conglin Guo <conglin.guo@amlogic.com>
+    Change-Id: I3bd3950a60f14b15166de7253b669960a7fe3d90
+    Signed-off-by: Nanxin Qin <nanxin.qin@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-index 1a8f371..bdc16f1 100644
---- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
-+++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-@@ -4369,6 +4369,7 @@ static int vh264_set_params(struct vdec_h264_hw_s *hw,
- 	unsigned int crop_infor, crop_bottom, crop_right;
- 	unsigned int used_reorder_dpb_size_margin
- 		= reorder_dpb_size_margin;
-+
- #ifdef CONFIG_AMLOGIC_MEDIA_ENHANCEMENT_DOLBYVISION
- 	if (vdec->master || vdec->slave)
- 		used_reorder_dpb_size_margin =
-@@ -4493,11 +4494,18 @@ static int vh264_set_params(struct vdec_h264_hw_s *hw,
- 			mb_height, mb_width, mb_total,
- 			level_idc, max_reference_size);
+diff --git a/drivers/stream_input/parser/esparser.c b/drivers/stream_input/parser/esparser.c
+index 1cf8f02..c3d8857 100644
+--- a/drivers/stream_input/parser/esparser.c
++++ b/drivers/stream_input/parser/esparser.c
+@@ -261,8 +261,8 @@ static ssize_t _esparser_write_s(const char __user *buf,
+ 	u32 len = 0;
+ 	int ret;
+ 	u32 wp, buf_start, buf_end;
+-	dma_addr_t buf_wp_map;
+ 	u32 type = stbuf->type;
++	void *vaddr = NULL;
  
-+
- 		p_H264_Dpb->colocated_buf_size = mb_total * 96;
- 		hw->dpb.reorder_pic_num =
- 			get_max_dec_frame_buf_size(level_idc,
- 			max_reference_size, mb_width, mb_height);
- 
-+			if (hw->dpb.reorder_pic_num > MAX_VF_BUF_NUM) {
-+				dpb_print(DECODE_ID(hw), 0,
-+			"%s abnormal reorder_pic_num  %d\n", __func__, hw->dpb.reorder_pic_num);
-+				return -1;
-+				}
-+
- 		dpb_print(DECODE_ID(hw), 0,
- 			"restriction_flag=%d, max_dec_frame_buffering=%d, reorder_pic_num=%d\n",
- 			hw->bitstream_restriction_flag,
-@@ -7642,13 +7650,9 @@ static void vh264_work(struct work_struct *work)
- 		u32 param3 = READ_VREG(AV_SCRATCH_6);
- 		u32 param4 = READ_VREG(AV_SCRATCH_B);
- 		if (vh264_set_params(hw, param1,
--			param2, param3, param4) < 0)
--			hw->stat |= DECODER_FATAL_ERROR_SIZE_OVERFLOW;
--		WRITE_VREG(AV_SCRATCH_0, (hw->max_reference_size<<24) |
--			(hw->dpb.mDPB.size<<16) |
--			(hw->dpb.mDPB.size<<8));
--		start_process_time(hw);
--		return;
-+			param2, param3, param4) < 0) {
-+				goto result_done;
-+			}
- 	} else
- 	if (((hw->dec_result == DEC_RESULT_GET_DATA) ||
- 		(hw->dec_result == DEC_RESULT_GET_DATA_RETRY))
-@@ -8776,6 +8780,7 @@ static int ammvdec_h264_remove(struct platform_device *pdev)
- 			}
+ 	if (type != BUF_TYPE_AUDIO)
+ 		BUG();
+@@ -272,24 +272,20 @@ static ssize_t _esparser_write_s(const char __user *buf,
+ 	/*pr_info("write wp 0x%x, count %d, start 0x%x, end 0x%x\n",
+ 	*		 wp, (u32)count, buf_start, buf_end);*/
+ 	if (wp + count > buf_end) {
+-		ret = copy_from_user(codec_mm_phys_to_virt(wp),
+-				 p, buf_end - wp);
++		vaddr = codec_mm_phys_to_virt(wp);
++		ret = copy_from_user(vaddr, p, buf_end - wp);
+ 		if (ret > 0) {
+ 			len +=  buf_end - wp - ret;
+-			buf_wp_map = dma_map_single(amports_get_dma_device(),
+-				codec_mm_phys_to_virt(wp), len, DMA_TO_DEVICE);
++			codec_mm_dma_flush(vaddr, len, DMA_TO_DEVICE);
+ 			wp += len;
+ 			pr_info("copy from user not finished\n");
+-			dma_unmap_single(NULL, buf_wp_map, len, DMA_TO_DEVICE);
+ 			set_buf_wp(type, wp);
+ 			goto end_write;
+ 		} else if (ret == 0) {
+ 			len += buf_end - wp;
+-			buf_wp_map = dma_map_single(amports_get_dma_device(),
+-				codec_mm_phys_to_virt(wp), len, DMA_TO_DEVICE);
++			codec_mm_dma_flush(vaddr, len, DMA_TO_DEVICE);
+ 			wp = buf_start;
+ 			r = count - len;
+-			dma_unmap_single(NULL, buf_wp_map, len, DMA_TO_DEVICE);
+ 			set_buf_wp(type, wp);
+ 		} else {
+ 			pr_info("copy from user failed 1\n");
+@@ -298,16 +294,15 @@ static ssize_t _esparser_write_s(const char __user *buf,
+ 			return -EAGAIN;
  		}
  	}
+-	ret = copy_from_user(codec_mm_phys_to_virt(wp), p + len, r);
 +
- 	ammvdec_h264_mmu_release(hw);
- 	h264_free_hw_stru(&pdev->dev, (void *)hw);
- 	clk_adj_frame_count = 0;
++	vaddr = codec_mm_phys_to_virt(wp);
++	ret = copy_from_user(vaddr, p + len, r);
+ 	if (ret >= 0) {
+ 		len += r - ret;
+-		buf_wp_map = dma_map_single(amports_get_dma_device(),
+-			 codec_mm_phys_to_virt(wp), r - ret, DMA_TO_DEVICE);
+-
++		codec_mm_dma_flush(vaddr, r - ret, DMA_TO_DEVICE);
+ 		if (ret > 0)
+ 			pr_info("copy from user not finished 2\n");
+ 		wp += r - ret;
+-		dma_unmap_single(NULL, buf_wp_map, r - ret, DMA_TO_DEVICE);
+ 		set_buf_wp(type, wp);
+ 	} else {
+ 		pr_info("copy from user failed 2\n");
