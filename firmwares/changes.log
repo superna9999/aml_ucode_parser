@@ -1,44 +1,240 @@
-commit ea8881d9b8eee92692e937a0eed68ee14b204f12
-Author: Lifeng Cao <lifeng.cao@amlogic.com>
-Date:   Tue May 7 16:24:52 2019 +0800
+commit 96c44abf9582678b87ee314bf86735437f80a123
+Author: Tao Guo <tao.guo@amlogic.com>
+Date:   Fri Mar 29 20:28:28 2019 +0800
 
-    mmpeg12: Set valid pts false when last pts = this pts. [1/1]
+    media: add atrace tag [2/2]
     
-    PD#OTT-3332
+    PD#SWPL-8124
     
     Problem:
-    Some stream input pts is the same. If last pts = this pts.
-    Out pts will not change. Some video will stuck.
+    Need atrace tag to enable/disable trace info
     
     Solution:
-    Set valid pts false when last pts = this pts.
+    Add atrace tag
     
     Verify:
-    A311D
+    P212
     
-    Change-Id: Ib35edda87bfc66f0da83c946c027e869f6024203
-    Signed-off-by: Lifeng Cao <lifeng.cao@amlogic.com>
+    Change-Id: I2ba3ff7dfd047373c674c1eb70ec6d271fe24f95
+    Signed-off-by: Tao Guo <tao.guo@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-index a8962dd..41a81b3 100644
---- a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-+++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
-@@ -226,6 +226,7 @@ struct vdec_mpeg12_hw_s {
- 	u64 pts64[DECODE_BUFFER_NUM_MAX];
- 	bool pts_valid[DECODE_BUFFER_NUM_MAX];
- 	u32 canvas_spec[DECODE_BUFFER_NUM_MAX];
-+	u64 lastpts64;
- 	struct canvas_config_s canvas_config[DECODE_BUFFER_NUM_MAX][2];
- 	struct dec_sysinfo vmpeg12_amstream_dec_info;
+diff --git a/drivers/frame_provider/decoder/avs/avs.c b/drivers/frame_provider/decoder/avs/avs.c
+index ae50ec2..23f83a5 100644
+--- a/drivers/frame_provider/decoder/avs/avs.c
++++ b/drivers/frame_provider/decoder/avs/avs.c
+@@ -46,8 +46,6 @@
+ #include <linux/amlogic/tee.h>
  
-@@ -1406,6 +1407,10 @@ static irqreturn_t vmpeg12_isr_thread_fn(struct vdec_s *vdec, int irq)
- 		pts_valid = hw->pts_valid[index];
- 		pts = hw->pts[index];
- 		pts_us64 = hw->pts64[index];
-+		if (hw->pts_valid[index] && hw->lastpts64 == pts_us64)
-+			pts_valid = false;
-+		if (hw->pts_valid[index])
-+			hw->lastpts64 = pts_us64;
  
- 		user_data_ready_notify(hw, pts, pts_valid);
+-#include <trace/events/meson_atrace.h>
+-
+ #define DRIVER_NAME "amvdec_avs"
+ #define MODULE_NAME "amvdec_avs"
  
+diff --git a/drivers/frame_provider/decoder/avs2/vavs2.c b/drivers/frame_provider/decoder/avs2/vavs2.c
+index cc22161..93ef7b1 100644
+--- a/drivers/frame_provider/decoder/avs2/vavs2.c
++++ b/drivers/frame_provider/decoder/avs2/vavs2.c
+@@ -56,7 +56,7 @@
+ #include "../utils/firmware.h"
+ #include "../../../common/chips/decoder_cpu_ver_info.h"
+ #include <linux/amlogic/tee.h>
+-#include <trace/events/meson_atrace.h>
++
+ 
+ #define I_ONLY_SUPPORT
+ #define MIX_STREAM_SUPPORT
+diff --git a/drivers/frame_provider/decoder/h264/vh264.c b/drivers/frame_provider/decoder/h264/vh264.c
+index 3e95690..85c530a 100644
+--- a/drivers/frame_provider/decoder/h264/vh264.c
++++ b/drivers/frame_provider/decoder/h264/vh264.c
+@@ -58,8 +58,6 @@
+ #include <linux/uaccess.h>
+ 
+ 
+-#include <trace/events/meson_atrace.h>
+-
+ 
+ #define DRIVER_NAME "amvdec_h264"
+ #define MODULE_NAME "amvdec_h264"
+diff --git a/drivers/frame_provider/decoder/h264/vh264_4k2k.c b/drivers/frame_provider/decoder/h264/vh264_4k2k.c
+index 8ea595f..44465ad 100644
+--- a/drivers/frame_provider/decoder/h264/vh264_4k2k.c
++++ b/drivers/frame_provider/decoder/h264/vh264_4k2k.c
+@@ -59,7 +59,6 @@
+ #include <linux/amlogic/media/codec_mm/codec_mm.h>
+ #include <linux/amlogic/media/codec_mm/configs.h>
+ 
+-#include <trace/events/meson_atrace.h>
+ 
+ 
+ #if  0 /* MESON_CPU_TYPE == MESON_CPU_TYPE_MESON6TVD */
+diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+index 1f4ae56..7034b5f 100644
+--- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
++++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+@@ -62,7 +62,6 @@
+ #include "../../../common/chips/decoder_cpu_ver_info.h"
+ #include <linux/crc32.h>
+ 
+-#include <trace/events/meson_atrace.h>
+ 
+ 
+ #undef pr_info
+diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
+index f0d97b5..91e91c9 100644
+--- a/drivers/frame_provider/decoder/h265/vh265.c
++++ b/drivers/frame_provider/decoder/h265/vh265.c
+@@ -46,7 +46,7 @@
+ #include "../utils/config_parser.h"
+ #include "../utils/firmware.h"
+ #include "../../../common/chips/decoder_cpu_ver_info.h"
+-#include <trace/events/meson_atrace.h>
++
+ 
+ #define CONSTRAIN_MAX_BUF_NUM
+ 
+diff --git a/drivers/frame_provider/decoder/mjpeg/vmjpeg.c b/drivers/frame_provider/decoder/mjpeg/vmjpeg.c
+index 1c69a5a..6f21125 100644
+--- a/drivers/frame_provider/decoder/mjpeg/vmjpeg.c
++++ b/drivers/frame_provider/decoder/mjpeg/vmjpeg.c
+@@ -38,7 +38,6 @@
+ #include <linux/amlogic/media/codec_mm/configs.h>
+ #include <linux/amlogic/tee.h>
+ 
+-#include <trace/events/meson_atrace.h>
+ 
+ 
+ #ifdef CONFIG_AM_VDEC_MJPEG_LOG
+diff --git a/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c b/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c
+index 38c08e1..82abf8e 100644
+--- a/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c
++++ b/drivers/frame_provider/decoder/mjpeg/vmjpeg_multi.c
+@@ -44,7 +44,6 @@
+ #include <linux/amlogic/media/codec_mm/configs.h>
+ #include "../utils/firmware.h"
+ 
+-#include <trace/events/meson_atrace.h>
+ 
+ 
+ #define MEM_NAME "codec_mmjpeg"
+diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
+index ab54188..630b693 100644
+--- a/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
++++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
+@@ -43,7 +43,6 @@
+ #include <linux/amlogic/media/codec_mm/configs.h>
+ #include <linux/amlogic/tee.h>
+ 
+-#include <trace/events/meson_atrace.h>
+ 
+ 
+ #ifdef CONFIG_AM_VDEC_MPEG12_LOG
+diff --git a/drivers/frame_provider/decoder/mpeg4/vmpeg4.c b/drivers/frame_provider/decoder/mpeg4/vmpeg4.c
+index 0d8d407..5525086 100644
+--- a/drivers/frame_provider/decoder/mpeg4/vmpeg4.c
++++ b/drivers/frame_provider/decoder/mpeg4/vmpeg4.c
+@@ -42,7 +42,6 @@
+ #include <linux/amlogic/media/codec_mm/configs.h>
+ #include <linux/amlogic/tee.h>
+ 
+-#include <trace/events/meson_atrace.h>
+ 
+ 
+ /* #define CONFIG_AM_VDEC_MPEG4_LOG */
+diff --git a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
+index efc2639..a1b29d0 100644
+--- a/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
++++ b/drivers/frame_provider/decoder/mpeg4/vmpeg4_multi.c
+@@ -46,7 +46,6 @@
+ #include <linux/amlogic/media/codec_mm/configs.h>
+ #include "../utils/firmware.h"
+ 
+-#include <trace/events/meson_atrace.h>
+ 
+ 
+ #define DRIVER_NAME "ammvdec_mpeg4"
+diff --git a/drivers/frame_provider/decoder/real/vreal.c b/drivers/frame_provider/decoder/real/vreal.c
+index afce94e..3b55d9c 100644
+--- a/drivers/frame_provider/decoder/real/vreal.c
++++ b/drivers/frame_provider/decoder/real/vreal.c
+@@ -54,7 +54,6 @@
+ #include "../utils/firmware.h"
+ #include <linux/amlogic/tee.h>
+ 
+-#include <trace/events/meson_atrace.h>
+ 
+ 
+ #define DRIVER_NAME "amvdec_real"
+diff --git a/drivers/frame_provider/decoder/utils/vdec.h b/drivers/frame_provider/decoder/utils/vdec.h
+index b7287fb..cbabeb4 100644
+--- a/drivers/frame_provider/decoder/utils/vdec.h
++++ b/drivers/frame_provider/decoder/utils/vdec.h
+@@ -28,7 +28,8 @@
+ #include <linux/amlogic/media/vfm/vframe.h>
+ #include <linux/amlogic/media/vfm/vframe_provider.h>
+ #include <linux/amlogic/media/vfm/vframe_receiver.h>
+-
++#define KERNEL_ATRACE_TAG KERNEL_ATRACE_TAG_VDEC
++#include <trace/events/meson_atrace.h>
+ /*#define CONFIG_AM_VDEC_DV*/
+ 
+ #include "vdec_input.h"
+diff --git a/drivers/frame_provider/decoder/utils/vdec_input.c b/drivers/frame_provider/decoder/utils/vdec_input.c
+index f571bcf..69997c6 100644
+--- a/drivers/frame_provider/decoder/utils/vdec_input.c
++++ b/drivers/frame_provider/decoder/utils/vdec_input.c
+@@ -28,7 +28,6 @@
+ #include <asm/cacheflush.h>
+ #include <linux/crc32.h>
+ 
+-#include <trace/events/meson_atrace.h>
+ 
+ #define VFRAME_BLOCK_SIZE (512 * SZ_1K)/*512 for 1080p default init.*/
+ #define VFRAME_BLOCK_SIZE_4K (2 * SZ_1M) /*2M for 4K default.*/
+diff --git a/drivers/frame_provider/decoder/utils/vdec_profile.c b/drivers/frame_provider/decoder/utils/vdec_profile.c
+index d03335a..d00987a 100644
+--- a/drivers/frame_provider/decoder/utils/vdec_profile.c
++++ b/drivers/frame_provider/decoder/utils/vdec_profile.c
+@@ -27,6 +27,7 @@
+ #include "vdec_profile.h"
+ #include "vdec.h"
+ 
++
+ #define ISA_TIMERE 0x2662
+ #define ISA_TIMERE_HI 0x2663
+ 
+@@ -224,7 +225,7 @@ EXPORT_SYMBOL(vdec_profile_more);
+ 
+ void vdec_profile(struct vdec_s *vdec, int event)
+ {
+-	ATRACE_COUNTER(vdec_device_name_str(vdec), event);
++	ATRACE_COUNTER(vdec->vfm_map_id, event);
+ 	vdec_profile_more(vdec, event, 0 , 0);
+ 	if (dec_time_stat_flag == 1)
+ 		vdec_profile_statistics(vdec, event);
+diff --git a/drivers/frame_provider/decoder/vc1/vvc1.c b/drivers/frame_provider/decoder/vc1/vvc1.c
+index d9cb53c..40cdee5 100644
+--- a/drivers/frame_provider/decoder/vc1/vvc1.c
++++ b/drivers/frame_provider/decoder/vc1/vvc1.c
+@@ -43,7 +43,7 @@
+ #include "../utils/firmware.h"
+ #include <linux/amlogic/tee.h>
+ #include <linux/delay.h>
+-#include <trace/events/meson_atrace.h>
++
+ 
+ 
+ #define DRIVER_NAME "amvdec_vc1"
+diff --git a/drivers/frame_provider/decoder/vp9/vvp9.c b/drivers/frame_provider/decoder/vp9/vvp9.c
+index 42ecd46..5c0db92 100644
+--- a/drivers/frame_provider/decoder/vp9/vvp9.c
++++ b/drivers/frame_provider/decoder/vp9/vvp9.c
+@@ -55,7 +55,6 @@
+ #include "../utils/firmware.h"
+ #include "../../../common/chips/decoder_cpu_ver_info.h"
+ 
+-#include <trace/events/meson_atrace.h>
+ 
+ 
+ #define MIX_STREAM_SUPPORT
