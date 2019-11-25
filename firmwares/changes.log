@@ -1,103 +1,40 @@
-commit 0b6a7fae4efe2f17b0814facc528fded6d59ba24
-Author: shihong.zheng <shihong.zheng@amlogic.com>
-Date:   Wed Apr 17 10:21:23 2019 +0800
+commit fda8275f3eb40356e414809c260344d8518d885d
+Author: Peng Yixin <yixin.peng@amlogic.com>
+Date:   Tue Apr 16 20:26:22 2019 +0800
 
-    vdec: fix iptv vdec_sync_input error. [1/1]
+    module: use new interface to increase accuracy of ar calculation [2/2]
     
-    PD#IPTV-2248
+    PD#OTT-2068
     
     Problem:
-    too many vdec_sync_input error while stream mode play
-    with frame mode at same time.
+    When playing 1280x128 video under normal screen mode, the aspect ratio from
+    decodec is not accurate enough by multipling 0x100. (128x256/1280=25.6).
+    Dropping 0.6 will cause height losing 9 lines.
     
     Solution:
-    frame mode set a input ptr to VLD_MEM_VFIFO_RP, if it
-    do not restore the stream mode value, the input data
-    will be error and too many vdec_sync_input error. set
-    the vdec input restore to vdec_sync_input.
+    Using new interface to pass real ar width and height following steps:
+    1.Set old ar variable to 0x3ff as a trigger flag.
+    2.set the original ar value into sar_width and sar_height of vframe.
     
     Verify:
-    S905L3
+    verified on franklin
     
-    Change-Id: I62c66c250f09680f8e792e63314b711ff925b9a1
-    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
+    Change-Id: I681197707f3f2cff64298dc13c28c28f7ee80b94
+    Signed-off-by: Peng Yixin <yixin.peng@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/utils/vdec.c b/drivers/frame_provider/decoder/utils/vdec.c
-index 7e8988f..6492fc7 100644
---- a/drivers/frame_provider/decoder/utils/vdec.c
-+++ b/drivers/frame_provider/decoder/utils/vdec.c
-@@ -1520,12 +1520,74 @@ void vdec_clean_input(struct vdec_s *vdec)
- }
- EXPORT_SYMBOL(vdec_clean_input);
- 
+diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+index 4f04816..08d5421 100644
+--- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
++++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+@@ -2663,6 +2663,11 @@ int prepare_display_buf(struct vdec_s *vdec, struct FrameStore *frame)
+ 			else
+ 				decoder_do_frame_check(hw_to_vdec(hw), vf);
+ 		}
 +
-+static int vdec_input_read_restore(struct vdec_s *vdec)
-+{
-+	struct vdec_input_s *input = &vdec->input;
++		vf->ratio_control |= (0x3FF << DISP_RATIO_ASPECT_RATIO_BIT);
++		vf->sar_width = vf->width;
++		vf->sar_height = vf->height;
 +
-+	if (!vdec_stream_based(vdec))
-+		return 0;
-+
-+	if (!input->swap_valid) {
-+		if (input->target == VDEC_INPUT_TARGET_VLD) {
-+			WRITE_VREG(VLD_MEM_VIFIFO_START_PTR,
-+				input->start);
-+			WRITE_VREG(VLD_MEM_VIFIFO_END_PTR,
-+				input->start + input->size - 8);
-+			WRITE_VREG(VLD_MEM_VIFIFO_CURR_PTR,
-+				input->start);
-+			WRITE_VREG(VLD_MEM_VIFIFO_CONTROL, 1);
-+			WRITE_VREG(VLD_MEM_VIFIFO_CONTROL, 0);
-+
-+			/* set to manual mode */
-+			WRITE_VREG(VLD_MEM_VIFIFO_BUF_CNTL, 2);
-+			WRITE_VREG(VLD_MEM_VIFIFO_RP, input->start);
-+		} else if (input->target == VDEC_INPUT_TARGET_HEVC) {
-+				WRITE_VREG(HEVC_STREAM_START_ADDR,
-+					input->start);
-+				WRITE_VREG(HEVC_STREAM_END_ADDR,
-+					input->start + input->size);
-+				WRITE_VREG(HEVC_STREAM_RD_PTR,
-+					input->start);
-+		}
-+		return 0;
-+	}
-+	if (input->target == VDEC_INPUT_TARGET_VLD) {
-+		/* restore read side */
-+		WRITE_VREG(VLD_MEM_SWAP_ADDR,
-+			input->swap_page_phys);
-+
-+		/*swap active*/
-+		WRITE_VREG(VLD_MEM_SWAP_CTL, 1);
-+
-+		/*wait swap busy*/
-+		while (READ_VREG(VLD_MEM_SWAP_CTL) & (1<<7))
-+			;
-+
-+		WRITE_VREG(VLD_MEM_SWAP_CTL, 0);
-+	} else if (input->target == VDEC_INPUT_TARGET_HEVC) {
-+		/* restore read side */
-+		WRITE_VREG(HEVC_STREAM_SWAP_ADDR,
-+			input->swap_page_phys);
-+		WRITE_VREG(HEVC_STREAM_SWAP_CTRL, 1);
-+
-+		while (READ_VREG(HEVC_STREAM_SWAP_CTRL)
-+			& (1<<7))
-+			;
-+		WRITE_VREG(HEVC_STREAM_SWAP_CTRL, 0);
-+	}
-+
-+	return 0;
-+}
-+
-+
- int vdec_sync_input(struct vdec_s *vdec)
- {
- 	struct vdec_input_s *input = &vdec->input;
- 	u32 rp = 0, wp = 0, fifo_len = 0;
- 	int size;
- 
-+	vdec_input_read_restore(vdec);
- 	vdec_sync_input_read(vdec);
- 	vdec_sync_input_write(vdec);
- 	if (input->target == VDEC_INPUT_TARGET_VLD) {
+ 		kfifo_put(&hw->display_q, (const struct vframe_s *)vf);
+ 		ATRACE_COUNTER(MODULE_NAME, vf->pts);
+ 		hw->vf_pre_count++;
