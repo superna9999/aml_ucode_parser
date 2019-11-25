@@ -1,39 +1,107 @@
-commit fc4c46d64a0a732ccb731bd2c805f307293fef8a
+commit 114e0f5b02c6022fd2b4e05009424e92f7783910
 Author: Conglin Guo <conglin.guo@amlogic.com>
-Date:   Tue Apr 30 17:24:00 2019 +0800
+Date:   Mon Apr 22 15:23:34 2019 +0800
 
-    media_modules: cts Security Test Cases crash [1/1]
+    media_modules: timeout_process trigger softlockup crash [1/1]
     
-    PD#SWPL-7942
+    PD#TV-4684
     
     Problem:
-    cts Security Test Cases crash
+    timeout trigger softlockup.
     
     Solution:
-    1 adjust clock to 100MHZ video Wide*high <= 1280*720
+    1  use work deal timeout.
+    2 First clear timeout, after amvdec_stop Reduce
+      frequent triggers timeout_process.
     
     Verify:
-    p241
+    T962X2
     
-    Change-Id: I57440b34a6f5cd7ad5fbca2c20b5af0a3b7dc50f
+    Change-Id: I9513f311a1bd4c5b50da1978e37e3557356eff0c
     Signed-off-by: Conglin Guo <conglin.guo@amlogic.com>
 
 diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-index 10f2c19..a2cd994 100644
+index a2cd994..1f4ae56 100644
 --- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
 +++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-@@ -8661,8 +8661,13 @@ static int ammvdec_h264_probe(struct platform_device *pdev)
- 	if (vdec_is_support_4k() ||
- 		(clk_adj_frame_count > (VDEC_CLOCK_ADJUST_FRAME - 1)))
- 		vdec_source_changed(VFORMAT_H264, 3840, 2160, 60);
--	else
-+	else if (pdata->sys_info->height * pdata->sys_info->width <= 1280 * 720)
-+	{
-+		vdec_source_changed(VFORMAT_H264, 1280, 720, 29);
-+	}else
-+	{
- 		vdec_source_changed(VFORMAT_H264, 1920, 1080, 29);
-+	}
+@@ -752,7 +752,7 @@ struct vdec_h264_hw_s {
+ 	int dec_result;
+ 	struct work_struct work;
+ 	struct work_struct notify_work;
+-
++	struct work_struct timeout_work;
+ 	void (*vdec_cb)(struct vdec_s *, void *);
+ 	void *vdec_cb_arg;
  
- 	if (vh264_init(hw) < 0) {
- 		pr_info("\nammvdec_h264 init failed.\n");
+@@ -2767,7 +2767,7 @@ static void reset_process_time(struct vdec_h264_hw_s *hw)
+ 
+ static void start_process_time(struct vdec_h264_hw_s *hw)
+ {
+-	hw->decode_timeout_count = 2;
++	hw->decode_timeout_count = 10;
+ 	hw->start_process_time = jiffies;
+ }
+ 
+@@ -6077,7 +6077,6 @@ static void timeout_process(struct vdec_h264_hw_s *hw)
+ 	release_cur_decoding_buf(hw);
+ 	hw->dec_result = DEC_RESULT_DONE;
+ 	hw->data_flag |= ERROR_FLAG;
+-	reset_process_time(hw);
+ 	vdec_schedule_work(&hw->work);
+ }
+ 
+@@ -6306,7 +6305,10 @@ static void check_timer_func(unsigned long arg)
+ 				if (hw->decode_timeout_count > 0)
+ 					hw->decode_timeout_count--;
+ 				if (hw->decode_timeout_count == 0)
+-					timeout_process(hw);
++				{
++					reset_process_time(hw);
++					vdec_schedule_work(&hw->timeout_work);
++				}
+ 			} else
+ 				start_process_time(hw);
+ 		} else if (is_in_parsing_state(dpb_status)) {
+@@ -6315,7 +6317,10 @@ static void check_timer_func(unsigned long arg)
+ 				if (hw->decode_timeout_count > 0)
+ 					hw->decode_timeout_count--;
+ 				if (hw->decode_timeout_count == 0)
+-					timeout_process(hw);
++				{
++					reset_process_time(hw);
++					vdec_schedule_work(&hw->timeout_work);
++				}
+ 			}
+ 		}
+ 		hw->last_vld_level =
+@@ -6631,6 +6636,14 @@ static void vh264_local_init(struct vdec_h264_hw_s *hw)
+ 	return;
+ }
+ 
++static void timeout_process_work(struct work_struct *work)
++{
++	struct vdec_h264_hw_s *hw = container_of(work,
++			struct vdec_h264_hw_s, timeout_work);
++
++	timeout_process(hw);
++}
++
+ static s32 vh264_init(struct vdec_h264_hw_s *hw)
+ {
+ 	int size = -1;
+@@ -6658,6 +6671,7 @@ static s32 vh264_init(struct vdec_h264_hw_s *hw)
+ 	vh264_local_init(hw);
+ 	INIT_WORK(&hw->work, vh264_work);
+ 	INIT_WORK(&hw->notify_work, vh264_notify_work);
++	INIT_WORK(&hw->timeout_work, timeout_process_work);
+ #ifdef MH264_USERDATA_ENABLE
+ 	INIT_WORK(&hw->user_data_ready_work, user_data_ready_notify_work);
+ #endif
+@@ -6858,6 +6872,7 @@ static int vh264_stop(struct vdec_h264_hw_s *hw)
+ #endif
+ 	cancel_work_sync(&hw->work);
+ 	cancel_work_sync(&hw->notify_work);
++	cancel_work_sync(&hw->timeout_work);
+ #ifdef MH264_USERDATA_ENABLE
+ 	cancel_work_sync(&hw->user_data_ready_work);
+ #endif
