@@ -1,66 +1,65 @@
-commit 441cbb4b24bd0a39c77aae5a56fbe643648181f3
-Author: Yao.Liu <yao.liu@amlogic.com>
-Date:   Thu Jan 17 00:37:29 2019 -0500
+commit 35570cb29ce048efa9254ccb43162e338d010b69
+Author: shihong.zheng <shihong.zheng@amlogic.com>
+Date:   Wed Jan 23 20:06:21 2019 +0800
 
-    vpu: Fix vpu panic if open quickly after close [1/1]
+    mvc: fix mvc some abnormal display. [1/1]
     
-    PD#SWPL-4243
+    PD#SWPL-4003
     
     Problem:
-    If the interrupt flag is not cleared before
-    closing the device, this flag will affect the
-    initialization operation of the next encode.
+    switch to other format play from mvc will flash color lump;
     
     Solution:
-    Clear interrupt flag before close device
+    keep last frame for both view0 and view1;
     
     Verify:
-    u212
+    x301
     
-    Change-Id: Ie2e40c6441fd65fb02c6955ed0b7d12cae290bf5
-    Signed-off-by: Yao.Liu <yao.liu@amlogic.com>
+    Change-Id: Iad6ce80a8e33b67a7cd050971d5f349a4f00becf
+    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
 
-diff --git a/drivers/frame_sink/encoder/h265/vpu.c b/drivers/frame_sink/encoder/h265/vpu.c
-index 8ae38ba..4739b21 100644
---- a/drivers/frame_sink/encoder/h265/vpu.c
-+++ b/drivers/frame_sink/encoder/h265/vpu.c
-@@ -702,6 +702,9 @@ static long vpu_ioctl(struct file *filp, u32 cmd, ulong arg)
- 				ret = -ETIME;
- 				break;
- 			}
-+			enc_pr(LOG_INFO,
-+			       "s_interrupt_flag(%d), reason(0x%08lx)\n",
-+			       s_interrupt_flag, dev->interrupt_reason);
- 			if (dev->interrupt_reason & (1 << W4_INT_ENC_PIC)) {
- 				u32 start, end, size, core = 0;
+diff --git a/drivers/frame_provider/decoder/h264/vh264_mvc.c b/drivers/frame_provider/decoder/h264/vh264_mvc.c
+index 9ad7ca2..70d26bc 100644
+--- a/drivers/frame_provider/decoder/h264/vh264_mvc.c
++++ b/drivers/frame_provider/decoder/h264/vh264_mvc.c
+@@ -1002,6 +1002,11 @@ static void vh264mvc_isr(void)
+ 						VF_BUFFER_IDX(display_buff_id));
  
-@@ -1332,6 +1335,11 @@ static s32 vpu_release(struct inode *inode, struct file *filp)
- 		vpu_free_instances(filp);
- 		s_vpu_drv_context.open_count--;
- 		if (s_vpu_drv_context.open_count == 0) {
-+			enc_pr(LOG_INFO,
-+			       "vpu_release: s_interrupt_flag(%d), reason(0x%08lx)\n",
-+			       s_interrupt_flag, s_vpu_drv_context.interrupt_reason);
-+			s_vpu_drv_context.interrupt_reason = 0;
-+			s_interrupt_flag = 0;
- 			if (s_instance_pool.base) {
- 				enc_pr(LOG_DEBUG, "free instance pool\n");
- 				vfree((const void *)s_instance_pool.base);
-@@ -1993,8 +2001,15 @@ static s32 __init vpu_init(void)
- static void __exit vpu_exit(void)
- {
- 	enc_pr(LOG_DEBUG, "vpu_exit\n");
--	if (get_cpu_type() == MESON_CPU_MAJOR_ID_GXM)
--		platform_driver_unregister(&vpu_driver);
-+	if ((get_cpu_type() != MESON_CPU_MAJOR_ID_GXM) &&
-+		(get_cpu_type() != MESON_CPU_MAJOR_ID_G12A) &&
-+		(get_cpu_type() != MESON_CPU_MAJOR_ID_GXLX) &&
-+		(get_cpu_type() != MESON_CPU_MAJOR_ID_G12B)) {
-+		enc_pr(LOG_INFO,
-+			"The chip is not support hevc encoder\n");
-+		return;
+ 				} else if (display_view_id == 1) {
++					vf->mem_head_handle =
++					decoder_bmmu_box_get_mem_handle(
++						mm_blk_handle,
++						VF_BUFFER_IDX(display_buff_id));
++
+ 					vf->mem_handle =
+ 					decoder_bmmu_box_get_mem_handle(
+ 						mm_blk_handle,
+@@ -1375,8 +1380,10 @@ static int vh264mvc_local_init(void)
+ 		vfpool_idx[i].view1_drop = 0;
+ 		vfpool_idx[i].used = 0;
+ 	}
+-	for (i = 0; i < VF_POOL_SIZE; i++)
++	for (i = 0; i < VF_POOL_SIZE; i++) {
+ 		memset(&vfpool[i], 0, sizeof(struct vframe_s));
++		vfpool[i].index = i;
 +	}
-+	platform_driver_unregister(&vpu_driver);
- }
+ 	init_vf_buf();
  
- static const struct reserved_mem_ops rmem_hevc_ops = {
+ 	if (mm_blk_handle) {
+@@ -1708,13 +1715,13 @@ module_param(view_mode, uint, 0664);
+ MODULE_PARM_DESC(view_mode, "\n amvdec_h264mvc view mode\n");
+ 
+ module_param(dbg_cmd, uint, 0664);
+-MODULE_PARM_DESC(dbg_mode, "\n amvdec_h264mvc cmd mode\n");
++MODULE_PARM_DESC(dbg_cmd, "\n amvdec_h264mvc cmd mode\n");
+ 
+ module_param(drop_rate, uint, 0664);
+-MODULE_PARM_DESC(dbg_mode, "\n amvdec_h264mvc drop rate\n");
++MODULE_PARM_DESC(drop_rate, "\n amvdec_h264mvc drop rate\n");
+ 
+ module_param(drop_thread_hold, uint, 0664);
+-MODULE_PARM_DESC(dbg_mode, "\n amvdec_h264mvc drop thread hold\n");
++MODULE_PARM_DESC(drop_thread_hold, "\n amvdec_h264mvc drop thread hold\n");
+ module_init(amvdec_h264mvc_driver_init_module);
+ module_exit(amvdec_h264mvc_driver_remove_module);
+ 
