@@ -1,146 +1,71 @@
-commit 7998051f2d8d66a046857218ac1fc22c589878f4
-Author: shihong.zheng <shihong.zheng@amlogic.com>
-Date:   Thu May 23 11:13:26 2019 +0800
+commit ed867a7bcd2d6715514cf8369b3259ae070de04d
+Author: Nanxin Qin <nanxin.qin@amlogic.com>
+Date:   Thu May 23 15:27:06 2019 +0800
 
-    AATS: fix frame check failed. [1/1]
+    decode: fixed the err of single mode playback with vp9. [1/1]
     
-    PD#SWPL-8871
+    PD#SWPL-8885
     
     Problem:
-    AATS decoder unit test failed and crash.
+    YouTube TV vp9 playback crashed
     
     Solution:
-    change canvas mode to linear and fix dead loop.
+    1. fixed the err of single mode playback with vp9
+    2. release the source of canvas.
     
     Verify:
-    x301
+    T962X3-AB301
     
-    Change-Id: Ic86dc68e5237c77cdc78e899704e2ec7950f5a0b
-    Signed-off-by: shihong.zheng <shihong.zheng@amlogic.com>
+    Change-Id: I399ef17a30d13900276f8faa5d649393d1d7afd6
+    Signed-off-by: Nanxin Qin <nanxin.qin@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-index 9e75e09..58f59d5 100644
---- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
-+++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
-@@ -1847,12 +1847,20 @@ static int alloc_one_buf_spec_from_queue(struct vdec_h264_hw_s *hw, int idx)
- static void config_decode_canvas(struct vdec_h264_hw_s *hw, int i)
- {
- 	struct aml_vcodec_ctx * v4l2_ctx = hw->v4l2_ctx;
-+	int blkmode = CANVAS_BLKMODE_32X32;
- 	int endian = 0;
--	int blkmode =  ((hw->canvas_mode == CANVAS_BLKMODE_LINEAR) ||
--		hw->is_used_v4l) ? CANVAS_BLKMODE_LINEAR :
--			CANVAS_BLKMODE_32X32;
--	if (blkmode == CANVAS_BLKMODE_LINEAR)
+diff --git a/drivers/frame_provider/decoder/vp9/vvp9.c b/drivers/frame_provider/decoder/vp9/vvp9.c
+index 4355e0c..241436c 100644
+--- a/drivers/frame_provider/decoder/vp9/vvp9.c
++++ b/drivers/frame_provider/decoder/vp9/vvp9.c
+@@ -8157,6 +8157,8 @@ static s32 vvp9_init(struct VP9Decoder_s *pbi)
+ 	hevc_enable_DMC(hw_to_vdec(pbi));
+ 	amhevc_enable();
+ 
++	init_pic_list(pbi);
 +
-+	if (hw->canvas_mode == CANVAS_BLKMODE_LINEAR) {
-+		blkmode = CANVAS_BLKMODE_LINEAR;
-+		endian = 7;
-+	}
-+
-+	if (hw->is_used_v4l) {
-+		blkmode = CANVAS_BLKMODE_LINEAR;
-+		if (v4l2_ctx->ada_ctx->vfm_path
-+			!= FRAME_BASE_PATH_V4L_VIDEO)
- 		endian = 7;
-+	}
+ 	ret = amhevc_loadmc_ex(VFORMAT_VP9, NULL, fw->data);
+ 	if (ret < 0) {
+ 		amhevc_disable();
+@@ -8173,8 +8175,6 @@ static s32 vvp9_init(struct VP9Decoder_s *pbi)
+ 	/* enable AMRISC side protocol */
+ 	vvp9_prot_init(pbi, HW_MASK_FRONT | HW_MASK_BACK);
  
- 	canvas_config_ex(hw->buffer_spec[i].
- 		y_canvas_index,
-@@ -1860,10 +1868,8 @@ static void config_decode_canvas(struct vdec_h264_hw_s *hw, int i)
- 		hw->mb_width << 4,
- 		hw->mb_height << 4,
- 		CANVAS_ADDR_NOWRAP,
--		hw->is_used_v4l ? CANVAS_BLKMODE_LINEAR :
--			CANVAS_BLKMODE_32X32,
--		hw->is_used_v4l && (v4l2_ctx->ada_ctx->vfm_path
--			!= FRAME_BASE_PATH_V4L_VIDEO) ? 7 : 0);
-+		blkmode,
-+		endian);
- 
- 	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_G12A) {
- 		WRITE_VREG(VDEC_ASSIST_CANVAS_BLK32,
-@@ -1880,10 +1886,8 @@ static void config_decode_canvas(struct vdec_h264_hw_s *hw, int i)
- 		hw->mb_width << 4,
- 		hw->mb_height << 3,
- 		CANVAS_ADDR_NOWRAP,
--		hw->is_used_v4l ? CANVAS_BLKMODE_LINEAR :
--			CANVAS_BLKMODE_32X32,
--		hw->is_used_v4l && (v4l2_ctx->ada_ctx->vfm_path
--			!= FRAME_BASE_PATH_V4L_VIDEO) ? 7 : 0);
-+		blkmode,
-+		endian);
- 
- 	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_G12A) {
- 		WRITE_VREG(VDEC_ASSIST_CANVAS_BLK32,
-@@ -1908,7 +1912,7 @@ static void config_decode_canvas(struct vdec_h264_hw_s *hw, int i)
- 			hw->mb_height << 4,
- 			CANVAS_ADDR_NOWRAP,
- 			blkmode,
--			hw->is_used_v4l ? 7 : 0);
-+			endian);
- 		if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_G12A) {
- 			WRITE_VREG(VDEC_ASSIST_CANVAS_BLK32,
- 				(1 << 11) |
-@@ -1923,7 +1927,7 @@ static void config_decode_canvas(struct vdec_h264_hw_s *hw, int i)
- 			hw->mb_height << 3,
- 			CANVAS_ADDR_NOWRAP,
- 			blkmode,
--			hw->is_used_v4l ? 7 : 0);
-+			endian);
- 		if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_G12A) {
- 			WRITE_VREG(VDEC_ASSIST_CANVAS_BLK32,
- 				(1 << 11) |
-@@ -1939,7 +1943,7 @@ static void config_decode_canvas(struct vdec_h264_hw_s *hw, int i)
- 			hw->mb_height << 3,
- 			CANVAS_ADDR_NOWRAP,
- 			blkmode,
--			hw->is_used_v4l ? 7 : 0);
-+			endian);
- 		if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_G12A) {
- 			WRITE_VREG(VDEC_ASSIST_CANVAS_BLK32,
- 				(1 << 11) |
-@@ -1955,7 +1959,7 @@ static void config_decode_canvas(struct vdec_h264_hw_s *hw, int i)
- 			hw->mb_height << 2,
- 			CANVAS_ADDR_NOWRAP,
- 			blkmode,
--			hw->is_used_v4l ? 7 : 0);
-+			endian);
- 		if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_G12A) {
- 			WRITE_VREG(VDEC_ASSIST_CANVAS_BLK32,
- 				(1 << 11) |
-diff --git a/drivers/frame_provider/decoder/utils/frame_check.c b/drivers/frame_provider/decoder/utils/frame_check.c
-index 2fcc0e5..b9eaec0 100644
---- a/drivers/frame_provider/decoder/utils/frame_check.c
-+++ b/drivers/frame_provider/decoder/utils/frame_check.c
-@@ -56,7 +56,7 @@
- #define CRC_MASK	0x02
- 
- #define MAX_YUV_SIZE (4096 * 2304)
--#define YUV_DEF_SIZE (1920*1088*3/2)
-+#define YUV_DEF_SIZE (MAX_YUV_SIZE * 3 / 2)
- #define YUV_DEF_NUM	 1
- 
- #define MAX_SIZE_AFBC_PLANES 	(4096 * 2048)
-@@ -277,11 +277,11 @@ static int write_yuv_work(struct pic_check_mgr_t *mgr)
- 			(dump->yuv_fp != NULL) &&
- 			(dump->dump_cnt >= dump->num)) {
- 
-+			i = 0;
- 			pic_num = dump->dump_cnt;
- 			old_fs = get_fs();
- 			set_fs(KERNEL_DS);
+-	vdec_schedule_work(&pbi->work);
 -
--			for (i = 0; dump->dump_cnt > 0; i++) {
-+			while (pic_num > 0) {
- 				wr_size = vfs_write(dump->yuv_fp,
- 					(dump->buf_addr + i * mgr->size_pic),
- 					mgr->size_pic, &dump->yuv_pos);
-@@ -290,6 +290,7 @@ static int write_yuv_work(struct pic_check_mgr_t *mgr)
- 					break;
- 				}
- 				pic_num--;
-+				i++;
- 			}
- 			set_fs(old_fs);
- 			vfs_fsync(dump->yuv_fp, 0);
+ 	if (vdec_request_threaded_irq(VDEC_IRQ_0,
+ 				vvp9_isr,
+ 				vvp9_isr_thread_fn,
+@@ -8495,6 +8495,8 @@ static int amvdec_vp9_probe(struct platform_device *pdev)
+ static int amvdec_vp9_remove(struct platform_device *pdev)
+ {
+ 	struct VP9Decoder_s *pbi = gHevc;
++	struct vdec_s *vdec = hw_to_vdec(pbi);
++	int i;
+ 
+ 	if (debug)
+ 		pr_info("amvdec_vp9_remove\n");
+@@ -8503,9 +8505,17 @@ static int amvdec_vp9_remove(struct platform_device *pdev)
+ 
+ 	vvp9_stop(pbi);
+ 
+-
+ 	hevc_source_changed(VFORMAT_VP9, 0, 0, 0);
+ 
++	if (vdec->parallel_dec == 1) {
++		for (i = 0; i < FRAME_BUFFERS; i++) {
++			vdec->free_canvas_ex(pbi->common.buffer_pool->
++				frame_bufs[i].buf.y_canvas_index, vdec->id);
++			vdec->free_canvas_ex(pbi->common.buffer_pool->
++				frame_bufs[i].buf.uv_canvas_index, vdec->id);
++		}
++	}
++
+ #ifdef DEBUG_PTS
+ 	pr_info("pts missed %ld, pts hit %ld, duration %d\n",
+ 		   pbi->pts_missed, pbi->pts_hit, pbi->frame_dur);
