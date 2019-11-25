@@ -1,7 +1,235 @@
-commit b19bbc28d29f6473a78f1a5d9bdb167545ecc13e
-Merge: e9513c4 a8f62ee
-Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Mon Apr 8 02:04:59 2019 -0700
+commit aa5b19d5a0f267b91c65ee21d5f73fbacc377c19
+Author: Rong Zhang <rong.zhang@amlogic.com>
+Date:   Fri Feb 22 16:14:58 2019 +0800
 
-    Merge "media_module: mh264/h265/avs2 [2/2]" into amlogic-4.9-dev
+    media_module: h264/mpeg2/h265 [1/2]
+    
+    PD#SWPL-3654
+    
+    Problem:
+            provide aspect_ratio information by AMSTREAM_IOC_VDECSTAT
+    
+    Solution:
+            add ration_control information in vdec_status function for
+            h264/mh264/vh265/mpeg12/mmpeg12, and normalized it for
+            aspect_ratio in AMSTREAM_IOC_VDECSTAT message.
+    
+    Verify:
+            Verified U212
+    
+    Change-Id: Idec14dc61a1df48d84a3de051f5b23c6e8993a02
+    Signed-off-by: Rong Zhang <rong.zhang@amlogic.com>
 
+diff --git a/drivers/frame_provider/decoder/h264/vh264.c b/drivers/frame_provider/decoder/h264/vh264.c
+index 4b8c61a..1b69288 100755
+--- a/drivers/frame_provider/decoder/h264/vh264.c
++++ b/drivers/frame_provider/decoder/h264/vh264.c
+@@ -3434,6 +3434,9 @@ exit:
+ 
+ int vh264_dec_status(struct vdec_s *vdec, struct vdec_info *vstatus)
+ {
++	u32 ratio_control;
++	u32 ar;
++
+ 	if (!(stat & STAT_VDEC_RUN))
+ 		return -1;
+ 
+@@ -3457,6 +3460,13 @@ int vh264_dec_status(struct vdec_s *vdec, struct vdec_info *vstatus)
+ 	vstatus->total_data = gvs->total_data;
+ 	vstatus->samp_cnt = gvs->samp_cnt;
+ 	vstatus->offset = gvs->offset;
++	ar = min_t(u32,
++			h264_ar,
++			DISP_RATIO_ASPECT_RATIO_MAX);
++	ratio_control =
++		ar << DISP_RATIO_ASPECT_RATIO_BIT;
++	vstatus->ratio_control = ratio_control;
++
+ 	snprintf(vstatus->vdec_name, sizeof(vstatus->vdec_name),
+ 		"%s", DRIVER_NAME);
+ 
+diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+index e84223f..6774cfc 100644
+--- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
++++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+@@ -6095,6 +6095,7 @@ static void check_timer_func(unsigned long arg)
+ 
+ static int dec_status(struct vdec_s *vdec, struct vdec_info *vstatus)
+ {
++	u32 ar;
+ 	struct vdec_h264_hw_s *hw = (struct vdec_h264_hw_s *)vdec->private;
+ 
+ 	if (!hw)
+@@ -6108,6 +6109,12 @@ static int dec_status(struct vdec_s *vdec, struct vdec_info *vstatus)
+ 		vstatus->frame_rate = -1;
+ 	vstatus->error_count = 0;
+ 	vstatus->status = hw->stat;
++	ar = min_t(u32,
++			hw->h264_ar,
++			DISP_RATIO_ASPECT_RATIO_MAX);
++	vstatus->ratio_control =
++		ar << DISP_RATIO_ASPECT_RATIO_BIT;
++
+ 	snprintf(vstatus->vdec_name, sizeof(vstatus->vdec_name),
+ 		"%s-%02d", DRIVER_NAME, hw->id);
+ 
+diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
+index ce322d4..d202e01 100644
+--- a/drivers/frame_provider/decoder/h265/vh265.c
++++ b/drivers/frame_provider/decoder/h265/vh265.c
+@@ -1694,6 +1694,7 @@ struct hevc_state_s {
+ 	u8 next_again_flag;
+ 	u32 pre_parser_wr_ptr;
+ #endif
++	u32 ratio_control;
+ 	u32 first_pic_flag;
+ 	u32 decode_size;
+ 	struct mutex chunks_mutex;
+@@ -7472,6 +7473,7 @@ static void set_frame_info(struct hevc_state_s *hevc, struct vframe_s *vf,
+ 			DISP_RATIO_ASPECT_RATIO_MAX);
+ 		vf->ratio_control = (ar << DISP_RATIO_ASPECT_RATIO_BIT);
+ 	}
++	hevc->ratio_control = vf->ratio_control;
+ 	if (pic->aux_data_buf
+ 		&& pic->aux_data_size) {
+ 		/* parser sei */
+@@ -10241,6 +10243,7 @@ int vh265_dec_status(struct vdec_info *vstatus)
+ 	snprintf(vstatus->vdec_name, sizeof(vstatus->vdec_name),
+ 		"%s", DRIVER_NAME);
+ #endif
++	vstatus->ratio_control = hevc->ratio_control;
+ 	return 0;
+ }
+ 
+diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
+index 3ba30e0..b111549 100644
+--- a/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
++++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12.c
+@@ -176,6 +176,7 @@ static int ccbuf_phyAddress_is_remaped_nocache;
+ static u32 lastpts;
+ static u32 fr_hint_status;
+ static u32 last_offset;
++static u32 ratio_control;
+ 
+ 
+ static DEFINE_SPINLOCK(lock);
+@@ -295,6 +296,8 @@ static void set_frame_info(struct vframe_s *vf)
+ 	else
+ 		vf->ratio_control = 0;
+ 
++	ratio_control = vf->ratio_control;
++
+ 	amlog_level_if(first, LOG_LEVEL_INFO,
+ 		"mpeg2dec: w(%d), h(%d), dur(%d), dur-ES(%d)\n",
+ 		frame_width, frame_height, frame_dur,
+@@ -1392,6 +1395,7 @@ int vmpeg12_dec_status(struct vdec_s *vdec, struct vdec_info *vstatus)
+ 	vstatus->total_data = gvs->total_data;
+ 	vstatus->samp_cnt = gvs->samp_cnt;
+ 	vstatus->offset = gvs->offset;
++	vstatus->ratio_control = ratio_control;
+ 	snprintf(vstatus->vdec_name, sizeof(vstatus->vdec_name),
+ 		"%s", DRIVER_NAME);
+ 
+diff --git a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
+index b5d1ef4..7c6c3cb 100644
+--- a/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
++++ b/drivers/frame_provider/decoder/mpeg12/vmpeg12_multi.c
+@@ -252,6 +252,7 @@ struct vdec_mpeg12_hw_s {
+ 	u32 get_num;
+ 	u32 drop_frame_count;
+ 	u32 buffer_not_ready;
++	u32 ratio_control;
+ 	int frameinfo_enable;
+ 	struct firmware_s *fw;
+ 	u32 canvas_mode;
+@@ -414,6 +415,8 @@ static void set_frame_info(struct vdec_mpeg12_hw_s *hw, struct vframe_s *vf)
+ 	else
+ 		vf->ratio_control = 0;
+ 
++	hw->ratio_control = vf->ratio_control;
++
+ 	vf->canvas0Addr = vf->canvas1Addr = -1;
+ 	vf->plane_num = 2;
+ 
+@@ -1888,6 +1891,7 @@ static int vmmpeg12_dec_status(struct vdec_s *vdec, struct vdec_info *vstatus)
+ 	vstatus->total_data = gvs.total_data;
+ 	vstatus->samp_cnt = gvs.samp_cnt;
+ 	vstatus->offset = gvs.offset;
++	vstatus->ratio_control = hw->ratio_control;
+ 	snprintf(vstatus->vdec_name, sizeof(vstatus->vdec_name),
+ 			"%s", DRIVER_NAME);
+ 
+diff --git a/drivers/frame_provider/decoder/utils/vdec.c b/drivers/frame_provider/decoder/utils/vdec.c
+index d693dea..2c7cfe8 100644
+--- a/drivers/frame_provider/decoder/utils/vdec.c
++++ b/drivers/frame_provider/decoder/utils/vdec.c
+@@ -4150,6 +4150,9 @@ static ssize_t vdec_status_show(struct class *class,
+ 			pbuf += sprintf(pbuf,
+ 				"%13s : %llu %s\n\n", "total data",
+ 				vs.total_data / 1024, "KB");
++			pbuf += sprintf(pbuf,
++				"%13s : %x\n", "ratio_control",
++				vs.ratio_control);
+ 
+ 			vdec_num++;
+ 		}
+diff --git a/drivers/stream_input/amports/amstream.c b/drivers/stream_input/amports/amstream.c
+index c821cf1..2c0ae39 100644
+--- a/drivers/stream_input/amports/amstream.c
++++ b/drivers/stream_input/amports/amstream.c
+@@ -2269,6 +2269,34 @@ static long amstream_ioctl_set(struct port_priv_s *priv, ulong arg)
+ 	}
+ 	return r;
+ }
++
++static enum E_ASPECT_RATIO  get_normalized_aspect_ratio(u32 ratio_control)
++{
++	enum E_ASPECT_RATIO euAspectRatio;
++
++	ratio_control = ratio_control >> DISP_RATIO_ASPECT_RATIO_BIT;
++
++	switch (ratio_control) {
++	case 0x8c:
++	case 0x90:
++		euAspectRatio = ASPECT_RATIO_16_9;
++		/*pr_info("ASPECT_RATIO_16_9\n");*/
++		break;
++	case 0xbb:
++	case 0xc0:
++		euAspectRatio = ASPECT_RATIO_4_3;
++		/*pr_info("ASPECT_RATIO_4_3\n");*/
++		break;
++	default:
++		euAspectRatio = ASPECT_UNDEFINED;
++		/*pr_info("ASPECT_UNDEFINED and ratio_control = 0x%x\n",
++			ratio_control);*/
++		break;
++	}
++
++	return euAspectRatio;
++}
++
+ static long amstream_ioctl_get_ex(struct port_priv_s *priv, ulong arg)
+ {
+ 	struct stream_port_s *this = priv->port;
+@@ -2359,6 +2387,10 @@ static long amstream_ioctl_get_ex(struct port_priv_s *priv, ulong arg)
+ 			p->vstatus.fps = vstatus.frame_rate;
+ 			p->vstatus.error_count = vstatus.error_count;
+ 			p->vstatus.status = vstatus.status;
++			p->vstatus.euAspectRatio =
++				get_normalized_aspect_ratio(
++					vstatus.ratio_control);
++
+ 		}
+ 		break;
+ 	case AMSTREAM_GET_EX_ADECSTAT:
+@@ -2853,6 +2885,9 @@ static long amstream_do_ioctl_old(struct port_priv_s *priv,
+ 			p->vstatus.fps = vstatus.frame_rate;
+ 			p->vstatus.error_count = vstatus.error_count;
+ 			p->vstatus.status = vstatus.status;
++			p->vstatus.euAspectRatio =
++				get_normalized_aspect_ratio(
++					vstatus.ratio_control);
+ 
+ 			if (copy_to_user((void *)arg, p, sizeof(para)))
+ 				r = -EFAULT;
