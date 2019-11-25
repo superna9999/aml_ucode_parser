@@ -1,53 +1,200 @@
-commit 78532a937abbee8070a216670e4d0446e73c9030
-Author: Rui Wang <rui.wang@amlogic.com>
-Date:   Mon Feb 25 15:31:10 2019 +0800
+commit d8f0fcee67ed629533ec69dbe584c520085da90c
+Author: Rong Zhang <rong.zhang@amlogic.com>
+Date:   Mon Feb 25 16:50:27 2019 +0800
 
-    dvb: add interface of clearing audio and video pid [1/1]
+    media_module: avs [1/1]
     
-    PD#TV-2151
+    PD#SWPL-3708
     
     Problem:
-    no user mode clearing interface for audio and video pid
+            Playback avs video file by dtv alway report fatal
+            error, but the source video file is no problem.
     
     Solution:
-    add interface of clearing audio and video pid
+            reset user data buffer address on local reset.
+            ucode change id: I3878c48e85fab1d42e0b840063cd8133cc7e28fc
+            ucode gerrit id: 59232
     
     Verify:
-    Verify android p at x301
+            Verified R311
     
-    Change-Id: Ie619e49bea9f3ef358dbf4154d9f1181bd99dc43
-    Signed-off-by: Rui Wang <rui.wang@amlogic.com>
+    Change-Id: I195cd71b8ea57166f24a9830d2b2d244bfd9b714
+    Signed-off-by: Rong Zhang <rong.zhang@amlogic.com>
 
-diff --git a/drivers/stream_input/parser/hw_demux/aml_dvb.c b/drivers/stream_input/parser/hw_demux/aml_dvb.c
-index 1c85409..f737b21 100644
---- a/drivers/stream_input/parser/hw_demux/aml_dvb.c
-+++ b/drivers/stream_input/parser/hw_demux/aml_dvb.c
-@@ -781,6 +781,20 @@ static ssize_t stb_show_source(struct class *class,
- 	return ret;
+diff --git a/drivers/frame_provider/decoder/avs/avs.c b/drivers/frame_provider/decoder/avs/avs.c
+index b8bf8e4..acb3292 100644
+--- a/drivers/frame_provider/decoder/avs/avs.c
++++ b/drivers/frame_provider/decoder/avs/avs.c
+@@ -48,7 +48,6 @@
+ #define DRIVER_NAME "amvdec_avs"
+ #define MODULE_NAME "amvdec_avs"
+ 
+-#define ENABLE_USER_DATA
+ 
+ #if 1/* MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6 */
+ #define NV21
+@@ -111,6 +110,7 @@ firmware_sel
+ static int firmware_sel;
+ static int disable_longcabac_trans = 1;
+ 
++static int support_user_data = 1;
+ 
+ int avs_get_debug_flag(void)
+ {
+@@ -203,10 +203,10 @@ void *avsp_heap_adr;
+ static uint long_cabac_busy;
+ #endif
+ 
+-#ifdef ENABLE_USER_DATA
++
+ static void *user_data_buffer;
+ static dma_addr_t user_data_buffer_phys;
+-#endif
++
+ static DECLARE_KFIFO(newframe_q, struct vframe_s *, VF_POOL_SIZE);
+ static DECLARE_KFIFO(display_q, struct vframe_s *, VF_POOL_SIZE);
+ static DECLARE_KFIFO(recycle_q, struct vframe_s *, VF_POOL_SIZE);
+@@ -311,7 +311,6 @@ static void set_frame_info(struct vframe_s *vf, unsigned int *duration)
+ 	vf->flag = 0;
  }
  
-+static ssize_t stb_clear_av(struct class *class,
-+				struct class_attribute *attr, const char *buf,
-+				size_t size)
-+{
-+	if (!strncmp("1", buf, 1)) {
-+		aml_tsdemux_set_vid(0x1fff);
-+		aml_tsdemux_set_aid(0x1fff);
-+		aml_tsdemux_set_sid(0x1fff);
-+		aml_tsdemux_set_pcrid(0x1fff);
-+	}
-+
-+	return size;
-+}
-+
- /*Set the STB input source*/
- static ssize_t stb_store_source(struct class *class,
- 				struct class_attribute *attr, const char *buf,
-@@ -1700,6 +1714,7 @@ static struct class_attribute aml_stb_class_attrs[] = {
- 	       NULL),
- 	__ATTR(first_audio_pts, 0644, demux_show_first_audio_pts,
- 	       NULL),
-+	__ATTR(clear_av, 0644, NULL, stb_clear_av),
+-#ifdef ENABLE_USER_DATA
  
- #define DSC_SOURCE_ATTR_DECL(i)\
- 	__ATTR(dsc##i##_source,  0664,\
+ static struct work_struct userdata_push_work;
+ /*
+@@ -410,7 +409,7 @@ static void UserDataHandler(void)
+ 		schedule_work(&userdata_push_work);
+ 	}
+ }
+-#endif
++
+ 
+ #ifdef HANDLE_AVS_IRQ
+ static irqreturn_t vavs_isr(int irq, void *dev_id)
+@@ -445,9 +444,9 @@ static void vavs_isr(void)
+ 	}
+ #endif
+ 
+-#ifdef ENABLE_USER_DATA
++
+ 	UserDataHandler();
+-#endif
++
+ 	reg = READ_VREG(AVS_BUFFEROUT);
+ 
+ 	if (reg) {
+@@ -1021,6 +1020,13 @@ void vavs_recover(void)
+ 		WRITE_VREG(LONG_CABAC_SRC_ADDR, 0);
+ 	}
+ #endif
++	WRITE_VREG(AV_SCRATCH_N, (u32)(user_data_buffer_phys - buf_offset));
++	pr_info("support_user_data = %d\n", support_user_data);
++	if (support_user_data)
++		WRITE_VREG(AV_SCRATCH_M, 1);
++	else
++		WRITE_VREG(AV_SCRATCH_M, 0);
++
+ 	WRITE_VREG(AV_SCRATCH_5, 0);
+ 
+ }
+@@ -1127,10 +1133,12 @@ static int vavs_prot_init(void)
+ 	}
+ #endif
+ 
+-#ifdef ENABLE_USER_DATA
+ 	WRITE_VREG(AV_SCRATCH_N, (u32)(user_data_buffer_phys - buf_offset));
+-	pr_debug("AV_SCRATCH_N = 0x%x\n", READ_VREG(AV_SCRATCH_N));
+-#endif
++	pr_info("support_user_data = %d\n", support_user_data);
++	if (support_user_data)
++		WRITE_VREG(AV_SCRATCH_M, 1);
++	else
++		WRITE_VREG(AV_SCRATCH_M, 0);
+ 
+ 	return r;
+ }
+@@ -1226,9 +1234,9 @@ static void vavs_local_reset(void)
+ 	vavs_local_init();
+ 	vavs_recover();
+ 
+-#ifdef ENABLE_USER_DATA
++
+ 	reset_userdata_fifo(1);
+-#endif
++
+ 
+ 	amvdec_start();
+ 	recover_flag = 0;
+@@ -1666,7 +1674,7 @@ static int amvdec_avs_probe(struct platform_device *pdev)
+ 
+ 	vavs_vdec_info_init();
+ 
+-#ifdef ENABLE_USER_DATA
++
+ 	if (NULL == user_data_buffer) {
+ 		user_data_buffer =
+ 			dma_alloc_coherent(amports_get_dma_device(),
+@@ -1680,7 +1688,7 @@ static int amvdec_avs_probe(struct platform_device *pdev)
+ 		pr_debug("user_data_buffer = 0x%p, user_data_buffer_phys = 0x%x\n",
+ 			user_data_buffer, (u32)user_data_buffer_phys);
+ 	}
+-#endif
++
+ 	INIT_WORK(&set_clk_work, avs_set_clk);
+ 	if (vavs_init() < 0) {
+ 		pr_info("amvdec_avs init failed.\n");
+@@ -1693,9 +1701,9 @@ static int amvdec_avs_probe(struct platform_device *pdev)
+ 
+ 	INIT_WORK(&fatal_error_wd_work, vavs_fatal_error_handler);
+ 	atomic_set(&error_handler_run, 0);
+-#ifdef ENABLE_USER_DATA
++
+ 	INIT_WORK(&userdata_push_work, userdata_push_do_work);
+-#endif
++
+ 	INIT_WORK(&notify_work, vavs_notify_work);
+ 
+ 	return 0;
+@@ -1705,9 +1713,9 @@ static int amvdec_avs_remove(struct platform_device *pdev)
+ {
+ 	cancel_work_sync(&fatal_error_wd_work);
+ 	atomic_set(&error_handler_run, 0);
+-#ifdef ENABLE_USER_DATA
++
+ 	cancel_work_sync(&userdata_push_work);
+-#endif
++
+ 	cancel_work_sync(&notify_work);
+ 	cancel_work_sync(&set_clk_work);
+ 	if (stat & STAT_VDEC_RUN) {
+@@ -1769,7 +1777,7 @@ static int amvdec_avs_remove(struct platform_device *pdev)
+ 		stat &= ~STAT_VF_HOOK;
+ 	}
+ 
+-#ifdef ENABLE_USER_DATA
++
+ 	if (user_data_buffer != NULL) {
+ 		dma_free_coherent(
+ 			amports_get_dma_device(),
+@@ -1779,7 +1787,7 @@ static int amvdec_avs_remove(struct platform_device *pdev)
+ 		user_data_buffer = NULL;
+ 		user_data_buffer_phys = 0;
+ 	}
+-#endif
++
+ 
+ 	amvdec_disable();
+ 	vdec_disable_DMC(NULL);
+@@ -1913,6 +1921,9 @@ MODULE_PARM_DESC(disable_longcabac_trans, "\n disable_longcabac_trans\n");
+ module_param(dec_control, uint, 0664);
+ MODULE_PARM_DESC(dec_control, "\n amvdec_vavs decoder control\n");
+ 
++module_param(support_user_data, uint, 0664);
++MODULE_PARM_DESC(support_user_data, "\n support_user_data\n");
++
+ module_init(amvdec_avs_driver_init_module);
+ module_exit(amvdec_avs_driver_remove_module);
+ 
+diff --git a/firmware/video_ucode.bin b/firmware/video_ucode.bin
+index 1ca3695..b700492 100755
+Binary files a/firmware/video_ucode.bin and b/firmware/video_ucode.bin differ
