@@ -1,7 +1,95 @@
-commit 912cc23ed95801da408ba12c920578e1c91f0caf
-Merge: 630e09e fda8275
+commit c4265acedff9f9ad083f9548a3852f31223eca43
 Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Mon Apr 22 23:18:23 2019 -0700
+Date:   Wed Jan 16 12:30:36 2019 +0800
 
-    Merge "module: use new interface to increase accuracy of ar calculation [2/2]" into amlogic-4.9-dev
+    media_module: single mode fw load failed issue [1/1]
+    
+    PD#SWPL-4263
+    
+    Problem:
+    when run hevc stream mode first. then to run hevc single
+    mode. fw load failed. (vdec core no issue). the root cause
+    is that hevc dmc is disabled when hevc remove. it need to be
+    enabled before fw load. single mode missed it
+    
+    Solution:
+    add hevc dmc enable before hevc fw load in single mode
+    
+    Verify:
+    U212
+    
+    Change-Id: Iad6a578b285d3a5fedc8d8b4da98af6a50d5b80b
+    Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
 
+diff --git a/drivers/frame_provider/decoder/avs2/vavs2.c b/drivers/frame_provider/decoder/avs2/vavs2.c
+index 790b94b..cc22161 100644
+--- a/drivers/frame_provider/decoder/avs2/vavs2.c
++++ b/drivers/frame_provider/decoder/avs2/vavs2.c
+@@ -6338,7 +6338,7 @@ static s32 vavs2_init(struct vdec_s *vdec)
+ 
+ 		return 0;
+ 	}
+-
++	hevc_enable_DMC(hw_to_vdec(dec));
+ 	amhevc_enable();
+ 
+ 	ret = amhevc_loadmc_ex(VFORMAT_AVS2, NULL, fw->data);
+diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
+index 371d3df..f0d97b5 100644
+--- a/drivers/frame_provider/decoder/h265/vh265.c
++++ b/drivers/frame_provider/decoder/h265/vh265.c
+@@ -10590,6 +10590,7 @@ static s32 vh265_init(struct hevc_state_s *hevc)
+ 		return 0;
+ 	}
+ #endif
++	hevc_enable_DMC(hw_to_vdec(hevc));
+ 	amhevc_enable();
+ 
+ 	if (hevc->mmu_enable)
+diff --git a/drivers/frame_provider/decoder/utils/vdec.c b/drivers/frame_provider/decoder/utils/vdec.c
+index 9f65381..3e7a47f 100644
+--- a/drivers/frame_provider/decoder/utils/vdec.c
++++ b/drivers/frame_provider/decoder/utils/vdec.c
+@@ -3563,6 +3563,17 @@ void vdec_reset_core(struct vdec_s *vdec)
+ }
+ EXPORT_SYMBOL(vdec_reset_core);
+ 
++void hevc_enable_DMC(struct vdec_s *vdec)
++{
++	unsigned long flags;
++	spin_lock_irqsave(&vdec_spin_lock, flags);
++	codec_dmcbus_write(DMC_REQ_CTRL,
++	codec_dmcbus_read(DMC_REQ_CTRL) | (1 << 4));
++	spin_unlock_irqrestore(&vdec_spin_lock, flags);
++}
++
++EXPORT_SYMBOL(hevc_enable_DMC);
++
+ void hevc_reset_core(struct vdec_s *vdec)
+ {
+ 	unsigned long flags;
+diff --git a/drivers/frame_provider/decoder/utils/vdec.h b/drivers/frame_provider/decoder/utils/vdec.h
+index 6972e7d..b7287fb 100644
+--- a/drivers/frame_provider/decoder/utils/vdec.h
++++ b/drivers/frame_provider/decoder/utils/vdec.h
+@@ -421,6 +421,7 @@ extern void vdec_set_step_mode(void);
+ 
+ extern void vdec_disable_DMC(struct vdec_s *vdec);
+ extern void vdec_enable_DMC(struct vdec_s *vdec);
++extern void hevc_enable_DMC(struct vdec_s *vdec);
+ 
+ int vdec_read_user_data(struct vdec_s *vdec,
+ 				struct userdata_param_t *p_userdata_param);
+diff --git a/drivers/frame_provider/decoder/vp9/vvp9.c b/drivers/frame_provider/decoder/vp9/vvp9.c
+index cc83d60..42ecd46 100644
+--- a/drivers/frame_provider/decoder/vp9/vvp9.c
++++ b/drivers/frame_provider/decoder/vp9/vvp9.c
+@@ -8099,7 +8099,7 @@ static s32 vvp9_init(struct VP9Decoder_s *pbi)
+ 		return 0;
+ 	}
+ #endif
+-
++	hevc_enable_DMC(hw_to_vdec(pbi));
+ 	amhevc_enable();
+ 
+ 	ret = amhevc_loadmc_ex(VFORMAT_VP9, NULL, fw->data);
