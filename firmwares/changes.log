@@ -1,36 +1,76 @@
-commit f222bacf37ba1e49beaadaee2ec9581b9c08565c
+commit 006216e086a487104095a90d41bc26ffa8957bc6
 Author: Hui Zhang <hui.zhang@amlogic.com>
-Date:   Thu Sep 12 12:54:05 2019 +0800
+Date:   Fri Sep 13 17:30:26 2019 +0800
 
-    vh265: fix seek mosaic issue   [1/1]
+    vmh264: fix pic discard issue   [1/1]
     
-    PD#SWPL-14049
+    PD#SWPL-10954
     
     Problem:
-    there is mosaic in screeen when ff/ff or seek
+    in reference list error, it will cause bufmgr reset
+    and discard more frames.
     
     Solution:
-    not to do error flush until first pic decoded
+    1) not to do bufmgr for each reference list error.
+    2) change flag to NODISP for reference list error
     
     Verify:
     r314
     
-    Change-Id: Idd0499add7040ff5bb059ebdc0db16d6680a4600
+    Change-Id: Icab4dd31ca0674584e046c434e4702929c142dc8
     Signed-off-by: Hui Zhang <hui.zhang@amlogic.com>
 
-diff --git a/drivers/frame_provider/decoder/h265/vh265.c b/drivers/frame_provider/decoder/h265/vh265.c
-index 02944e6..1229791 100644
---- a/drivers/frame_provider/decoder/h265/vh265.c
-+++ b/drivers/frame_provider/decoder/h265/vh265.c
-@@ -5877,9 +5877,9 @@ static void check_pic_decoded_error(struct hevc_state_s *hevc,
- 				current_lcu_idx,
- 				hevc->lcu_x_num*hevc->lcu_y_num);
- 			if (((hevc->i_only & 0x4)  == 0) && hevc->cur_pic->POC && ( hevc->cur_pic->slice_type == 0)
--					&& ((hevc->cur_pic->POC + hevc->sps_num_reorder_pics_0) < hevc->iPrevPOC)) {
-+					&& ((hevc->cur_pic->POC + MAX_BUF_NUM) < hevc->iPrevPOC)) {
- 					hevc_print(hevc, 0,
--					"Flush  .. num_reorder_pic %d  pic->POC %d  hevc->iPrevPOC %d\n",
-+					"Flush.. num_reorder_pic %d  pic->POC %d  hevc->iPrevPOC %d\n",
- 					hevc->sps_num_reorder_pics_0,hevc->cur_pic->POC ,hevc->iPrevPOC);
- 					flush_output(hevc, get_pic_by_POC(hevc, hevc->cur_pic->POC ));
+diff --git a/drivers/frame_provider/decoder/h264_multi/vmh264.c b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+index e9fedd0..576544b 100644
+--- a/drivers/frame_provider/decoder/h264_multi/vmh264.c
++++ b/drivers/frame_provider/decoder/h264_multi/vmh264.c
+@@ -667,6 +667,7 @@ struct vdec_h264_hw_s {
+ 	u8 config_bufmgr_done;
+ 	u32 max_reference_size;
+ 	u32 decode_pic_count;
++	u32 reflist_error_count;
+ 	int start_search_pos;
+ 	u32 reg_iqidct_control;
+ 	u32 reg_vcop_ctrl_reg;
+@@ -5611,11 +5612,13 @@ static irqreturn_t vh264_isr_thread_fn(struct vdec_s *vdec, int irq)
+ 			if (error_proc_policy & 0x400) {
+ 				int ret = dpb_check_ref_list_error(p_H264_Dpb);
+ 				if (ret != 0) {
++					hw->reflist_error_count ++;
+ 					dpb_print(DECODE_ID(hw), 0,
+-						"reference list error %d frame count %d to skip %d\n",
++						"reference list error %d frame count %d to skip % reflist_error_count %dd\n",
+ 						ret,
+ 						hw->decode_pic_count+1,
+-						hw->skip_frame_count);
++						hw->skip_frame_count,
++						hw->reflist_error_count);
+ 
+ 					if (hw->ref_err_flush_dpb_flag) {
+ 						flush_dpb(p_H264_Dpb);
+@@ -5626,19 +5629,20 @@ static irqreturn_t vh264_isr_thread_fn(struct vdec_s *vdec, int irq)
+ 						}
+ 					}
+ 
+-					hw->data_flag |= ERROR_FLAG;
+-					p_H264_Dpb->mVideo.dec_picture->data_flag |= ERROR_FLAG;
+-					if ((error_proc_policy & 0x80)
++					p_H264_Dpb->mVideo.dec_picture->data_flag = NODISP_FLAG;
++					if (((error_proc_policy & 0x80)
+ 						&& ((hw->dec_flag &
+-							NODISP_FLAG) == 0)) {
++							NODISP_FLAG) == 0)) ||(hw->reflist_error_count > 50)) {
+ 						hw->reset_bufmgr_flag = 1;
++						hw->reflist_error_count =0;
+ 						amvdec_stop();
+ 						hw->dec_result
+ 							= DEC_RESULT_DONE;
+ 						vdec_schedule_work(&hw->work);
+ 						return IRQ_HANDLED;
+ 					}
+-				}
++				} else
++					hw->reflist_error_count = 0;
  			}
+ 			if ((error_proc_policy & 0x800)
+ 				&& p_H264_Dpb->dpb_error_flag != 0) {
